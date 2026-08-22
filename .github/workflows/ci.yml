@@ -1,0 +1,65 @@
+name: ci
+
+on: [push, pull_request]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax-check shell scripts
+        run: |
+          set -euo pipefail
+          for f in entrypoint.sh start.sh stop.sh scripts/*.sh; do
+            bash -n "$f"
+            echo "bash -n OK: $f"
+          done
+
+      - name: Verify internal script references exist
+        run: |
+          set -euo pipefail
+          for ref in $(grep -hoE 'scripts/[a-z_]+\.sh' *.sh scripts/*.sh | sort -u); do
+            test -f "$ref" || { echo "missing referenced script: $ref" >&2; exit 1; }
+          done
+          echo "all internal script references exist"
+
+      - name: Validate Containerfile structure
+        run: |
+          set -euo pipefail
+          # Required directives for a working image: base image, entrypoint copy
+          # and exec bit, entrypoint array.
+          grep -Eq '^FROM[[:space:]]+' Containerfile
+          grep -Eq '^COPY[[:space:]]+entrypoint\.sh' Containerfile
+          grep -Eq '^ENTRYPOINT[[:space:]]+\[' Containerfile
+          test -x entrypoint.sh || { echo "entrypoint.sh is not executable" >&2; exit 1; }
+          # No unknown directive keywords (mistyped instructions would silently
+          # be treated as shell commands in a RUN).
+          while read -r kw; do
+            case "$kw" in
+              FROM|RUN|COPY|ENTRYPOINT|USER) ;;
+              *) echo "unknown Containerfile directive: $kw" >&2; exit 1 ;;
+            esac
+          done < <(awk '/^[A-Z]+[[:space:]]/ {print $1}' Containerfile | sort -u)
+          echo "Containerfile OK"
+
+      - name: Validate config XML (raw and rendered)
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          for f in ("config/serverconfig.tmpl.xml", "config/serveradmin_seed.xml"):
+              ET.parse(f)
+              print(f, "well-formed")
+          PY
+          # Render the template the same way entrypoint.sh does and require the
+          # result to be valid XML with no leftover placeholders.
+          sed -e 's|@TELNET_PASSWORD@|retest|g' \
+              -e 's|@TELNET_PORT@|8087|g' \
+              -e 's|@USERDATA_DIR@|/root/.local/share/7DaysToDie|g' \
+              config/serverconfig.tmpl.xml > /tmp/serverconfig.xml
+          if grep -q '@' /tmp/serverconfig.xml; then
+            echo "unrendered template placeholder left in serverconfig.xml" >&2
+            exit 1
+          fi
+          python3 -c 'import xml.etree.ElementTree as ET; ET.parse("/tmp/serverconfig.xml"); print("rendered serverconfig.xml OK")'
