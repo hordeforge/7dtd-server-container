@@ -1,0 +1,7 @@
+# Runtime data on the server host (game files, saves, logs). Never commit.
+data/
+# Staged mod builds, regenerable via scripts/stage_mods.sh from sibling dist/.
+mods-available/
+mods/
+# Local secrets / env overrides (TELNET_PASSWORD etc).
+.env

@@ -1,0 +1,32 @@
+# 7dtd-server quadlet for rootless podman as a systemd user service.
+# This is the durable path (survives logout/reboot); scripts/run.sh is the
+# ad-hoc path for build/verify.
+#
+#   podman build -t localhost/7dtd-server:latest .
+#   cp systemd/7dtd-server.container ~/.config/containers/systemd/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now 7dtd-server
+#   loginctl enable-linger maci          # keep the service after logout
+[Unit]
+Description=7 Days to Die dedicated server (Navezgane, EfficientServer + APM bridge)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=localhost/7dtd-server:latest
+ContainerName=7dtd-server
+Network=host
+Environment=TELNET_PASSWORD=retest
+Environment=TELNET_PORT=8087
+# :Z relabels the sources to container_file_t (SELinux enforcing RHEL host).
+# mods is rw for the /api/perf toggle (EfficientServer config).
+Volume=%h/7dtd-server/data/game:/root/7dtd:Z
+Volume=%h/7dtd-server/data/userdata:/root/.local/share/7DaysToDie:Z
+Volume=%h/7dtd-server/mods:/mods:Z
+Volume=%h/7dtd-server/config:/config:ro,Z
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target

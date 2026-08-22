@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Stage built mods from sibling repos into mods-available/ and (re)create the
+# enabled set as real copies in mods/. Real copies (not symlinks) so the
+# bind-mounted mods/ dir is self-contained inside the container. The enabled
+# set is perf (EfficientServer) + APM bridge; add others with a copy, e.g.:
+#   cp -a mods-available/BotMod mods/BotMod
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+WS="$(cd "$ROOT/.." && pwd)"
+
+declare -A SRC=(
+  [EfficientServer]="$WS/7dtd-optimizer/dist/EfficientServer"
+  [7dtd-apm-bridge]="$WS/7dtd-apm/dist/7dtd-apm-bridge"
+  [BotMod]="$WS/7dtd-clanker/dist/BotMod"
+)
+ENABLED=(EfficientServer 7dtd-apm-bridge BotMod)
+
+mkdir -p "$ROOT/mods-available" "$ROOT/mods"
+for name in "${!SRC[@]}"; do
+  if [[ -d "${SRC[$name]}" ]]; then
+    rm -rf "$ROOT/mods-available/$name"
+    cp -a "${SRC[$name]}" "$ROOT/mods-available/$name"
+    echo "staged $name <- ${SRC[$name]}"
+  else
+    echo "WARN: missing ${SRC[$name]}; $name not staged" >&2
+  fi
+done
+
+rm -rf "$ROOT/mods/"*
+for name in "${ENABLED[@]}"; do
+  if [[ -d "$ROOT/mods-available/$name" ]]; then
+    cp -a "$ROOT/mods-available/$name" "$ROOT/mods/$name"
+  fi
+done
+
+echo "enabled:  $(ls "$ROOT/mods")"
+echo "available: $(ls "$ROOT/mods-available")"
+echo "enable another mod: cp -a mods-available/<Name> mods/<Name>"

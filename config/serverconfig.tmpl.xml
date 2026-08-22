@@ -1,0 +1,108 @@
+<?xml version="1.0"?>
+<ServerSettings>
+	<!-- GENERAL SERVER SETTINGS -->
+
+	<!-- Server representation -->
+	<property name="ServerName"						value="Navezgane LAN"/>		<!-- Whatever you want the name of the server to be. -->
+	<property name="ServerDescription"				value="A 7 Days to Die server"/>	<!-- Whatever you want the server description to be, will be shown in the server browser. -->
+	<property name="ServerWebsiteURL"				value=""/>					<!-- Website URL for the server, will be shown in the server browser as a clickable link -->
+	<property name="ServerPassword"					value=""/>					<!-- Password to gain entry to the server -->
+	<property name="ServerLoginConfirmationText"	value=""/>					<!-- If set the user will see the message during joining the server and has to confirm it before continuing. For more complex changes to this window you can change the "serverjoinrulesdialog" window in XUi -->
+	<property name="Region"							value="NorthAmericaEast"/>	<!-- The region this server is in. Values: NorthAmericaEast, NorthAmericaWest, CentralAmerica, SouthAmerica, Europe, Russia, Asia, MiddleEast, Africa, Oceania -->
+	<property name="Language"						value="English"/>			<!-- Primary language for players on this server. Values: Use any language name that you would users expect to search for. Should be the English name of the language, e.g. not "Deutsch" but "German" -->
+
+	<!-- Networking -->
+	<property name="ServerPort"						value="26900"/>				<!-- Port you want the server to listen on. Keep it in the ranges 26900 to 26905 or 27015 to 27020 if you want PCs on the same LAN to find it as a LAN server. -->
+	<property name="ServerVisibility"				value="2"/>					<!-- Visibility of this server: 2 = public, 1 = only shown to friends, 0 = not listed. As you are never friend of a dedicated server setting this to "1" will only work when the first player connects manually by IP. -->
+	<property name="ServerDisabledNetworkProtocols"	value="SteamNetworking"/>	<!-- Networking protocols that should not be used. Separated by comma. Possible values: LiteNetLib, SteamNetworking. Dedicated servers should disable SteamNetworking if there is no NAT router in between your users and the server or when port-forwarding is set up correctly -->
+	<property name="ServerMaxWorldTransferSpeedKiBs" value="512"/>				<!-- Maximum (!) speed in kiB/s the world is transferred to at a client on first connect if it does not have the world yet. Maximum is about 1300 kiB/s, even if you set a higher value. -->
+
+	<!-- Slots -->
+	<property name="ServerMaxPlayerCount"			value="8"/>					<!-- Maximum Concurrent Players -->
+	<property name="ServerReservedSlots"			value="0"/>					<!-- Out of the MaxPlayerCount this many slots can only be used by players with a specific permission level -->
+	<property name="ServerReservedSlotsPermission"	value="100"/>				<!-- Required permission level to use reserved slots above -->
+	<property name="ServerAdminSlots"				value="0"/>					<!-- This many admins can still join even if the server has reached MaxPlayerCount -->
+	<property name="ServerAdminSlotsPermission"		value="0"/>					<!-- Required permission level to use the admin slots above -->
+
+	<!-- Admin interfaces -->
+	<property name="WebDashboardEnabled"			value="true"/>				<!-- Enable/disable the web dashboard -->
+	<property name="WebDashboardPort"				value="8080"/>				<!-- Port of the web dashboard -->
+	<property name="WebDashboardUrl"				value=""/>					<!-- External URL to the web dashboard if not just using the public IP of the server, e.g. if the web dashboard is behind a reverse proxy. Needs to be the full URL, like "https://domainOfReverseProxy.tld:1234/". Can be left empty if directly using the public IP and dashboard port -->
+	<property name="EnableMapRendering"				value="false"/>				<!-- Enable/disable rendering of the map to tile images while exploring it. This is used e.g. by the web dashboard to display a view of the map. -->
+
+	<property name="TelnetEnabled"					value="true"/>				<!-- Enable/Disable the telnet -->
+	<property name="TelnetPort"						value="@TELNET_PORT@"/>		<!-- Port of the telnet server -->
+	<property name="TelnetPassword"					value="@TELNET_PASSWORD@"/>	<!-- Password to gain entry to telnet interface. If no password is set the server will only listen on the local loopback interface -->
+	<property name="TelnetFailedLoginLimit"			value="10"/>				<!-- After this many wrong passwords from a single remote client the client will be blocked from connecting to the Telnet interface -->
+	<property name="TelnetFailedLoginsBlocktime"	value="10"/>				<!-- How long will the block persist (in seconds) -->
+
+	<property name="TerminalWindowEnabled"			value="true"/>				<!-- Show a terminal window for log output / command input (Windows only) -->
+
+	<!-- Folder and file locations -->
+	<property name="AdminFileName"					value="serveradmin.xml"/>	<!-- Server admin file name. Path relative to UserDataFolder/Saves -->
+	<property name="UserDataFolder"					value="@USERDATA_DIR@"/>	<!-- Where the server stores all user data (saves, logs, generated worlds) -->
+
+	<!-- Other technical settings -->
+	<property name="ServerAllowCrossplay"			value="false"/>				<!-- Enables/Disables crossplay, crossplay servers will only be found in searches and joinable if sanctions are not ignored, and have a default or fewer player slot count  -->
+	<property name="EACEnabled"						value="false"/>				<!-- Enables/Disables EasyAntiCheat -->
+	<property name="IgnoreEOSSanctions"				value="false"/>				<!-- Ignore EOS sanctions when allowing players to join -->
+	<property name="HideCommandExecutionLog"		value="0"/>					<!-- Hide logging of command execution. 0 = show everything, 1 = hide only from Telnet/ControlPanel, 2 = also hide from remote game clients, 3 = hide everything -->
+	<property name="MaxUncoveredMapChunksPerPlayer"	value="131072"/>			<!-- Override how many chunks can be uncovered on the in-game map by each player. Resulting max map file size limit per player is (x * 512 Bytes), uncovered area is (x * 256 m²). Default 131072 means max 32 km² can be uncovered at any time -->
+	<property name="PersistentPlayerProfiles"		value="false"/>				<!-- If disabled a player can join with any selected profile. If true they will join with the last profile they joined with -->
+	<property name="MaxChunkAge"					value="-1"/>				<!-- The number of in-game days which must pass since visiting a chunk before it will reset to its original state if not revisited or protected (e.g. by a land claim or bedroll being in close proximity). -->
+	<property name="SaveDataLimit"					value="-1"/>				<!-- The maximum disk space allowance for each saved game in megabytes (MB). Saved chunks may be forcibly reset to their original states to free up space when this limit is reached. Negative values disable the limit. -->
+
+	<!-- GAMEPLAY -->
+
+	<!-- World -->
+	<property name="GameWorld"						value="Navezgane"/>			<!-- "RWG" (see WorldGenSeed and WorldGenSize options below) or any already existing world name in the Worlds folder (currently shipping with e.g. "Navezgane", "Pregen06k01", "Pregen06k02", "Pregen08k01", "Pregen08k02", ...) -->
+	<property name="WorldGenSeed"					value="MyGame"/>			<!-- If RWG this is the seed for the generation of the new world. If a world with the resulting name already exists it will simply load it -->
+	<property name="WorldGenSize"					value="6144"/>				<!-- 6144, 8192, 10240 If GameWorld = RWG, this controls the width and height of the created world. Officially supported sizes are between 6144 and 10240 and must be a multiple of 2048, e.g. 6144, 8192, 10240. --> 
+	<property name="GameName"						value="Navezgane"/>			<!-- Whatever you want the game name to be (allowed [A-Za-z0-9_-. ]). This affects the save game name as well as the seed used when placing decoration (trees etc.) in the world. It does not control the generic layout of the world if creating an RWG world -->
+	<property name="GameMode"						value="GameModeSurvival"/>	<!-- GameModeSurvival -->
+
+	<!-- Difficulty -->
+	<property name="PlayerSafeZoneLevel"			value="5"/>					<!-- If a player is less or equal this level he will create a safe zone (no enemies) when spawned -->
+	<property name="PlayerSafeZoneHours"			value="5"/>					<!-- Hours in world time this safe zone exists -->
+
+	<!-- Game Rules -->
+	<property name="BuildCreate"					value="false"/>				<!-- cheat mode on/off -->
+	<property name="BedrollDeadZoneSize"			value="15"/>				<!-- Size (box "radius", so a box with 2 times the given value for each side's length) of bedroll dead zone, no zombies will spawn inside this area, and any cleared sleeper volumes that touch a bedroll deadzone will not spawn after they've been cleared. -->
+	<property name="BedrollExpiryTime"				value="45"/>				<!-- Number of real world days a bedroll stays active after owner was last online -->
+	<property name="AllowSpawnNearFriend"			value="2"/>					<!-- Can new players joining the server for the first time select to join near any friend playing at the same time? 0 = Disabled, 1 = Always, 2 = Only near friends in forest biome -->
+	<property name="CameraRestrictionMode"			value="0"/>					<!-- 0 = Players can freely swap between first and third person camera modes, 1 = Restricted to first person, 2 = Restricted to third person -->
+
+	<!-- Performance related -->
+	<property name="MaxSpawnedZombies"				value="64" />				<!-- This count covers the entire world. It is scaled based on use case (x1.9 blood moons, x2.1 sleepers). Changing this setting can have a huge impact on performance. -->
+	<property name="MaxSpawnedAnimals"				value="50" />				<!-- If your server has a large number of players you can increase this limit to add more wildlife. Animals don't consume as much CPU as zombies. NOTE: That this doesn't cause more animals to spawn arbitrarily: The biome spawning system only spawns a certain number of animals in a		given area, but if you have lots of players that are all spread out then you may be hitting the limit and can increase it. -->
+	<property name="ServerMaxAllowedViewDistance"	value="12" />				<!-- Max view distance a client may request (6 - 12). High impact on memory usage and performance. -->
+	<property name="MaxQueuedMeshLayers"			value="1000" />				<!-- Maximum amount of Chunk mesh layers that can be enqueued during mesh generation. Reducing this will improve memory usage but may increase Chunk generation time -->
+
+	<!-- Multiplayer -->
+	<property name="PartySharedKillRange"			value="100"/>				<!-- The distance you must be within to receive party shared kill XP and quest party kill objective credit. -->
+	<property name="PlayerKillingMode"				value="3"/>					<!-- Player Killing Settings (0 = No Killing, 1 = Kill Allies Only, 2 = Kill Strangers Only, 3 = Kill Everyone) -->
+
+	<!-- Land claim options -->
+	<property name="LandClaimCount"					value="5"/>					<!-- Maximum allowed land claims per player. -->
+	<property name="LandClaimSize"					value="41"/>				<!-- Size in blocks that is protected by a keystone -->
+	<property name="LandClaimDeadZone"				value="30"/>				<!-- Keystones must be this many blocks apart (unless you are friends with the other player) -->
+	<property name="LandClaimExpiryTime"			value="7"/>					<!-- The number of real world days a player can be offline before their claims expire and are no longer protected -->
+	<property name="LandClaimDecayMode"				value="0"/>					<!-- Controls how offline players land claims decay. 0=Slow (Linear) , 1=Fast (Exponential), 2=None (Full protection until claim is expired). -->
+	<property name="LandClaimOnlineDurabilityModifier"	value="4"/>				<!-- How much protected claim area block hardness is increased when a player is online. 0 means infinite (no damage will ever be taken). Default is 4x -->
+	<property name="LandClaimOfflineDurabilityModifier"	value="4"/>				<!-- How much protected claim area block hardness is increased when a player is offline. 0 means infinite (no damage will ever be taken). Default is 4x -->
+	<property name="LandClaimOfflineDelay"			value="0"/>					<!-- The number of minutes after a player logs out that the land claim area hardness transitions from online to offline. Default is 0 -->
+
+	<property name="DynamicMeshEnabled"				value="true"/>				<!-- Is Dynamic Mesh system enabled -->
+	<property name="DynamicMeshLandClaimOnly"		value="true"/>				<!-- Is Dynamic Mesh system only active in player LCB areas -->
+	<property name="DynamicMeshLandClaimBuffer"		value="3"/>					<!-- Dynamic Mesh LCB chunk radius -->
+	<property name="DynamicMeshMaxItemCache"		value="3"/>					<!-- How many items can be processed concurrently, higher values use more RAM -->
+
+	<property name="TwitchServerPermission"			value="90"/>				<!-- Required permission level to use twitch integration on the server -->
+	<property name="TwitchBloodMoonAllowed"			value="false"/>				<!-- If the server allows twitch actions during a blood moon. This could cause server lag with extra zombies being spawned during blood moon. -->
+
+	<property name="SandboxCode"					value="AAAJABJACJADJARFBNC"/>	<!-- Currently set to the default difficulty of Adventurer. This code can be changed by starting the new game screen, clicking on the sandbox options button, adjusting the options, and then using the copy code button to paste it here. Code example: AAAJABJACJADJARFBNC -->
+
+	<!-- There are several game settings that you cannot change when starting a new game. -->
+	<!-- You can use console commands to change at least some of them in-game. -->
+	<!-- setgamepref BedrollDeadZoneSize 30 -->
+</ServerSettings>
