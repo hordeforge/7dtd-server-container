@@ -107,6 +107,9 @@
   </apitokens>
   <webmodules />
   <webusers>
-    <user name="admin" pass="ISMvKXpXpadDiUoOSoAfww==" platform="Steam" userid="76561198055688007" crossplatform="EOS" crossuserid="00022b9cbf4b4e23ae412f26de6b1640" />
+    <!-- pass is rendered by the container entrypoint from WEBADMIN_PASSWORD
+         (or a random value minted at first seed) as the MD5 digest the
+         dashboard expects; the placeholder must never ship with a real hash. -->
+    <user name="admin" pass="@WEBADMIN_PASSWORD_HASH@" platform="Steam" userid="76561198055688007" crossplatform="EOS" crossuserid="00022b9cbf4b4e23ae412f26de6b1640" />
   </webusers>
 </adminTools>

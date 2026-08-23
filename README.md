@@ -20,7 +20,7 @@ and disposable.
 | `Containerfile` | Image: official `steamcmd/steamcmd` base + game runtime libs + entrypoint |
 | `entrypoint.sh` | steamcmd install/validate, config render, admin seed, mod sync, run |
 | `config/serverconfig.tmpl.xml` | Stock V3.1.0 template, Navezgane, EAC off, dashboard on |
-| `config/serveradmin_seed.xml` | Dashboard admin (level 0) + webuser `admin`/`admin` seed |
+| `config/serveradmin_seed.xml` | Dashboard admin (level 0) + webuser seed (password from `WEBADMIN_PASSWORD`, random at first seed) |
 | `scripts/stage_mods.sh` | Copy built mods from sibling `dist/` into `mods-available/`, recreate the enabled copies |
 | `scripts/deploy.sh` | Stage mods + rsync this project to the server host (`--restart` also restarts the container) |
 | `scripts/update_mods.sh` | Server-side: restage enabled mods + restart container (no image rebuild) |
@@ -59,7 +59,7 @@ cd ~/7dtd-server
 |---|---|
 | 26900 | Game: client "Connect to IP" (LiteNetLib) |
 | 26902 | LiteNetLib data port (loadgen bots connect here) |
-| 8080 | Web dashboard + APM bridge panel (`admin`/`admin`) |
+| 8080 | Web dashboard + APM bridge panel (webuser `admin`, password: `WEBADMIN_PASSWORD` or the first-seed log line) |
 | 8087 | Telnet console (`TELNET_PORT`) |
 
 Networking is host mode: the server binds directly on the host, no NAT.
@@ -118,8 +118,18 @@ Overrides (all optional):
 ```bash
 export TELNET_PASSWORD=change-me            # telnet console password (default retest)
 export TELNET_PORT=8087                     # telnet port (default 8087)
+export WEBADMIN_PASSWORD=change-me          # dashboard webuser password; if unset a
+                                            # random one is minted at first seed and
+                                            # logged once (container log / journalctl)
 export STEAMCMD_UPDATE=0                    # skip steamcmd validate on next start
 ```
+
+The dashboard webuser password is never stored in the repo: at first seed the
+entrypoint takes `WEBADMIN_PASSWORD` (min 8 chars) or generates a random value,
+writes only its MD5 digest into `data/userdata/Saves/serveradmin.xml`, and
+prints the plaintext once. For the quadlet path, add
+`Environment=WEBADMIN_PASSWORD=...` to `systemd/7dtd-server.container` before
+installing it.
 
 Or keep them in a git-ignored `.env` file in this directory. Values are taken
 literally (no shell expansion); one matching pair of surrounding quotes is

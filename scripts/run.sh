@@ -4,8 +4,8 @@
 # container itself is disposable.
 #
 # Usage: run.sh {build|start|install-only|stop|restart|logs|status}
-# Env overrides: TELNET_PASSWORD, TELNET_PORT, STEAMCMD_UPDATE,
-# STEAMCMD_ONLY, SEVENDTD_CONTAINER_NAME, SEVENDTD_IMAGE.
+# Env overrides: TELNET_PASSWORD, TELNET_PORT, WEBADMIN_PASSWORD,
+# STEAMCMD_UPDATE, STEAMCMD_ONLY, SEVENDTD_CONTAINER_NAME, SEVENDTD_IMAGE.
 # A git-ignored .env in this directory fills unset variables; variables
 # already present in the environment win over it, defaults come last.
 set -euo pipefail
@@ -37,6 +37,14 @@ STEAMCMD_ONLY="${STEAMCMD_ONLY:-0}"
 # inside the container; rationale and rules: scripts/lib-env.sh).
 init_telnet_env
 
+# Optional dashboard webuser password: when provided it is validated here so a
+# bad value fails on the host instead of mid-boot in the container. When
+# unset, the entrypoint mints a random one at seed time (see seed_admin_file);
+# the empty pass-through below keeps that behavior.
+if [[ -n "${WEBADMIN_PASSWORD:-}" ]]; then
+  check_webadmin_password
+fi
+
 mkdir -p "$GAME_DIR" "$USERDATA_DIR" "$ROOT/mods" "$ROOT/config"
 
 # Shared container env + mounts. $1 optionally overrides the STEAMCMD_ONLY
@@ -46,6 +54,7 @@ make_common() {
     --network host
     -e TELNET_PASSWORD="$TELNET_PASSWORD"
     -e TELNET_PORT="$TELNET_PORT"
+    -e WEBADMIN_PASSWORD="${WEBADMIN_PASSWORD:-}"
     -e STEAMCMD_UPDATE="$STEAMCMD_UPDATE"
     -e STEAMCMD_ONLY="${1:-$STEAMCMD_ONLY}"
     # :Z relabels the sources to container_file_t (SELinux enforcing RHEL host).

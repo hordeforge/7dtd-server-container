@@ -70,6 +70,33 @@ jobs:
             echo "loader precedence OK"
           )
 
+      - name: Test webadmin password rules and digest (scripts/lib-env.sh)
+        run: |
+          set -euo pipefail
+          source "$GITHUB_WORKSPACE/scripts/lib-env.sh"
+          # Sane values pass.
+          WEBADMIN_PASSWORD='correct-horse-battery' check_webadmin_password
+          # Characters that break sed rendering or XML attribute values fail
+          # (subshell: the checker exits on rejection).
+          for bad in 'a|b' 'a&b' 'a"b' "a'b" 'a<b' 'a>b' 'a\b' 'a$b' 'a`b'; do
+            if ( WEBADMIN_PASSWORD="$bad" check_webadmin_password ) 2>/dev/null; then
+              echo "FAIL: unsafe WEBADMIN_PASSWORD accepted: $bad" >&2; exit 1
+            fi
+          done
+          if ( WEBADMIN_PASSWORD="$(printf 'a\tb')" check_webadmin_password ) 2>/dev/null; then
+            echo "FAIL: control character accepted in WEBADMIN_PASSWORD" >&2; exit 1
+          fi
+          # Too-short values fail.
+          if ( WEBADMIN_PASSWORD=short check_webadmin_password ) 2>/dev/null; then
+            echo "FAIL: short WEBADMIN_PASSWORD accepted" >&2; exit 1
+          fi
+          # Digest format pinned to what the dashboard expects: base64(MD5(pw)),
+          # verified against the known vector for "admin".
+          hex="$(printf '%s' admin | md5sum)"; hex="${hex%% *}"
+          b64="$(printf '%b' "$(printf '%s' "$hex" | sed 's/\(..\)/\\x\1/g')" | base64)"
+          [[ "$b64" == "ISMvKXpXpadDiUoOSoAfww==" ]] || { echo "FAIL: md5-base64 digest vector" >&2; exit 1; }
+          echo "webadmin password rules OK"
+
       - name: Test telnet_session helper (scripts/lib-env.sh)
         run: |
           set -euo pipefail

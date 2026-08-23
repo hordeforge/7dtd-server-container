@@ -3,7 +3,7 @@
 # change takes effect (the mod reads its config at game boot).
 # Observe the effects with:
 #   ./scripts/perf.sh measure   # bridge `apm status` snapshot via telnet
-#   APM web panel: http://<server>:8080  (web login admin/admin or Steam)
+#   APM web panel: http://<server>:8080  (web login admin/<WEBADMIN_PASSWORD> or Steam)
 #   workstation capture: cd 7dtd-server-apm && uv run 7dtd-server-apm capture --seconds 60
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

@@ -73,13 +73,33 @@ render_config() {
   if grep -q '@TELNET_PASSWORD@\|@TELNET_PORT@\|@USERDATA_DIR@' "$GAME_DIR/serverconfig.xml"; then
     fatal "unrendered placeholders remain in $GAME_DIR/serverconfig.xml; template mismatch"
   fi
+}
+
+seed_admin_file() {
+  if [[ -f "$USERDATA_DIR/Saves/serveradmin.xml" ]]; then
+    return 0
+  fi
   # The server regenerates an empty serveradmin.xml on fresh saves; re-seed the
   # dashboard admin + webuser once so the APM panel is reachable after wipes.
-  if [[ ! -f "$USERDATA_DIR/Saves/serveradmin.xml" ]]; then
-    mkdir -p "$USERDATA_DIR/Saves"
-    cp /config/serveradmin_seed.xml "$USERDATA_DIR/Saves/serveradmin.xml"
-    log "seeded serveradmin.xml (dashboard webuser admin/admin)"
+  # The webuser credential never ships in the image or repo: WEBADMIN_PASSWORD
+  # wins when set, otherwise a random value is minted for this seed. Only the
+  # MD5 digest the dashboard expects is written to serveradmin.xml; the
+  # plaintext is printed once, below (host-user-readable container log).
+  if [[ -z "${WEBADMIN_PASSWORD:-}" ]]; then
+    WEBADMIN_PASSWORD="$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+    export WEBADMIN_PASSWORD
   fi
+  check_webadmin_password
+  local hex b64
+  hex="$(printf '%s' "$WEBADMIN_PASSWORD" | md5sum)"
+  hex="${hex%% *}"
+  b64="$(printf '%b' "$(printf '%s' "$hex" | sed 's/\(..\)/\\x\1/g')" | base64)"
+  sed -e "s|@WEBADMIN_PASSWORD_HASH@|${b64}|g" \
+    /config/serveradmin_seed.xml > "$USERDATA_DIR/Saves/serveradmin.xml"
+  if grep -q '@WEBADMIN_PASSWORD_HASH@' "$USERDATA_DIR/Saves/serveradmin.xml"; then
+    fatal "unrendered placeholder remains in $USERDATA_DIR/Saves/serveradmin.xml; template mismatch"
+  fi
+  log "seeded serveradmin.xml (dashboard webuser admin, password: $WEBADMIN_PASSWORD)"
 }
 
 sync_mods() {
@@ -113,6 +133,7 @@ if [[ "$INSTALL_ONLY" == "1" ]]; then
 fi
 write_platform_cfg
 render_config
+seed_admin_file
 sync_mods
 
 cd "$GAME_DIR"

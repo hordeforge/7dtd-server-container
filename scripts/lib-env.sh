@@ -41,13 +41,31 @@ load_env_file() {
 # container that dies on startup. The entrypoint sources this same file from
 # the image (/usr/local/lib/7dtd-lib-env.sh), so host scripts and container
 # enforce one shared copy of these rules.
-check_telnet_password() {
-  case "$TELNET_PASSWORD" in
+# Shared character policy for secret values that are rendered by sed into XML
+# attribute values (serverconfig.xml, serveradmin.xml) and travel through
+# double-quoted shell strings in the ops scripts (see telnet_session). Reject
+# unsafe values up front instead of escaping: the game reads the rendered
+# files, and a mangled value fails far from the cause.
+reject_unsafe_value() { # name value
+  local name="$1" value="$2"
+  case "$value" in
     *'\'*|*'|'*|*'&'*|*"'"*|*'"'*|*'$'*|*'`'*|*'<'*|*'>'*|*[![:print:]]*)
-      echo "FATAL: TELNET_PASSWORD must avoid backslash, |, &, ', \", \$, backtick, <, >, and control characters" >&2
+      echo "FATAL: $name must avoid backslash, |, &, ', \", \$, backtick, <, >, and control characters" >&2
       exit 1
       ;;
   esac
+}
+
+check_telnet_password() {
+  reject_unsafe_value TELNET_PASSWORD "$TELNET_PASSWORD"
+}
+
+check_webadmin_password() {
+  reject_unsafe_value WEBADMIN_PASSWORD "$WEBADMIN_PASSWORD"
+  if (( ${#WEBADMIN_PASSWORD} < 8 )); then
+    echo "FATAL: WEBADMIN_PASSWORD must be at least 8 characters" >&2
+    exit 1
+  fi
 }
 
 check_telnet_port() {

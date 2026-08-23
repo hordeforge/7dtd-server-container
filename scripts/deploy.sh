@@ -31,5 +31,7 @@ rsync -a --delete \
 
 echo "deployed $ROOT -> ${SSH_USER}@${HOST}:${DEST_DIR}/"
 if [[ "$RESTART" == "1" ]]; then
-  ssh "${SSH_USER}@${HOST}" "cd ${DEST_DIR} && ./scripts/update_mods.sh"
+  # DEST_DIR is quoted inside the remote command so spaces or shell-special
+  # characters in SEVENDTD_SERVER_DIR cannot split the command.
+  ssh "${SSH_USER}@${HOST}" "cd '${DEST_DIR}' && ./scripts/update_mods.sh"
 fi
