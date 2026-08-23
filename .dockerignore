@@ -1,0 +1,8 @@
+# Build context for `podman build` (podman/buildah also honor this name; a
+# .containerignore would take precedence if one ever appears). The Containerfile
+# copies exactly one file, entrypoint.sh; everything else is repo metadata or
+# host runtime state. Without these rules every image build tars up the whole
+# project directory, including the multi-GB Steam depot under data/ and the
+# staged mod builds, plus the git-ignored .env secrets.
+*
+!entrypoint.sh
