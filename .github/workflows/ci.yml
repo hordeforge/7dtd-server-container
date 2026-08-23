@@ -19,7 +19,7 @@ jobs:
       - name: Verify internal script references exist
         run: |
           set -euo pipefail
-          for ref in $(grep -hoE 'scripts/[a-z_]+\.sh' *.sh scripts/*.sh | sort -u); do
+          for ref in $(grep -hoE 'scripts/[-a-z_]+\.sh' *.sh scripts/*.sh | sort -u); do
             test -f "$ref" || { echo "missing referenced script: $ref" >&2; exit 1; }
           done
           echo "all internal script references exist"

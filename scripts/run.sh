@@ -33,28 +33,11 @@ TELNET_PORT="${TELNET_PORT:-8087}"
 STEAMCMD_UPDATE="${STEAMCMD_UPDATE:-1}"
 STEAMCMD_ONLY="${STEAMCMD_ONLY:-0}"
 
-# TELNET_PASSWORD is embedded into the double-quoted telnet shutdown helper
-# below and rendered into serverconfig.xml inside the container (an XML
-# attribute value, where < is illegal); TELNET_PORT goes into both too.
-# Reject unsafe values up front instead of failing later as a boot-time
-# config parse error, a silent forced stop (no world save), or a container
-# that dies on startup.
-case "$TELNET_PASSWORD" in
-  *'\'*|*'|'*|*'&'*|*"'"*|*'"'*|*'$'*|*'`'*|*'<'*|*'>'*|*[![:print:]]*)
-    echo "FATAL: TELNET_PASSWORD must avoid backslash, |, &, ', \", \$, backtick, <, >, and control characters" >&2
-    exit 1
-    ;;
-esac
-case "$TELNET_PORT" in
-  ''|*[!0-9]*)
-    echo "FATAL: TELNET_PORT must be numeric (got '$TELNET_PORT')" >&2
-    exit 1
-    ;;
-esac
-if (( TELNET_PORT < 1 || TELNET_PORT > 65535 )); then
-  echo "FATAL: TELNET_PORT must be a TCP port in 1..65535 (got '$TELNET_PORT')" >&2
-  exit 1
-fi
+# TELNET_PASSWORD lands in the double-quoted telnet shutdown helper below and
+# in serverconfig.xml inside the container; reject unsafe values before any
+# container starts (rationale and rules: scripts/lib-env.sh).
+check_telnet_password
+check_telnet_port
 
 mkdir -p "$GAME_DIR" "$USERDATA_DIR" "$ROOT/mods" "$ROOT/config"
 
