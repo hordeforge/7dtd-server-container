@@ -107,14 +107,17 @@ jobs:
               f.write(data)
           PY
           server_pid=$!
+          # Tear down the listener on every exit path (set -e aborts before
+          # any later line on failure); without this a failed telnet_session
+          # orphans the python process and its listening socket.
+          cleanup() { kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true; }
+          trap cleanup EXIT
           source "$GITHUB_WORKSPACE/scripts/lib-env.sh"
           for _ in $(seq 1 50); do
             if timeout 1 bash -c "exec 3<>/dev/tcp/127.0.0.1/${port}" 2>/dev/null; then break; fi
             sleep 0.1
           done
           out="$(telnet_session "$port" retest 'apm status' 10)"
-          kill "$server_pid" 2>/dev/null || true
-          wait "$server_pid" 2>/dev/null || true
           [[ "$out" == *"telnet ok"* ]] || { echo "FAIL: reply not relayed" >&2; exit 1; }
           printf 'retest\napm status\n' > "$tmp/expected.bin"
           cmp -s "$tmp/received.bin" "$tmp/expected.bin" || { echo "FAIL: wrong bytes on the wire (got $(od -c "$tmp/received.bin" | head -3))" >&2; exit 1; }

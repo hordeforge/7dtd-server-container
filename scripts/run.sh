@@ -69,7 +69,10 @@ build() {
 start() {
   podman rm -f "$NAME" 2>/dev/null || true
   make_common
-  podman run -d --name "$NAME" --restart unless-stopped "${COMMON[@]}" "$IMAGE"
+  # --init: catatonit takes PID 1 and reaps orphans/zombies for the game's
+  # whole uptime; without it, children the server forks but never waits on
+  # accumulate as zombies until the container restarts.
+  podman run -d --name "$NAME" --restart unless-stopped --init "${COMMON[@]}" "$IMAGE"
   echo "started $NAME (game 26900, telnet $TELNET_PORT, dashboard 8080)"
 }
 
@@ -81,7 +84,9 @@ install_only() {
   # never boot the game server, even if the environment or .env set
   # STEAMCMD_ONLY=0.
   make_common 1
-  podman run --rm --name "$NAME-install" "${COMMON[@]}" "$IMAGE"
+  # --init: same reaper as start(); steamcmd forks a bootstrap that must not
+  # linger if it outlives its parent mid-download.
+  podman run --rm --name "$NAME-install" --init "${COMMON[@]}" "$IMAGE"
 }
 
 stop() {
