@@ -24,6 +24,7 @@ ENV
   [[ "${PLAIN:-}" == "hello" ]] || { echo "FAIL: PLAIN" >&2; exit 1; }
   [[ "${DOUBLE:-}" == "double quoted" ]] || { echo "FAIL: DOUBLE quote stripping" >&2; exit 1; }
   [[ "${SINGLE:-}" == "single" ]] || { echo "FAIL: SINGLE quote stripping" >&2; exit 1; }
+  # shellcheck disable=SC2016  # single quotes are the point: asserting the .env value stayed literal
   [[ "${EVIL:-}" == '$(touch ./pwned-marker)' ]] || { echo "FAIL: EVIL must stay literal" >&2; exit 1; }
   [[ ! -e ./pwned-marker ]] || { echo "FAIL: .env value was executed" >&2; exit 1; }
   [[ -z "${EMPTY:-}" && -n "${EMPTY+x}" ]] || { echo "FAIL: EMPTY must be set but empty" >&2; exit 1; }
@@ -44,6 +45,7 @@ ENV
 )
 source "$ROOT/scripts/lib-env.sh"
 WEBADMIN_PASSWORD='correct-horse-battery' check_webadmin_password
+# shellcheck disable=SC2016  # single-quoted literals: each bad value must reach the checker unexpanded
 for bad in 'a|b' 'a&b' 'a"b' "a'b" 'a<b' 'a>b' 'a\b' 'a$b' 'a`b'; do
   if ( WEBADMIN_PASSWORD="$bad" check_webadmin_password ) 2>/dev/null; then
     echo "FAIL: unsafe WEBADMIN_PASSWORD accepted: $bad" >&2; exit 1
