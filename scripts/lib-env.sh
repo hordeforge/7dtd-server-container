@@ -114,10 +114,8 @@ telnet_session() { # port password payload timeout_seconds
     exit 1
   }
   # Values travel as positional parameters, never inside the command string,
-  # so nothing needs shell quoting. The payload is a printf format fragment
-  # (separate commands with \n, e.g. 'shutdown' or 'apm status\nquit') and
-  # keeps %b; the password is data, so %s, which would otherwise mangle a
-  # '%' in it.
+  # so nothing needs shell quoting. The payload keeps %b; the password is
+  # data, so %s, which would otherwise mangle a '%' in it.
   # shellcheck disable=SC2016  # non-expansion is the point: values are passed as "$1".."$4" below
   timeout "$timeout_secs" bash -c '
     exec 3<>/dev/tcp/127.0.0.1/$1
