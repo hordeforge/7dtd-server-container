@@ -33,5 +33,6 @@ echo "deployed $ROOT -> ${SSH_USER}@${HOST}:${DEST_DIR}/"
 if [[ "$RESTART" == "1" ]]; then
   # DEST_DIR is quoted inside the remote command so spaces or shell-special
   # characters in SEVENDTD_SERVER_DIR cannot split the command.
+  # shellcheck disable=SC2029  # HOST/SSH_USER/DEST_DIR are meant to expand client-side
   ssh "${SSH_USER}@${HOST}" "cd '${DEST_DIR}' && ./scripts/update_mods.sh"
 fi

@@ -16,6 +16,18 @@ jobs:
             echo "bash -n OK: $f"
           done
 
+      - name: Static-analyze shell scripts (shellcheck)
+        run: |
+          set -euo pipefail
+          # Full default severity, sources followed (-x) so sourced libs are
+          # checked in caller context. Preinstalled on GitHub runners. Any new
+          # finding fails the job; intentional ones carry a scoped
+          # `# shellcheck disable=CODE  # reason` directive in the script.
+          for f in entrypoint.sh start.sh stop.sh scripts/*.sh; do
+            shellcheck -x "$f"
+            echo "shellcheck OK: $f"
+          done
+
       - name: Verify internal script references exist
         run: |
           set -euo pipefail

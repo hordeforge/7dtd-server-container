@@ -48,6 +48,9 @@ load_env_file() {
 # files, and a mangled value fails far from the cause.
 reject_unsafe_value() { # name value
   local name="$1" value="$2"
+  # The pattern matches each forbidden character literally; the escaped quote
+  # inside it is the only way to write a literal single quote in a pattern.
+  # shellcheck disable=SC1003  # intentional literal-quote case pattern
   case "$value" in
     *'\'*|*'|'*|*'&'*|*"'"*|*'"'*|*'$'*|*'`'*|*'<'*|*'>'*|*[![:print:]]*)
       echo "FATAL: $name must avoid backslash, |, &, ', \", \$, backtick, <, >, and control characters" >&2
@@ -115,6 +118,7 @@ telnet_session() { # port password payload timeout_seconds
   # (separate commands with \n, e.g. 'shutdown' or 'apm status\nquit') and
   # keeps %b; the password is data, so %s, which would otherwise mangle a
   # '%' in it.
+  # shellcheck disable=SC2016  # non-expansion is the point: values are passed as "$1".."$4" below
   timeout "$timeout_secs" bash -c '
     exec 3<>/dev/tcp/127.0.0.1/$1
     printf "%s\n%b\n" "$2" "$3" >&3

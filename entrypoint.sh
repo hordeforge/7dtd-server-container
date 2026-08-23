@@ -24,6 +24,7 @@ INSTALL_ONLY="${STEAMCMD_ONLY:-0}"  # 1 = install/update then exit (pre-warm)
 # Shared telnet defaults + value validation (same rules the host ops scripts
 # use). The lib is shipped into the image by the Containerfile so both sides
 # enforce one copy of the rules; it exits 1 with a FATAL line on a bad value.
+# shellcheck disable=SC1091  # the lib lives at this absolute path inside the image, not on the host
 source /usr/local/lib/7dtd-lib-env.sh
 init_telnet_env
 
