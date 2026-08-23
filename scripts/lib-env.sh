@@ -1,5 +1,5 @@
-# Shared .env loader and telnet env validation for the ops scripts
-# (run.sh, perf.sh).
+# Shared .env loader, telnet env validation, and the telnet session helper
+# for the ops scripts (run.sh, perf.sh).
 #
 # Semantics: variables already present in the environment win over the file;
 # KEY=value lines only; values are taken literally (no variable expansion, no
@@ -59,4 +59,15 @@ check_telnet_port() {
     echo "FATAL: TELNET_PORT must be a TCP port in 1..65535 (got '$TELNET_PORT')" >&2
     exit 1
   fi
+}
+
+# Single owner of the quoting-sensitive shell fragment that embeds both telnet
+# values: open one /dev/tcp session to 127.0.0.1, send the password, send the
+# payload, print the reply until timeout or EOF. Callers must have run
+# check_telnet_password/check_telnet_port first (both values land inside a
+# double-quoted shell string here). The payload is a printf format fragment;
+# separate commands with \n, e.g. 'shutdown' or 'apm status\nquit'.
+telnet_session() { # port password payload timeout_seconds
+  local port="$1" password="$2" payload="$3" timeout_secs="$4"
+  timeout "$timeout_secs" bash -c "exec 3<>/dev/tcp/127.0.0.1/${port}; printf '${password}\n${payload}\n' >&3; cat <&3"
 }

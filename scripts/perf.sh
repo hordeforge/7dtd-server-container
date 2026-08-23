@@ -20,8 +20,9 @@ fi
 TELNET_PORT="${TELNET_PORT:-8087}"
 TELNET_PASSWORD="${TELNET_PASSWORD:-retest}"
 
-# Same rules as run.sh: the password is embedded into a double-quoted shell
-# string in measure() below, so unsafe values must be rejected first.
+# Same rules as run.sh: the password is embedded into a shell string by the
+# shared telnet_session helper (scripts/lib-env.sh) in measure() below, so
+# unsafe values must be rejected first.
 check_telnet_password
 check_telnet_port
 
@@ -66,7 +67,7 @@ case "${1:-status}" in
     echo "EfficientServer: $state"
     ;;
   measure)
-    timeout 15 bash -c "exec 3<>/dev/tcp/127.0.0.1/${TELNET_PORT}; printf '${TELNET_PASSWORD}\napm status\nquit\n' >&3; cat <&3" 2>&1 \
+    telnet_session "$TELNET_PORT" "$TELNET_PASSWORD" 'apm status\nquit' 15 2>&1 \
       | strings | tail -30
     ;;
   *)

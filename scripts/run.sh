@@ -33,9 +33,10 @@ TELNET_PORT="${TELNET_PORT:-8087}"
 STEAMCMD_UPDATE="${STEAMCMD_UPDATE:-1}"
 STEAMCMD_ONLY="${STEAMCMD_ONLY:-0}"
 
-# TELNET_PASSWORD lands in the double-quoted telnet shutdown helper below and
-# in serverconfig.xml inside the container; reject unsafe values before any
-# container starts (rationale and rules: scripts/lib-env.sh).
+# TELNET_PASSWORD is sent by the shared telnet_session helper
+# (scripts/lib-env.sh) in stop() and rendered into serverconfig.xml inside the
+# container; reject unsafe values before any container starts (rationale and
+# rules: scripts/lib-env.sh).
 check_telnet_password
 check_telnet_port
 
@@ -83,8 +84,7 @@ stop() {
   if podman ps --format '{{.Names}}' | grep -qx "$NAME"; then
     echo "requesting save + shutdown via telnet ..."
     if timeout 3 bash -c "exec 3<>/dev/tcp/127.0.0.1/${TELNET_PORT}" >/dev/null 2>&1; then
-      timeout 10 bash -c "exec 3<>/dev/tcp/127.0.0.1/${TELNET_PORT}; printf '${TELNET_PASSWORD}\nshutdown\n' >&3; cat <&3" \
-        >/dev/null 2>&1 || true
+      telnet_session "$TELNET_PORT" "$TELNET_PASSWORD" 'shutdown' 10 >/dev/null 2>&1 || true
     else
       echo "telnet not reachable on $TELNET_PORT; falling back to forced stop"
     fi

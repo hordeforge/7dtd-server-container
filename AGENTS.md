@@ -16,7 +16,7 @@ Workspace root guide: [`../AGENTS.md`](../AGENTS.md) and
 | Server config template (stock Navezgane defaults, EAC off) | `config/serverconfig.tmpl.xml` |
 | Dashboard admin/webuser seed | `config/serveradmin_seed.xml` |
 | Mod staging from sibling `dist/` + enabled copies | `scripts/stage_mods.sh`, `mods/`, `mods-available/` |
-| Deploy + container lifecycle scripts | `scripts/deploy.sh` (`--restart`), `scripts/update_mods.sh`, `scripts/run.sh` |
+| Deploy + container lifecycle + ops scripts | `scripts/deploy.sh` (`--restart`), `scripts/update_mods.sh`, `scripts/run.sh`, `scripts/perf.sh`; shared `.env`/telnet lib: `scripts/lib-env.sh` |
 | Enabled tweaks + bot options doc | `MODS.md` |
 | Rootless systemd service unit | `systemd/7dtd-server.container` |
 

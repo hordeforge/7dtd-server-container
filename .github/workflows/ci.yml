@@ -70,6 +70,56 @@ jobs:
             echo "loader precedence OK"
           )
 
+      - name: Test telnet_session helper (scripts/lib-env.sh)
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          port=18087
+          # Fake telnet endpoint: tolerate probe connections, record every
+          # byte of the first connection that sends data, reply, then close
+          # (the EOF ends the helper instead of its timeout).
+          python3 - "$port" "$tmp/received.bin" <<'PY' &
+          import socket, sys
+          port, out = int(sys.argv[1]), sys.argv[2]
+          srv = socket.socket()
+          srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+          srv.bind(("127.0.0.1", port))
+          srv.listen(1)
+          while True:
+              conn, _ = srv.accept()
+              conn.settimeout(8)
+              try:
+                  data = conn.recv(4096)
+                  if not data:
+                      continue  # readiness probe; wait for the real client
+                  while data.count(b"\n") < 2:
+                      chunk = conn.recv(4096)
+                      if not chunk:
+                          break
+                      data += chunk
+                  conn.sendall(b"telnet ok\n")
+                  break
+              finally:
+                  conn.close()
+          srv.close()
+          with open(out, "wb") as f:
+              f.write(data)
+          PY
+          server_pid=$!
+          source "$GITHUB_WORKSPACE/scripts/lib-env.sh"
+          for _ in $(seq 1 50); do
+            if timeout 1 bash -c "exec 3<>/dev/tcp/127.0.0.1/${port}" 2>/dev/null; then break; fi
+            sleep 0.1
+          done
+          out="$(telnet_session "$port" retest 'apm status' 10)"
+          kill "$server_pid" 2>/dev/null || true
+          wait "$server_pid" 2>/dev/null || true
+          [[ "$out" == *"telnet ok"* ]] || { echo "FAIL: reply not relayed" >&2; exit 1; }
+          printf 'retest\napm status\n' > "$tmp/expected.bin"
+          cmp -s "$tmp/received.bin" "$tmp/expected.bin" || { echo "FAIL: wrong bytes on the wire (got $(od -c "$tmp/received.bin" | head -3))" >&2; exit 1; }
+          echo "telnet_session OK"
+
       - name: Validate Containerfile structure
         run: |
           set -euo pipefail

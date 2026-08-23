@@ -19,6 +19,8 @@ and disposable.
 | `scripts/deploy.sh` | Stage mods + rsync this project to the server host (`--restart` also restarts the container) |
 | `scripts/update_mods.sh` | Server-side: restage enabled mods + restart container (no image rebuild) |
 | `scripts/run.sh` | Container lifecycle on the server host (build/start/logs/stop/...) |
+| `scripts/perf.sh` | EfficientServer toggle (`on`/`off`/`status`) + telnet `apm status` snapshot (`measure`) |
+| `scripts/lib-env.sh` | Shared `.env` loader, telnet value validation, telnet session helper (sourced by the ops scripts) |
 | `start.sh` / `stop.sh` | Top-level daily shortcuts: start / graceful stop (wrap `run.sh`) |
 | `systemd/7dtd-server.container` | Quadlet for a durable rootless user service |
 | `mods/` (runtime) | Enabled mods, bind-mounted into the container |
