@@ -42,21 +42,25 @@ check_telnet_port
 
 mkdir -p "$GAME_DIR" "$USERDATA_DIR" "$ROOT/mods" "$ROOT/config"
 
-COMMON=(
-  --network host
-  -e TELNET_PASSWORD="$TELNET_PASSWORD"
-  -e TELNET_PORT="$TELNET_PORT"
-  -e STEAMCMD_UPDATE="$STEAMCMD_UPDATE"
-  -e STEAMCMD_ONLY="$STEAMCMD_ONLY"
-  # :Z relabels the sources to container_file_t (SELinux enforcing RHEL host).
-  # mods is rw: the /api/perf toggle writes the EfficientServer config there
-  # (the game itself never touches /mods; the entrypoint copies it to the game
-  # Mods at every start, so a flipped config applies on the next boot).
-  -v "$GAME_DIR:/root/7dtd:Z"
-  -v "$USERDATA_DIR:/root/.local/share/7DaysToDie:Z"
-  -v "$ROOT/mods:/mods:Z"
-  -v "$ROOT/config:/config:ro,Z"
-)
+# Shared container env + mounts. $1 optionally overrides the STEAMCMD_ONLY
+# value passed into the container (used by install-only, see below).
+make_common() {
+  COMMON=(
+    --network host
+    -e TELNET_PASSWORD="$TELNET_PASSWORD"
+    -e TELNET_PORT="$TELNET_PORT"
+    -e STEAMCMD_UPDATE="$STEAMCMD_UPDATE"
+    -e STEAMCMD_ONLY="${1:-$STEAMCMD_ONLY}"
+    # :Z relabels the sources to container_file_t (SELinux enforcing RHEL host).
+    # mods is rw: the /api/perf toggle writes the EfficientServer config there
+    # (the game itself never touches /mods; the entrypoint copies it to the game
+    # Mods at every start, so a flipped config applies on the next boot).
+    -v "$GAME_DIR:/root/7dtd:Z"
+    -v "$USERDATA_DIR:/root/.local/share/7DaysToDie:Z"
+    -v "$ROOT/mods:/mods:Z"
+    -v "$ROOT/config:/config:ro,Z"
+  )
+}
 
 build() {
   podman build -t "$IMAGE" "$ROOT"
@@ -64,6 +68,7 @@ build() {
 
 start() {
   podman rm -f "$NAME" 2>/dev/null || true
+  make_common
   podman run -d --name "$NAME" --restart unless-stopped "${COMMON[@]}" "$IMAGE"
   echo "started $NAME (game 26900, telnet $TELNET_PORT, dashboard 8080)"
 }
@@ -72,6 +77,10 @@ install_only() {
   # Same stale-name guard start() applies; a crashed prior --rm run can leave
   # the name behind and podman refuses to reuse it.
   podman rm -f "$NAME-install" 2>/dev/null || true
+  # Force the pre-warm mode: install-only must download/validate and exit,
+  # never boot the game server, even if the environment or .env set
+  # STEAMCMD_ONLY=0.
+  make_common 1
   podman run --rm --name "$NAME-install" "${COMMON[@]}" "$IMAGE"
 }
 

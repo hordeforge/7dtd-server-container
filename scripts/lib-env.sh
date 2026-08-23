@@ -57,7 +57,11 @@ check_telnet_port() {
       exit 1
       ;;
   esac
-  if (( TELNET_PORT < 1 || TELNET_PORT > 65535 )); then
+  # Compare base-10 with leading zeros stripped: a value like 08087 would hit
+  # bash's octal arithmetic, where the range test errors out and reads as
+  # false, letting the bad port past this check.
+  local port="${TELNET_PORT#"${TELNET_PORT%%[!0]*}"}"
+  if [[ -z "$port" ]] || (( ${#port} > 5 || port < 1 || port > 65535 )); then
     echo "FATAL: TELNET_PORT must be a TCP port in 1..65535 (got '$TELNET_PORT')" >&2
     exit 1
   fi
