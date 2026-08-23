@@ -24,6 +24,52 @@ jobs:
           done
           echo "all internal script references exist"
 
+      - name: Test .env loader (scripts/lib-env.sh)
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          cat > "$tmp/test.env" <<'ENV'
+          # comment line
+
+          PLAIN=hello
+          DOUBLE="double quoted"
+          SINGLE='single'
+          EVIL=$(touch ./pwned-marker)
+          EMPTY=
+          export EXPORTED=yes
+          NOEQUALS
+          KEY2=a=b
+          ENV
+          # Values are literal data: no expansion, no command substitution.
+          (
+            cd "$tmp"
+            set -euo pipefail
+            source "$GITHUB_WORKSPACE/scripts/lib-env.sh"
+            load_env_file test.env
+            [[ "${PLAIN:-}" == "hello" ]] || { echo "FAIL: PLAIN" >&2; exit 1; }
+            [[ "${DOUBLE:-}" == "double quoted" ]] || { echo "FAIL: DOUBLE quote stripping" >&2; exit 1; }
+            [[ "${SINGLE:-}" == "single" ]] || { echo "FAIL: SINGLE quote stripping" >&2; exit 1; }
+            [[ "${EVIL:-}" == '$(touch ./pwned-marker)' ]] || { echo "FAIL: EVIL must stay literal" >&2; exit 1; }
+            [[ ! -e ./pwned-marker ]] || { echo "FAIL: .env value was executed" >&2; exit 1; }
+            [[ -z "${EMPTY:-}" && -n "${EMPTY+x}" ]] || { echo "FAIL: EMPTY must be set but empty" >&2; exit 1; }
+            [[ "${EXPORTED:-}" == "yes" ]] || { echo "FAIL: export prefix" >&2; exit 1; }
+            [[ -z "${NOEQUALS+x}" ]] || { echo "FAIL: lines without = must be skipped" >&2; exit 1; }
+            [[ "${KEY2:-}" == "a=b" ]] || { echo "FAIL: KEY2 value with =" >&2; exit 1; }
+            echo "loader literal semantics OK"
+          )
+          # Variables already in the environment win over the file.
+          (
+            cd "$tmp"
+            set -euo pipefail
+            export PLAIN=fromenv EMPTY=fromenv
+            source "$GITHUB_WORKSPACE/scripts/lib-env.sh"
+            load_env_file test.env
+            [[ "${PLAIN:-}" == "fromenv" ]] || { echo "FAIL: environment must win (PLAIN)" >&2; exit 1; }
+            [[ "${EMPTY:-}" == "fromenv" ]] || { echo "FAIL: environment must win (EMPTY)" >&2; exit 1; }
+            echo "loader precedence OK"
+          )
+
       - name: Validate Containerfile structure
         run: |
           set -euo pipefail

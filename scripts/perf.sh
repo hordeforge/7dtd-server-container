@@ -12,23 +12,8 @@ cd "$ROOT"
 CFG="mods/EfficientServer/Config/efficientserver.json"
 
 # Same precedence as run.sh: environment beats .env, .env beats defaults.
-load_env_file() {
-  local line key
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    case "$line" in
-      ''|'#'*) continue ;;
-      'export '*) line="${line#'export '}" ;;
-    esac
-    key="${line%%=*}"
-    if [[ ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
-      continue
-    fi
-    if [[ -n "${!key+x}" ]]; then
-      continue
-    fi
-    eval "export $line"
-  done < "$1"
-}
+# Values are literal (see scripts/lib-env.sh); nothing in .env is executed.
+source "$ROOT/scripts/lib-env.sh"
 if [[ -f "$ROOT/.env" ]]; then
   load_env_file "$ROOT/.env"
 fi
@@ -36,13 +21,24 @@ TELNET_PORT="${TELNET_PORT:-8087}"
 TELNET_PASSWORD="${TELNET_PASSWORD:-retest}"
 
 # measure() embeds the password into a double-quoted shell string; reject
-# values that would expand or break quoting instead of sending garbage.
+# values that would expand or break quoting instead of sending garbage. The
+# same list run.sh enforces (the password also lands in serverconfig.xml).
 case "$TELNET_PASSWORD" in
-  *'\'*|*'|'*|*'&'*|*"'"*|*'"'*|*'$'*|*'`'*|*[![:print:]]*)
-    echo "FATAL: TELNET_PASSWORD must avoid backslash, |, &, ', \", \$, backtick, and control characters" >&2
+  *'\'*|*'|'*|*'&'*|*"'"*|*'"'*|*'$'*|*'`'*|*'<'*|*'>'*|*[![:print:]]*)
+    echo "FATAL: TELNET_PASSWORD must avoid backslash, |, &, ', \", \$, backtick, <, >, and control characters" >&2
     exit 1
     ;;
 esac
+case "$TELNET_PORT" in
+  ''|*[!0-9]*)
+    echo "FATAL: TELNET_PORT must be numeric (got '$TELNET_PORT')" >&2
+    exit 1
+    ;;
+esac
+if (( TELNET_PORT < 1 || TELNET_PORT > 65535 )); then
+  echo "FATAL: TELNET_PORT must be a TCP port in 1..65535 (got '$TELNET_PORT')" >&2
+  exit 1
+fi
 
 current() {
   if [[ ! -f "$CFG" ]]; then echo "missing"; return 1; fi

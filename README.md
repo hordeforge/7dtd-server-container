@@ -113,8 +113,12 @@ export TELNET_PORT=8087                     # telnet port (default 8087)
 export STEAMCMD_UPDATE=0                    # skip steamcmd validate on next start
 ```
 
-Or keep them in a git-ignored `.env` file in this directory. The telnet
-password is rendered into `serverconfig.xml` at every start.
+Or keep them in a git-ignored `.env` file in this directory. Values are taken
+literally (no shell expansion); one matching pair of surrounding quotes is
+stripped. The telnet password is rendered into `serverconfig.xml` at every
+start, so it must avoid backslash, pipe, ampersand, single/double quotes,
+dollar, backtick, angle brackets, and control characters; the port must be in
+1..65535. Both are checked before the container starts.
 
 Add players to the admin list via telnet after joining, e.g.
 `admin add <name-if-online> 0` or `admin add Steam <steamid64> 0`.

@@ -15,27 +15,12 @@ cd "$ROOT"
 GAME_DIR="$ROOT/data/game"
 USERDATA_DIR="$ROOT/data/userdata"
 
-# Load the git-ignored .env (KEY=value lines). Precedence: variables already
-# in the environment win over .env, .env fills the rest, and the built-in
-# defaults below come last. Unlike a blind `source`, an explicit override
-# such as `TELNET_PORT=9099 ./scripts/run.sh stop` always takes effect.
-load_env_file() {
-  local line key
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    case "$line" in
-      ''|'#'*) continue ;;
-      'export '*) line="${line#'export '}" ;;
-    esac
-    key="${line%%=*}"
-    if [[ ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
-      continue
-    fi
-    if [[ -n "${!key+x}" ]]; then
-      continue
-    fi
-    eval "export $line"
-  done < "$1"
-}
+# Load the git-ignored .env via scripts/lib-env.sh. Precedence: variables
+# already in the environment win over .env, .env fills the rest, and the
+# built-in defaults below come last. Unlike a blind `source`, an explicit
+# override such as `TELNET_PORT=9099 ./scripts/run.sh stop` always takes
+# effect, and nothing in .env is executed: values are data, not code.
+source "$ROOT/scripts/lib-env.sh"
 if [[ -f "$ROOT/.env" ]]; then
   load_env_file "$ROOT/.env"
 fi
@@ -49,12 +34,14 @@ STEAMCMD_UPDATE="${STEAMCMD_UPDATE:-1}"
 STEAMCMD_ONLY="${STEAMCMD_ONLY:-0}"
 
 # TELNET_PASSWORD is embedded into the double-quoted telnet shutdown helper
-# below and rendered into serverconfig.xml inside the container; TELNET_PORT
-# goes into both too. Reject unsafe values up front instead of failing later
-# as a silent forced stop (no world save) or a container that dies on boot.
+# below and rendered into serverconfig.xml inside the container (an XML
+# attribute value, where < is illegal); TELNET_PORT goes into both too.
+# Reject unsafe values up front instead of failing later as a boot-time
+# config parse error, a silent forced stop (no world save), or a container
+# that dies on startup.
 case "$TELNET_PASSWORD" in
-  *'\'*|*'|'*|*'&'*|*"'"*|*'"'*|*'$'*|*'`'*|*[![:print:]]*)
-    echo "FATAL: TELNET_PASSWORD must avoid backslash, |, &, ', \", \$, backtick, and control characters" >&2
+  *'\'*|*'|'*|*'&'*|*"'"*|*'"'*|*'$'*|*'`'*|*'<'*|*'>'*|*[![:print:]]*)
+    echo "FATAL: TELNET_PASSWORD must avoid backslash, |, &, ', \", \$, backtick, <, >, and control characters" >&2
     exit 1
     ;;
 esac
@@ -64,6 +51,10 @@ case "$TELNET_PORT" in
     exit 1
     ;;
 esac
+if (( TELNET_PORT < 1 || TELNET_PORT > 65535 )); then
+  echo "FATAL: TELNET_PORT must be a TCP port in 1..65535 (got '$TELNET_PORT')" >&2
+  exit 1
+fi
 
 mkdir -p "$GAME_DIR" "$USERDATA_DIR" "$ROOT/mods" "$ROOT/config"
 
