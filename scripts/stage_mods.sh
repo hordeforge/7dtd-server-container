@@ -9,11 +9,11 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WS="$(cd "$ROOT/.." && pwd)"
 
 declare -A SRC=(
-  [EfficientServer]="$WS/7dtd-optimizer/dist/EfficientServer"
-  [7dtd-apm-bridge]="$WS/7dtd-apm/dist/7dtd-apm-bridge"
-  [BotMod]="$WS/7dtd-clanker/dist/BotMod"
+  [EfficientServer]="$WS/7dtd-server-optimizer/dist/EfficientServer"
+  [7dtd-server-apm-bridge]="$WS/7dtd-server-apm/dist/7dtd-server-apm-bridge"
+  [BotMod]="$WS/7dtd-fps-bots/dist/BotMod"
 )
-ENABLED=(EfficientServer 7dtd-apm-bridge BotMod)
+ENABLED=(EfficientServer 7dtd-server-apm-bridge BotMod)
 
 mkdir -p "$ROOT/mods-available" "$ROOT/mods"
 for name in "${!SRC[@]}"; do

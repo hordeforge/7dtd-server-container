@@ -22,8 +22,8 @@ Workspace root guide: [`../AGENTS.md`](../AGENTS.md) and
 
 ## Does not own
 
-- Mod source and builds (sibling repos: `7dtd-optimizer`, `7dtd-apm`,
-  `7dtd-clanker`, etc). Staging only copies their `dist/` output.
+- Mod source and builds (sibling repos: `7dtd-server-optimizer`, `7dtd-server-apm`,
+  `7dtd-fps-bots`, etc). Staging only copies their `dist/` output.
 - Game RE, measurement, load generation (see workspace root AGENTS.md).
 
 ## Rules
@@ -71,13 +71,13 @@ container.
 
 | Project | Role |
 |---|---|
-| `../7dtd-optimizer` | EfficientServer perf mod (staged, enabled) |
-| `../7dtd-apm` | APM bridge + host measurement (staged, enabled) |
-| `../7dtd-clanker` | BotMod FPS bots (staged, optional) |
+| `../7dtd-server-optimizer` | EfficientServer perf mod (staged, enabled) |
+| `../7dtd-server-apm` | APM bridge + host measurement (staged, enabled) |
+| `../7dtd-fps-bots` | BotMod FPS bots (staged, optional) |
 | `../7dtd-loadgen` | LiteNetLib bots + lab dedicated bring-up scripts (reference behavior) |
-| `../7dtd-connect` | Client join-by-IP mod used for join verification |
+| `../7dtd-fastconnect` | Client join-by-IP mod used for join verification |
 
-## Stock-game research -> 7dtd-research
+## Stock-game research -> 7dtd-engine-research
 
-Game internals RE lives in `../7dtd-research/`, never here. This project only
+Game internals RE lives in `../7dtd-engine-research/`, never here. This project only
 deploys the stock dedicated server and the reviewed sibling mods.

@@ -7,7 +7,7 @@ container restart (or a live `bot reload` where noted).
 
 ## Enabled by default
 
-### EfficientServer (`7dtd-optimizer`) v1.17.0 - perf
+### EfficientServer (`7dtd-server-optimizer`) v1.17.0 - perf
 
 Toggle on the server host:
 
@@ -53,13 +53,13 @@ from `mods/EfficientServer/Config/efficientserver.json`:
 
 Off by default in the shipped config: `TickGuard`, `AnimatorLod`,
 `CrowdCollisionLod`. Full feature description:
-`7dtd-optimizer/docs/FEATURES.md` (sibling repo).
+`7dtd-server-optimizer/docs/FEATURES.md` (sibling repo).
 
-### 7dtd-apm-bridge (`7dtd-apm`) v2.0.0 - measurement
+### 7dtd-server-apm-bridge (`7dtd-server-apm`) v2.0.0 - measurement
 
 Timing-only in-server instrumentation. It plugs a **web panel into the stock
 dashboard** at `http://192.168.0.100:8080` (web login `admin` / `admin`, or
-Steam). Values from `mods/7dtd-apm-bridge/Config/apmbridge.json`:
+Steam). Values from `mods/7dtd-server-apm-bridge/Config/apmbridge.json`:
 
 | Setting | Value | Meaning |
 |---|---|---|
@@ -69,12 +69,12 @@ Steam). Values from `mods/7dtd-apm-bridge/Config/apmbridge.json`:
 | `LogPeriodicSummary` / `LogSpikes` | true | Write to server log |
 | `MaxSpikeRecords` | 128 | Ring buffer size |
 
-Host-side capture tooling: `7dtd-apm` CLI (run from the workstation against
+Host-side capture tooling: `7dtd-server-apm` CLI (run from the workstation against
 this server's telnet/process).
 
 ## Available but not enabled
 
-### BotMod (`7dtd-clanker`) - FPS bots
+### BotMod (`7dtd-fps-bots`) - FPS bots
 
 Real player-model bots (Quake-style) that pathfind, hunt, and shoot. Not
 enabled by default because it spawns combat bots immediately.
