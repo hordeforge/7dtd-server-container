@@ -5,3 +5,4 @@ mods-available/
 mods/
 # Local secrets / env overrides (TELNET_PASSWORD etc).
 .env
+*.lock
