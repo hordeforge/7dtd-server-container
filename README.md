@@ -2,6 +2,12 @@
 
 > **Part of [HordeForge](https://github.com/hordeforge)** — High-Performance Systems Engineering for 7 Days to Die.
 
+![CI](https://github.com/hordeforge/7dtd-server-container/actions/workflows/ci.yml/badge.svg)
+![license](https://img.shields.io/github/license/hordeforge/7dtd-server-container)
+![release](https://img.shields.io/github/v/release/hordeforge/7dtd-server-container)
+![languages](https://img.shields.io/github/languages/count/hordeforge/7dtd-server-container)
+![top language](https://img.shields.io/github/languages/top/hordeforge/7dtd-server-container)
+
 A 7 Days to Die dedicated server (V3.1.0 line) in a rootless podman container on the LAN host `server.lan` (192.168.0.100). Stock Navezgane map, stock default difficulty and settings, with the workspace perf and APM mods loaded: **Crucible** (`7dtd-server-optimizer`) and **Geiger** (`7dtd-server-apm`). EAC is off (required for C# mods).
 
 Everything runtime lives on the host under `data/`; the container is stateless

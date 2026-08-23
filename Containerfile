@@ -22,6 +22,9 @@ RUN apt-get update \
  && mkdir -p /root/7dtd /config /mods
 
 COPY entrypoint.sh /entrypoint.sh
+# Telnet value validation is shared with the host ops scripts; the entrypoint
+# sources this copy so host and container cannot drift apart.
+COPY scripts/lib-env.sh /usr/local/lib/7dtd-lib-env.sh
 RUN chmod +x /entrypoint.sh
 
 # The image runs as root (no dedicated user). Under rootless podman,

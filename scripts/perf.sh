@@ -54,12 +54,10 @@ set_state() {
 }
 
 case "${1:-status}" in
-  on)
-    set_state true
-    ./scripts/run.sh restart
-    ;;
-  off)
-    set_state false
+  on|off)
+    flag=true
+    [[ "$1" == off ]] && flag=false
+    set_state "$flag"
     ./scripts/run.sh restart
     ;;
   status)

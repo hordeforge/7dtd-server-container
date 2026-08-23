@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Shared .env loader, telnet env validation, and the telnet session helper
 # for the ops scripts (run.sh, perf.sh).
 #
@@ -37,8 +38,9 @@ load_env_file() {
 # container (an XML attribute value, where < is illegal); TELNET_PORT goes
 # into both too. Reject unsafe values up front instead of failing later as a
 # boot-time config parse error, a silent forced stop (no world save), or a
-# container that dies on startup. The entrypoint keeps a parallel check for
-# its own copy of the values (the image does not ship this lib).
+# container that dies on startup. The entrypoint sources this same file from
+# the image (/usr/local/lib/7dtd-lib-env.sh), so host scripts and container
+# enforce one shared copy of these rules.
 check_telnet_password() {
   case "$TELNET_PASSWORD" in
     *'\'*|*'|'*|*'&'*|*"'"*|*'"'*|*'$'*|*'`'*|*'<'*|*'>'*|*[![:print:]]*)
@@ -61,13 +63,28 @@ check_telnet_port() {
   fi
 }
 
-# Single owner of the quoting-sensitive shell fragment that embeds both telnet
-# values: open one /dev/tcp session to 127.0.0.1, send the password, send the
-# payload, print the reply until timeout or EOF. Callers must have run
-# check_telnet_password/check_telnet_port first (both values land inside a
-# double-quoted shell string here). The payload is a printf format fragment;
-# separate commands with \n, e.g. 'shutdown' or 'apm status\nquit'.
+# Single owner of the telnet wire exchange: open one /dev/tcp session to
+# 127.0.0.1, send the password, send the payload, print the reply until
+# timeout or EOF. Callers must have run check_telnet_password/check_telnet_port
+# first (the port is re-checked here). The payload is a printf format
+# fragment; separate commands with \n, e.g. 'shutdown' or 'apm status\nquit'.
 telnet_session() { # port password payload timeout_seconds
   local port="$1" password="$2" payload="$3" timeout_secs="$4"
-  timeout "$timeout_secs" bash -c "exec 3<>/dev/tcp/127.0.0.1/${port}; printf '${password}\n${payload}\n' >&3; cat <&3"
+  # An empty or non-numeric port would make /dev/tcp fall back to the http
+  # port and hang the session; callers run check_telnet_port, this pins the
+  # contract at the boundary.
+  [[ "$port" =~ ^[0-9]+$ ]] || {
+    echo "FATAL: telnet_session: port must be numeric (got '$port')" >&2
+    exit 1
+  }
+  # Values travel as positional parameters, never inside the command string,
+  # so nothing needs shell quoting. The payload is a printf format fragment
+  # (separate commands with \n, e.g. 'shutdown' or 'apm status\nquit') and
+  # keeps %b; the password is data, so %s, which would otherwise mangle a
+  # '%' in it.
+  timeout "$timeout_secs" bash -c '
+    exec 3<>/dev/tcp/127.0.0.1/$1
+    printf "%s\n%b\n" "$2" "$3" >&3
+    cat <&3
+  ' telnet_session "$port" "$password" "$payload"
 }

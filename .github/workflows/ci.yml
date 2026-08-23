@@ -123,10 +123,12 @@ jobs:
       - name: Validate Containerfile structure
         run: |
           set -euo pipefail
-          # Required directives for a working image: base image, entrypoint copy
-          # and exec bit, entrypoint array.
+          # Required directives for a working image: base image, entrypoint
+          # copy and exec bit, shared telnet validation lib copy (sourced by
+          # the entrypoint), entrypoint array.
           grep -Eq '^FROM[[:space:]]+' Containerfile
           grep -Eq '^COPY[[:space:]]+entrypoint\.sh' Containerfile
+          grep -Eq '^COPY[[:space:]]+scripts/lib-env\.sh' Containerfile
           grep -Eq '^ENTRYPOINT[[:space:]]+\[' Containerfile
           test -x entrypoint.sh || { echo "entrypoint.sh is not executable" >&2; exit 1; }
           # No unknown directive keywords (mistyped instructions would silently

@@ -23,38 +23,18 @@ INSTALL_ONLY="${STEAMCMD_ONLY:-0}"  # 1 = install/update then exit (pre-warm)
 TELNET_PASSWORD="${TELNET_PASSWORD:-retest}"
 TELNET_PORT="${TELNET_PORT:-8087}"
 
+# Shared telnet value validation (same rules the host ops scripts use). The
+# lib is shipped into the image by the Containerfile so both sides enforce one
+# copy of the rules; it exits 1 with a FATAL line on a bad value.
+source /usr/local/lib/7dtd-lib-env.sh
+
 log() { echo "[entrypoint] $*"; }
 
 fatal() { echo "[entrypoint] FATAL: $*" >&2; exit 1; }
 
-# The password is substituted into serverconfig.xml via sed (delimiter |,
-# replacement metachars & and \) into an XML attribute value (", where < is
-# illegal XML), and embedded single-quoted into the telnet helpers of
-# run.sh/perf.sh on the host, where the surrounding double quotes make $ and
-# backticks expand. Reject anything that would corrupt either path instead of
-# producing a config the server cannot parse at boot.
-check_telnet_password() {
-  case "$TELNET_PASSWORD" in
-    *'\'*|*'|'*|*'&'*|*"'"*|*'"'*|*'$'*|*'`'*|*'<'*|*'>'*|*[![:print:]]*)
-      fatal "TELNET_PASSWORD contains a character that breaks config rendering or telnet clients; avoid backslash, |, &, ', \", \$, backtick, <, >, and control characters"
-      ;;
-  esac
-}
-
-check_telnet_port() {
-  case "$TELNET_PORT" in
-    ''|*[!0-9]*)
-      fatal "TELNET_PORT must be numeric (got '$TELNET_PORT')"
-      ;;
-  esac
-  if (( TELNET_PORT < 1 || TELNET_PORT > 65535 )); then
-    fatal "TELNET_PORT must be a TCP port in 1..65535 (got '$TELNET_PORT')"
-  fi
-}
-
 install_or_update() {
   local attempt rc max_attempts=3
-  for attempt in 1 2 3; do
+  for (( attempt = 1; attempt <= max_attempts; attempt++ )); do
     rc=0
     log "steamcmd: install/validate app $STEAM_APPID into $GAME_DIR (attempt $attempt/$max_attempts)"
     "$STEAMCMD" +force_install_dir "$GAME_DIR" \
