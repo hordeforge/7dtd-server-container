@@ -28,17 +28,14 @@ fi
 NAME="${SEVENDTD_CONTAINER_NAME:-7dtd-server}"
 IMAGE="${SEVENDTD_IMAGE:-localhost/7dtd-server:latest}"
 
-TELNET_PASSWORD="${TELNET_PASSWORD:-retest}"
-TELNET_PORT="${TELNET_PORT:-8087}"
 STEAMCMD_UPDATE="${STEAMCMD_UPDATE:-1}"
 STEAMCMD_ONLY="${STEAMCMD_ONLY:-0}"
 
-# TELNET_PASSWORD is sent by the shared telnet_session helper
-# (scripts/lib-env.sh) in stop() and rendered into serverconfig.xml inside the
-# container; reject unsafe values before any container starts (rationale and
-# rules: scripts/lib-env.sh).
-check_telnet_password
-check_telnet_port
+# Telnet values come from the environment or .env, get the shared lab defaults
+# if still unset, and are validated before any container starts (the password
+# is sent by telnet_session in stop() and rendered into serverconfig.xml
+# inside the container; rationale and rules: scripts/lib-env.sh).
+init_telnet_env
 
 mkdir -p "$GAME_DIR" "$USERDATA_DIR" "$ROOT/mods" "$ROOT/config"
 
@@ -121,7 +118,9 @@ restart() {
 }
 
 logs()  { podman logs -f "$NAME"; }
-status(){ podman ps -a --filter "name=$NAME"; }
+# Anchor the name filter: podman treats it as a regex, and unanchored it would
+# also list the $NAME-install pre-warm container.
+status(){ podman ps -a --filter "name=^${NAME}$"; }
 
 case "${1:-status}" in
   build)        build ;;

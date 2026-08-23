@@ -79,33 +79,7 @@ jobs:
           # Fake telnet endpoint: tolerate probe connections, record every
           # byte of the first connection that sends data, reply, then close
           # (the EOF ends the helper instead of its timeout).
-          python3 - "$port" "$tmp/received.bin" <<'PY' &
-          import socket, sys
-          port, out = int(sys.argv[1]), sys.argv[2]
-          srv = socket.socket()
-          srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-          srv.bind(("127.0.0.1", port))
-          srv.listen(1)
-          while True:
-              conn, _ = srv.accept()
-              conn.settimeout(8)
-              try:
-                  data = conn.recv(4096)
-                  if not data:
-                      continue  # readiness probe; wait for the real client
-                  while data.count(b"\n") < 2:
-                      chunk = conn.recv(4096)
-                      if not chunk:
-                          break
-                      data += chunk
-                  conn.sendall(b"telnet ok\n")
-                  break
-              finally:
-                  conn.close()
-          srv.close()
-          with open(out, "wb") as f:
-              f.write(data)
-          PY
+          python3 scripts/fake-telnet-server.py "$port" "$tmp/received.bin" &
           server_pid=$!
           # Tear down the listener on every exit path (set -e aborts before
           # any later line on failure); without this a failed telnet_session
@@ -147,12 +121,8 @@ jobs:
       - name: Validate config XML (raw and rendered)
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import xml.etree.ElementTree as ET
-          for f in ("config/serverconfig.tmpl.xml", "config/serveradmin_seed.xml"):
-              ET.parse(f)
-              print(f, "well-formed")
-          PY
+          python3 scripts/check-config-xml.py \
+            config/serverconfig.tmpl.xml config/serveradmin_seed.xml
           # Render the template the same way entrypoint.sh does and require the
           # result to be valid XML with no leftover placeholders.
           sed -e 's|@TELNET_PASSWORD@|retest|g' \
@@ -163,4 +133,4 @@ jobs:
             echo "unrendered template placeholder left in serverconfig.xml" >&2
             exit 1
           fi
-          python3 -c 'import xml.etree.ElementTree as ET; ET.parse("/tmp/serverconfig.xml"); print("rendered serverconfig.xml OK")'
+          python3 scripts/check-config-xml.py /tmp/serverconfig.xml

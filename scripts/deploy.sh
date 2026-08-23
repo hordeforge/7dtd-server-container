@@ -31,6 +31,5 @@ rsync -a --delete \
 
 echo "deployed $ROOT -> ${SSH_USER}@${HOST}:${DEST_DIR}/"
 if [[ "$RESTART" == "1" ]]; then
-  echo "restarting container to re-sync Mods/ ..."
   ssh "${SSH_USER}@${HOST}" "cd ${DEST_DIR} && ./scripts/update_mods.sh"
 fi

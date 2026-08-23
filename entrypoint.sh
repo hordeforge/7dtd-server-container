@@ -20,13 +20,12 @@ fi
 STEAM_APPID="${STEAM_APPID:-294420}"
 UPDATE="${STEAMCMD_UPDATE:-1}"      # 1 = steamcmd validate every start, 0 = skip
 INSTALL_ONLY="${STEAMCMD_ONLY:-0}"  # 1 = install/update then exit (pre-warm)
-TELNET_PASSWORD="${TELNET_PASSWORD:-retest}"
-TELNET_PORT="${TELNET_PORT:-8087}"
 
-# Shared telnet value validation (same rules the host ops scripts use). The
-# lib is shipped into the image by the Containerfile so both sides enforce one
-# copy of the rules; it exits 1 with a FATAL line on a bad value.
+# Shared telnet defaults + value validation (same rules the host ops scripts
+# use). The lib is shipped into the image by the Containerfile so both sides
+# enforce one copy of the rules; it exits 1 with a FATAL line on a bad value.
 source /usr/local/lib/7dtd-lib-env.sh
+init_telnet_env
 
 log() { echo "[entrypoint] $*"; }
 
@@ -103,8 +102,6 @@ sync_mods() {
 }
 
 mkdir -p "$GAME_DIR" "$USERDATA_DIR/Logs"
-check_telnet_password
-check_telnet_port
 if [[ "$UPDATE" == "1" || ! -x "$GAME_DIR/7DaysToDieServer.x86_64" ]]; then
   install_or_update
 else

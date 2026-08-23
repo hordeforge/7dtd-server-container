@@ -67,6 +67,17 @@ check_telnet_port() {
   fi
 }
 
+# Fill unset TELNET_PASSWORD/TELNET_PORT with the committed lab defaults, then
+# enforce the value rules above. One owner of both the defaults and the
+# validate step so host scripts and the container entrypoint cannot drift
+# apart. Call after load_env_file where a .env is in play.
+init_telnet_env() {
+  TELNET_PASSWORD="${TELNET_PASSWORD:-retest}"
+  TELNET_PORT="${TELNET_PORT:-8087}"
+  check_telnet_password
+  check_telnet_port
+}
+
 # Single owner of the telnet wire exchange: open one /dev/tcp session to
 # 127.0.0.1, send the password, send the payload, print the reply until
 # timeout or EOF. Callers must have run check_telnet_password/check_telnet_port

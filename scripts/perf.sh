@@ -11,20 +11,16 @@ cd "$ROOT"
 
 CFG="mods/EfficientServer/Config/efficientserver.json"
 
-# Same precedence as run.sh: environment beats .env, .env beats defaults.
-# Values are literal (see scripts/lib-env.sh); nothing in .env is executed.
+# Same precedence as run.sh: environment beats .env, .env beats the shared
+# defaults. Values are literal (see scripts/lib-env.sh); nothing in .env is
+# executed.
 source "$ROOT/scripts/lib-env.sh"
 if [[ -f "$ROOT/.env" ]]; then
   load_env_file "$ROOT/.env"
 fi
-TELNET_PORT="${TELNET_PORT:-8087}"
-TELNET_PASSWORD="${TELNET_PASSWORD:-retest}"
-
-# Same rules as run.sh: the password is embedded into a shell string by the
-# shared telnet_session helper (scripts/lib-env.sh) in measure() below, so
-# unsafe values must be rejected first.
-check_telnet_password
-check_telnet_port
+# The password travels through telnet_session in measure() below, so the
+# shared defaults + validation must run before anything else happens.
+init_telnet_env
 
 current() {
   if [[ ! -f "$CFG" ]]; then echo "missing"; return 1; fi
