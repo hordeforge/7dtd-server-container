@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import xml.etree.ElementTree as ET
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 
@@ -36,7 +37,10 @@ def main(argv: list[str]) -> int:
         print(f"usage: {argv[0]} COBERTURA_XML OUTPUT.svg", file=sys.stderr)
         return 2
     root = ET.parse(argv[1]).getroot()
-    pct = round(float(root.get("line-rate", "0")) * 100)
+    # Parse the ratio as an exact decimal and round half-up to a whole
+    # percent: going through binary float distorts ties unpredictably
+    # (0.985 * 100 reads back as 98.4999... and displays 98 instead of 99).
+    pct = int((Decimal(root.get("line-rate", "0")) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
     Path(argv[2]).write_text(badge(pct, colour(pct)))
     return 0
 
