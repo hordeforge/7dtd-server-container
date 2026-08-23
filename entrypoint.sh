@@ -28,13 +28,22 @@ log() { echo "[entrypoint] $*"; }
 fatal() { echo "[entrypoint] FATAL: $*" >&2; exit 1; }
 
 # The password is substituted into serverconfig.xml via sed (delimiter |,
-# replacement metachars & and \) and embedded single-quoted into the telnet
-# helpers of run.sh/perf.sh on the host. Reject anything that would corrupt
-# either path instead of producing a broken config later.
+# replacement metachars & and \) into an XML attribute value ("), and embedded
+# single-quoted into the telnet helpers of run.sh/perf.sh on the host, where
+# the surrounding double quotes make $ and backticks expand. Reject anything
+# that would corrupt either path instead of producing a broken config later.
 check_telnet_password() {
   case "$TELNET_PASSWORD" in
-    *'\'*|*'|'*|*'&'*|*"'"*|*[![:print:]]*)
-      fatal "TELNET_PASSWORD contains a character that breaks config rendering or telnet clients; avoid backslash, |, &, ', and control characters"
+    *'\'*|*'|'*|*'&'*|*"'"*|*'"'*|*'$'*|*'`'*|*[![:print:]]*)
+      fatal "TELNET_PASSWORD contains a character that breaks config rendering or telnet clients; avoid backslash, |, &, ', \", \$, backtick, and control characters"
+      ;;
+  esac
+}
+
+check_telnet_port() {
+  case "$TELNET_PORT" in
+    ''|*[!0-9]*)
+      fatal "TELNET_PORT must be numeric (got '$TELNET_PORT')"
       ;;
   esac
 }
@@ -111,6 +120,7 @@ sync_mods() {
 
 mkdir -p "$GAME_DIR" "$USERDATA_DIR/Logs"
 check_telnet_password
+check_telnet_port
 if [[ "$UPDATE" == "1" || ! -x "$GAME_DIR/7DaysToDieServer.x86_64" ]]; then
   install_or_update
 else

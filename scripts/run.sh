@@ -6,23 +6,64 @@
 # Usage: run.sh {build|start|install-only|stop|restart|logs|status}
 # Env overrides: TELNET_PASSWORD, TELNET_PORT, STEAMCMD_UPDATE,
 # STEAMCMD_ONLY, SEVENDTD_CONTAINER_NAME, SEVENDTD_IMAGE.
-# A git-ignored .env in this directory is sourced and wins over defaults.
+# A git-ignored .env in this directory fills unset variables; variables
+# already present in the environment win over it, defaults come last.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-NAME="${SEVENDTD_CONTAINER_NAME:-7dtd-server}"
-IMAGE="${SEVENDTD_IMAGE:-localhost/7dtd-server:latest}"
 GAME_DIR="$ROOT/data/game"
 USERDATA_DIR="$ROOT/data/userdata"
+
+# Load the git-ignored .env (KEY=value lines). Precedence: variables already
+# in the environment win over .env, .env fills the rest, and the built-in
+# defaults below come last. Unlike a blind `source`, an explicit override
+# such as `TELNET_PORT=9099 ./scripts/run.sh stop` always takes effect.
+load_env_file() {
+  local line key
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      ''|'#'*) continue ;;
+      'export '*) line="${line#'export '}" ;;
+    esac
+    key="${line%%=*}"
+    if [[ ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+      continue
+    fi
+    if [[ -n "${!key+x}" ]]; then
+      continue
+    fi
+    eval "export $line"
+  done < "$1"
+}
+if [[ -f "$ROOT/.env" ]]; then
+  load_env_file "$ROOT/.env"
+fi
+
+NAME="${SEVENDTD_CONTAINER_NAME:-7dtd-server}"
+IMAGE="${SEVENDTD_IMAGE:-localhost/7dtd-server:latest}"
 
 TELNET_PASSWORD="${TELNET_PASSWORD:-retest}"
 TELNET_PORT="${TELNET_PORT:-8087}"
 STEAMCMD_UPDATE="${STEAMCMD_UPDATE:-1}"
 STEAMCMD_ONLY="${STEAMCMD_ONLY:-0}"
-if [[ -f "$ROOT/.env" ]]; then
-  set -a; source "$ROOT/.env"; set +a
-fi
+
+# TELNET_PASSWORD is embedded into the double-quoted telnet shutdown helper
+# below and rendered into serverconfig.xml inside the container; TELNET_PORT
+# goes into both too. Reject unsafe values up front instead of failing later
+# as a silent forced stop (no world save) or a container that dies on boot.
+case "$TELNET_PASSWORD" in
+  *'\'*|*'|'*|*'&'*|*"'"*|*'"'*|*'$'*|*'`'*|*[![:print:]]*)
+    echo "FATAL: TELNET_PASSWORD must avoid backslash, |, &, ', \", \$, backtick, and control characters" >&2
+    exit 1
+    ;;
+esac
+case "$TELNET_PORT" in
+  ''|*[!0-9]*)
+    echo "FATAL: TELNET_PORT must be numeric (got '$TELNET_PORT')" >&2
+    exit 1
+    ;;
+esac
 
 mkdir -p "$GAME_DIR" "$USERDATA_DIR" "$ROOT/mods" "$ROOT/config"
 

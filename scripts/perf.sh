@@ -10,8 +10,39 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 CFG="mods/EfficientServer/Config/efficientserver.json"
+
+# Same precedence as run.sh: environment beats .env, .env beats defaults.
+load_env_file() {
+  local line key
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      ''|'#'*) continue ;;
+      'export '*) line="${line#'export '}" ;;
+    esac
+    key="${line%%=*}"
+    if [[ ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+      continue
+    fi
+    if [[ -n "${!key+x}" ]]; then
+      continue
+    fi
+    eval "export $line"
+  done < "$1"
+}
+if [[ -f "$ROOT/.env" ]]; then
+  load_env_file "$ROOT/.env"
+fi
 TELNET_PORT="${TELNET_PORT:-8087}"
 TELNET_PASSWORD="${TELNET_PASSWORD:-retest}"
+
+# measure() embeds the password into a double-quoted shell string; reject
+# values that would expand or break quoting instead of sending garbage.
+case "$TELNET_PASSWORD" in
+  *'\'*|*'|'*|*'&'*|*"'"*|*'"'*|*'$'*|*'`'*|*[![:print:]]*)
+    echo "FATAL: TELNET_PASSWORD must avoid backslash, |, &, ', \", \$, backtick, and control characters" >&2
+    exit 1
+    ;;
+esac
 
 current() {
   if [[ ! -f "$CFG" ]]; then echo "missing"; return 1; fi
@@ -50,7 +81,8 @@ case "${1:-status}" in
     ./scripts/run.sh restart
     ;;
   status)
-    echo "EfficientServer: $(current)"
+    state="$(current || true)"
+    echo "EfficientServer: $state"
     ;;
   measure)
     timeout 15 bash -c "exec 3<>/dev/tcp/127.0.0.1/${TELNET_PORT}; printf '${TELNET_PASSWORD}\napm status\nquit\n' >&3; cat <&3" 2>&1 \
