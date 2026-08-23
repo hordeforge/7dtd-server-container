@@ -55,7 +55,7 @@ Off by default in the shipped config: `TickGuard`, `AnimatorLod`,
 `CrowdCollisionLod`. Full feature description:
 `7dtd-server-optimizer/docs/FEATURES.md` (sibling repo).
 
-### 7dtd-server-apm-bridge (`7dtd-server-apm`) v2.0.0 - measurement
+### 7dtd-server-apm-bridge (`7dtd-server-apm`) v2.2.3 - measurement
 
 Timing-only in-server instrumentation. It plugs a **web panel into the stock
 dashboard** at `http://192.168.0.100:8080` (web login `admin` / `admin`, or
@@ -72,20 +72,20 @@ Steam). Values from `mods/7dtd-server-apm-bridge/Config/apmbridge.json`:
 Host-side capture tooling: `7dtd-server-apm` CLI (run from the workstation against
 this server's telnet/process).
 
-## Available but not enabled
-
 ### BotMod (`7dtd-fps-bots`) - FPS bots
 
-Real player-model bots (Quake-style) that pathfind, hunt, and shoot. Not
-enabled by default because it spawns combat bots immediately.
+Real player-model bots (Quake-style) that pathfind, hunt, and shoot. Enabled
+by default in the shipped staging set (`stage_mods.sh` copies it into `mods/`),
+which means combat bots spawn as soon as the server boots; remove it from
+`mods/` for clean perf runs:
 
 ```bash
 cd ~/7dtd-server
-cp -a mods-available/BotMod mods/BotMod
+rm -rf mods/BotMod                     # disable (re-enable: cp -a mods-available/BotMod mods/BotMod)
 ./start.sh            # or ./scripts/run.sh restart
 ```
 
-Key options from `mods/BotMod/Config/botmod.json` (after enabling):
+Key options from `mods/BotMod/Config/botmod.json`:
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -97,7 +97,7 @@ Key options from `mods/BotMod/Config/botmod.json` (after enabling):
 | `VisionRange` / `VisionAngle` | 70 / 190 | Detection cone |
 | `LoseTargetRange` / `LoseTargetTimeSec` | 85 / 4.5 | Target loss |
 | `AttackRange` / `FireRateSec` | 45 / 0.18 | Engagement range / fire rate |
-| `RespawnDelaySec` / `SpawnProtectionSec` | 3 | Respawn cadence |
+| `RespawnDelaySec` / `SpawnProtectionSec` | 3 / 1.2 | Respawn cadence / post-spawn protection window |
 | `UseNeuralBrain` | GA net | Optional evolved neural controller (`evolved/best.json`) |
 
 Live console (telnet `8087`, password from `TELNET_PASSWORD`):
@@ -117,5 +117,5 @@ brain toggle, and the scoreboard (kills, deaths, score per bot). API:
 2. Restart: `./stop.sh && ./start.sh` (BotMod config can be reloaded live
    with `bot reload`).
 
-The Docker image is static; mods are always the bind-mounted `mods/` dir,
+The container image is static; mods are always the bind-mounted `mods/` dir,
 re-copied into the game's `Mods/` by the entrypoint at every container start.

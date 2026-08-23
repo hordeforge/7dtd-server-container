@@ -4,7 +4,7 @@
 # Observe the effects with:
 #   ./scripts/perf.sh measure   # bridge `apm status` snapshot via telnet
 #   APM web panel: http://<server>:8080  (web login admin/admin or Steam)
-#   workstation capture: cd 7dtd-server-container-apm && uv run 7dtd-server-apm capture --seconds 60
+#   workstation capture: cd 7dtd-server-apm && uv run 7dtd-server-apm capture --seconds 60
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"

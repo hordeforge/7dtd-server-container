@@ -54,9 +54,9 @@ Workspace root guide: [`../AGENTS.md`](../AGENTS.md) and
 ./start.sh / ./stop.sh        # daily start/stop shortcuts (wrap run.sh)
 ```
 
-Durable service: quadlet in `systemd/` (see its header). Load a mod: put the
-mod dir into `mods/` (symlink from `mods-available/`), then restart the
-container.
+Durable service: quadlet in `systemd/` (see its header). Load a mod: copy the
+mod dir into `mods/` (real copies, not symlinks: `mods/` is bind-mounted and
+must be self-contained), then restart the container.
 
 ## Ports
 
@@ -73,7 +73,7 @@ container.
 |---|---|
 | `../7dtd-server-optimizer` | EfficientServer perf mod (staged, enabled) |
 | `../7dtd-server-apm` | APM bridge + host measurement (staged, enabled) |
-| `../7dtd-fps-bots` | BotMod FPS bots (staged, optional) |
+| `../7dtd-fps-bots` | BotMod FPS bots (staged, enabled by default) |
 | `../7dtd-loadgen` | LiteNetLib bots + lab dedicated bring-up scripts (reference behavior) |
 | `../7dtd-fastconnect` | Client join-by-IP mod used for join verification |
 

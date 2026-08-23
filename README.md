@@ -58,12 +58,13 @@ Networking is host mode: the server binds directly on the host, no NAT.
 
 ## Loading mods
 
-The enabled set is `EfficientServer` and `7dtd-server-apm-bridge`. To load another
-mod (the FPS bot mod, for example):
+The enabled set is `EfficientServer`, `7dtd-server-apm-bridge` and `BotMod`
+(see [`MODS.md`](MODS.md)). To unload a mod, remove its dir from `mods/`; to
+load another one, copy it in:
 
 ```bash
 cd ~/7dtd-server
-cp -a mods-available/BotMod mods/BotMod     # enable (or copy a new mod dir here)
+rm -rf mods/BotMod                          # example: disable the FPS bots
 ./scripts/run.sh restart
 ```
 
@@ -71,9 +72,9 @@ cp -a mods-available/BotMod mods/BotMod     # enable (or copy a new mod dir here
 
 ```bash
 # on the workstation: rebuild the mod, then redeploy
-cd 7dtd-server-container-optimizer && make build              # EfficientServer
-cd 7dtd-server-container-apm && make bridge-build             # 7dtd-server-apm-bridge
-cd 7dtd-fps-bots && make build                # BotMod
+cd 7dtd-server-optimizer && make build              # EfficientServer
+cd ../7dtd-server-apm && make bridge-build          # 7dtd-server-apm-bridge
+cd ../7dtd-fps-bots && make build                   # BotMod
 cd ../7dtd-server-container && ./scripts/deploy.sh
 ```
 
@@ -81,13 +82,13 @@ Dropping a mod into `mods/` and restarting is all it takes. Removing it from
 `mods/` and restarting disables it (the entrypoint keeps only the stock
 `0_TFP_Harmony` from the depot).
 
-**Updating a mod never requires rebuilding the Docker image.** The image is
+**Updating a mod never requires rebuilding the container image.** The image is
 static; mods are bind-mounted from `mods/` and re-synced by the entrypoint on
 every container start. Rebuild the mod in its sibling repo, then one command
 from the workstation:
 
 ```bash
-cd 7dtd-server-container-optimizer && make build            # rebuild the mod you changed
+cd 7dtd-server-optimizer && make build            # rebuild the mod you changed
 cd ../7dtd-server-container && ./scripts/deploy.sh --restart
 ```
 
