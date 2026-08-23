@@ -6,6 +6,9 @@ sends data, replies once, then closes (the EOF ends the helper instead of its
 timeout) and writes the recorded bytes to the output path.
 
 Usage: fake-telnet-server.py PORT OUTPUT_PATH
+
+PORT 0 binds an ephemeral port and prints the chosen port on stdout (flushed)
+once listening; the test reads it instead of racing on a fixed port.
 """
 import socket
 import sys
@@ -15,6 +18,8 @@ srv = socket.socket()
 srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 srv.bind(("127.0.0.1", port))
 srv.listen(1)
+if port == 0:
+    print(srv.getsockname()[1], flush=True)
 while True:
     conn, _ = srv.accept()
     conn.settimeout(8)
