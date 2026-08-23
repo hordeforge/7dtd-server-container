@@ -77,6 +77,9 @@ render_config() {
 }
 
 seed_admin_file() {
+  # The game creates Saves/ on its own first run, but this seed happens
+  # before that; without it a fresh host crashes here writing serveradmin.xml.
+  mkdir -p "$USERDATA_DIR/Saves"
   if [[ -f "$USERDATA_DIR/Saves/serveradmin.xml" ]]; then
     return 0
   fi
