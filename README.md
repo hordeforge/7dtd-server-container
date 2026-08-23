@@ -1,10 +1,8 @@
-# 7dtd-server
+# 🏰 Outpost (7DTD Server Container)
 
-A 7 Days to Die dedicated server (V3.1.0 line) in a rootless podman container
-on the LAN host `server.lan` (192.168.0.100). Stock Navezgane map, stock
-default difficulty and settings, with the workspace perf and APM mods loaded:
-**EfficientServer** (`7dtd-optimizer`) and **7dtd-apm-bridge** (`7dtd-apm`).
-EAC is off (required for C# mods).
+> **Part of [HordeForge](https://github.com/hordeforge)** — High-Performance Systems Engineering for 7 Days to Die.
+
+A 7 Days to Die dedicated server (V3.1.0 line) in a rootless podman container on the LAN host `server.lan` (192.168.0.100). Stock Navezgane map, stock default difficulty and settings, with the workspace perf and APM mods loaded: **Crucible** (`7dtd-server-optimizer`) and **Geiger** (`7dtd-server-apm`). EAC is off (required for C# mods).
 
 Everything runtime lives on the host under `data/`; the container is stateless
 and disposable.
@@ -60,7 +58,7 @@ Networking is host mode: the server binds directly on the host, no NAT.
 
 ## Loading mods
 
-The enabled set is `EfficientServer` and `7dtd-apm-bridge`. To load another
+The enabled set is `EfficientServer` and `7dtd-server-apm-bridge`. To load another
 mod (the FPS bot mod, for example):
 
 ```bash
@@ -73,10 +71,10 @@ cp -a mods-available/BotMod mods/BotMod     # enable (or copy a new mod dir here
 
 ```bash
 # on the workstation: rebuild the mod, then redeploy
-cd 7dtd-optimizer && make build              # EfficientServer
-cd 7dtd-apm && make bridge-build             # 7dtd-apm-bridge
-cd 7dtd-clanker && make build                # BotMod
-cd ../7dtd-server && ./scripts/deploy.sh
+cd 7dtd-server-container-optimizer && make build              # EfficientServer
+cd 7dtd-server-container-apm && make bridge-build             # 7dtd-server-apm-bridge
+cd 7dtd-fps-bots && make build                # BotMod
+cd ../7dtd-server-container && ./scripts/deploy.sh
 ```
 
 Dropping a mod into `mods/` and restarting is all it takes. Removing it from
@@ -89,8 +87,8 @@ every container start. Rebuild the mod in its sibling repo, then one command
 from the workstation:
 
 ```bash
-cd 7dtd-optimizer && make build            # rebuild the mod you changed
-cd ../7dtd-server && ./scripts/deploy.sh --restart
+cd 7dtd-server-container-optimizer && make build            # rebuild the mod you changed
+cd ../7dtd-server-container && ./scripts/deploy.sh --restart
 ```
 
 This stages the new build, rsyncs it to the server, and restarts the
