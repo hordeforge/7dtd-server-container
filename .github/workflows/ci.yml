@@ -19,10 +19,6 @@ jobs:
       - name: Static-analyze shell scripts (shellcheck)
         run: |
           set -euo pipefail
-          # Full default severity, sources followed (-x) so sourced libs are
-          # checked in caller context. Preinstalled on GitHub runners. Any new
-          # finding fails the job; intentional ones carry a scoped
-          # `# shellcheck disable=CODE  # reason` directive in the script.
           for f in entrypoint.sh start.sh stop.sh scripts/*.sh; do
             shellcheck -x "$f"
             echo "shellcheck OK: $f"
@@ -53,7 +49,6 @@ jobs:
           NOEQUALS
           KEY2=a=b
           ENV
-          # Values are literal data: no expansion, no command substitution.
           (
             cd "$tmp"
             set -euo pipefail
@@ -70,7 +65,6 @@ jobs:
             [[ "${KEY2:-}" == "a=b" ]] || { echo "FAIL: KEY2 value with =" >&2; exit 1; }
             echo "loader literal semantics OK"
           )
-          # Variables already in the environment win over the file.
           (
             cd "$tmp"
             set -euo pipefail
@@ -86,10 +80,7 @@ jobs:
         run: |
           set -euo pipefail
           source "$GITHUB_WORKSPACE/scripts/lib-env.sh"
-          # Sane values pass.
           WEBADMIN_PASSWORD='correct-horse-battery' check_webadmin_password
-          # Characters that break sed rendering or XML attribute values fail
-          # (subshell: the checker exits on rejection).
           for bad in 'a|b' 'a&b' 'a"b' "a'b" 'a<b' 'a>b' 'a\b' 'a$b' 'a`b'; do
             if ( WEBADMIN_PASSWORD="$bad" check_webadmin_password ) 2>/dev/null; then
               echo "FAIL: unsafe WEBADMIN_PASSWORD accepted: $bad" >&2; exit 1
@@ -98,12 +89,9 @@ jobs:
           if ( WEBADMIN_PASSWORD="$(printf 'a\tb')" check_webadmin_password ) 2>/dev/null; then
             echo "FAIL: control character accepted in WEBADMIN_PASSWORD" >&2; exit 1
           fi
-          # Too-short values fail.
           if ( WEBADMIN_PASSWORD=short check_webadmin_password ) 2>/dev/null; then
             echo "FAIL: short WEBADMIN_PASSWORD accepted" >&2; exit 1
           fi
-          # Digest format pinned to what the dashboard expects: base64(MD5(pw)),
-          # verified against the known vector for "admin".
           hex="$(printf '%s' admin | md5sum)"; hex="${hex%% *}"
           b64="$(printf '%b' "$(printf '%s' "$hex" | sed 's/\(..\)/\\x\1/g')" | base64)"
           [[ "$b64" == "ISMvKXpXpadDiUoOSoAfww==" ]] || { echo "FAIL: md5-base64 digest vector" >&2; exit 1; }
@@ -115,14 +103,8 @@ jobs:
           tmp="$(mktemp -d)"
           trap 'rm -rf "$tmp"' EXIT
           port=18087
-          # Fake telnet endpoint: tolerate probe connections, record every
-          # byte of the first connection that sends data, reply, then close
-          # (the EOF ends the helper instead of its timeout).
           python3 scripts/fake-telnet-server.py "$port" "$tmp/received.bin" &
           server_pid=$!
-          # Tear down the listener on every exit path (set -e aborts before
-          # any later line on failure); without this a failed telnet_session
-          # orphans the python process and its listening socket.
           cleanup() { kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true; }
           trap cleanup EXIT
           source "$GITHUB_WORKSPACE/scripts/lib-env.sh"
@@ -139,16 +121,11 @@ jobs:
       - name: Validate Containerfile structure
         run: |
           set -euo pipefail
-          # Required directives for a working image: base image, entrypoint
-          # copy and exec bit, shared telnet validation lib copy (sourced by
-          # the entrypoint), entrypoint array.
           grep -Eq '^FROM[[:space:]]+' Containerfile
           grep -Eq '^COPY[[:space:]]+entrypoint\.sh' Containerfile
           grep -Eq '^COPY[[:space:]]+scripts/lib-env\.sh' Containerfile
           grep -Eq '^ENTRYPOINT[[:space:]]+\[' Containerfile
           test -x entrypoint.sh || { echo "entrypoint.sh is not executable" >&2; exit 1; }
-          # No unknown directive keywords (mistyped instructions would silently
-          # be treated as shell commands in a RUN).
           while read -r kw; do
             case "$kw" in
               FROM|RUN|COPY|ENTRYPOINT|USER) ;;
@@ -162,8 +139,6 @@ jobs:
           set -euo pipefail
           python3 scripts/check-config-xml.py \
             config/serverconfig.tmpl.xml config/serveradmin_seed.xml
-          # Render the template the same way entrypoint.sh does and require the
-          # result to be valid XML with no leftover placeholders.
           sed -e 's|@TELNET_PASSWORD@|retest|g' \
               -e 's|@TELNET_PORT@|8087|g' \
               -e 's|@USERDATA_DIR@|/root/.local/share/7DaysToDie|g' \
@@ -173,3 +148,34 @@ jobs:
             exit 1
           fi
           python3 scripts/check-config-xml.py /tmp/serverconfig.xml
+
+  coverage-badge:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kcov
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends kcov
+      - run: make coverage
+      - run: python3 scripts/coverage_badge.py coverage.cobertura.xml "$RUNNER_TEMP/coverage.svg"
+      - name: Publish the badge to the badges branch
+        run: |
+          set -euo pipefail
+          url="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git ls-remote --exit-code --heads origin badges >/dev/null 2>&1; then
+            git clone --depth 1 --branch badges "$url" badge-repo
+          else
+            git init -q -b badges badge-repo
+          fi
+          cp "$RUNNER_TEMP/coverage.svg" badge-repo/
+          cd badge-repo
+          git remote add origin "$url"
+          git config user.name "hordeforge-ci"
+          git config user.email "ci@hordeforge.noreply.github.com"
+          git add coverage.svg
+          git diff --cached --quiet || git commit -m "update coverage badge"
+          git push origin badges
