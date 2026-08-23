@@ -30,6 +30,8 @@ rm -rf "$ROOT/mods/"*
 for name in "${ENABLED[@]}"; do
   if [[ -d "$ROOT/mods-available/$name" ]]; then
     cp -a "$ROOT/mods-available/$name" "$ROOT/mods/$name"
+  else
+    echo "WARN: enabled mod $name not staged (missing in mods-available/); server will start without it" >&2
   fi
 done
 

@@ -15,15 +15,28 @@ TELNET_PASSWORD="${TELNET_PASSWORD:-retest}"
 
 current() {
   if [[ ! -f "$CFG" ]]; then echo "missing"; return 1; fi
-  grep -q '"Enabled"[[:space:]]*:[[:space:]]*true' "$CFG" && echo "on" || echo "off"
+  # Anchor like set_state: only the top-level flag counts, otherwise any
+  # group-level Enabled (AiLod/Gc/...) makes a disabled mod read as "on".
+  grep -Eq '^  "Enabled"[[:space:]]*:[[:space:]]*true([[:space:]]*,?$)' "$CFG" && echo "on" || echo "off"
 }
 
 set_state() {
   local was
-  was="$(current || echo unknown)"
+  if [[ ! -f "$CFG" ]]; then
+    echo "FATAL: $CFG not found; is EfficientServer staged and enabled?" >&2
+    exit 1
+  fi
+  was="$(current)"
   # Top-level "Enabled" only (2-space indent); the group-level Enabled flags
   # (AiLod/DynamicMesh/Gc/Governor/TickGuard/...) keep their shipped values.
   sed -i "s/^  \"Enabled\"[[:space:]]*:[[:space:]]*\(true\|false\)/  \"Enabled\": $1/" "$CFG"
+  # Verify the edit landed: a config reformatted by a future mod build would
+  # make the sed a silent no-op, and restarting the container would change
+  # nothing while reporting success.
+  if ! grep -Eq "^  \"Enabled\"[[:space:]]*:[[:space:]]*$1([[:space:]]*,?\$)" "$CFG"; then
+    echo "FATAL: failed to set top-level \"Enabled\": $1 in $CFG (state after edit: $(current)); config format changed?" >&2
+    exit 1
+  fi
   echo "EfficientServer -> $1 (was $was)"
 }
 

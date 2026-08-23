@@ -13,7 +13,14 @@ HOST="${SEVENDTD_SERVER_HOST:-192.168.0.100}"
 SSH_USER="${SEVENDTD_SERVER_USER:-maci}"
 DEST_DIR="${SEVENDTD_SERVER_DIR:-/home/${SSH_USER}/7dtd-server}"
 RESTART=0
-[[ "${1:-}" == "--restart" ]] && RESTART=1
+case "${1:-}" in
+  "") ;;
+  --restart) RESTART=1 ;;
+  *)
+    echo "usage: $0 [--restart]" >&2
+    exit 1
+    ;;
+esac
 
 "$ROOT/scripts/stage_mods.sh"
 

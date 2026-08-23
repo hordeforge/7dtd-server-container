@@ -25,13 +25,40 @@ TELNET_PORT="${TELNET_PORT:-8087}"
 
 log() { echo "[entrypoint] $*"; }
 
+fatal() { echo "[entrypoint] FATAL: $*" >&2; exit 1; }
+
+# The password is substituted into serverconfig.xml via sed (delimiter |,
+# replacement metachars & and \) and embedded single-quoted into the telnet
+# helpers of run.sh/perf.sh on the host. Reject anything that would corrupt
+# either path instead of producing a broken config later.
+check_telnet_password() {
+  case "$TELNET_PASSWORD" in
+    *'\'*|*'|'*|*'&'*|*"'"*|*[![:print:]]*)
+      fatal "TELNET_PASSWORD contains a character that breaks config rendering or telnet clients; avoid backslash, |, &, ', and control characters"
+      ;;
+  esac
+}
+
 install_or_update() {
-  log "steamcmd: install/validate app $STEAM_APPID into $GAME_DIR"
-  "$STEAMCMD" +force_install_dir "$GAME_DIR" \
-    +login anonymous +app_update "$STEAM_APPID" validate +quit
+  local attempt rc max_attempts=3
+  for attempt in 1 2 3; do
+    rc=0
+    log "steamcmd: install/validate app $STEAM_APPID into $GAME_DIR (attempt $attempt/$max_attempts)"
+    "$STEAMCMD" +force_install_dir "$GAME_DIR" \
+      +login anonymous +app_update "$STEAM_APPID" validate +quit || rc=$?
+    (( rc == 0 )) && break
+    # Transient Steam network errors are common; app_update validate is
+    # idempotent, so retrying is safe. Bounded so a persistent failure exits.
+    if (( attempt < max_attempts )); then
+      log "steamcmd exited $rc; retrying in $((attempt * 10))s"
+      sleep $((attempt * 10))
+    fi
+  done
+  if (( rc != 0 )); then
+    fatal "steamcmd failed after $max_attempts attempts (app $STEAM_APPID, last exit $rc)"
+  fi
   if [[ ! -x "$GAME_DIR/7DaysToDieServer.x86_64" ]]; then
-    log "FATAL: steamcmd finished but 7DaysToDieServer.x86_64 is missing in $GAME_DIR" >&2
-    exit 1
+    fatal "steamcmd finished but 7DaysToDieServer.x86_64 is missing in $GAME_DIR"
   fi
 }
 
@@ -51,6 +78,9 @@ render_config() {
       -e "s|@TELNET_PORT@|${TELNET_PORT}|g" \
       -e "s|@USERDATA_DIR@|${USERDATA_DIR}|g" \
       /config/serverconfig.tmpl.xml > "$GAME_DIR/serverconfig.xml"
+  if grep -q '@TELNET_PASSWORD@\|@TELNET_PORT@\|@USERDATA_DIR@' "$GAME_DIR/serverconfig.xml"; then
+    fatal "unrendered placeholders remain in $GAME_DIR/serverconfig.xml; template mismatch"
+  fi
   # The server regenerates an empty serveradmin.xml on fresh saves; re-seed the
   # dashboard admin + webuser once so the APM panel is reachable after wipes.
   if [[ ! -f "$USERDATA_DIR/Saves/serveradmin.xml" ]]; then
@@ -80,7 +110,12 @@ sync_mods() {
 }
 
 mkdir -p "$GAME_DIR" "$USERDATA_DIR/Logs"
-install_or_update
+check_telnet_password
+if [[ "$UPDATE" == "1" || ! -x "$GAME_DIR/7DaysToDieServer.x86_64" ]]; then
+  install_or_update
+else
+  log "STEAMCMD_UPDATE=0: skipping steamcmd (server binary present)"
+fi
 if [[ "$INSTALL_ONLY" == "1" ]]; then
   log "STEAMCMD_ONLY=1: install/update complete, exiting"
   exit 0

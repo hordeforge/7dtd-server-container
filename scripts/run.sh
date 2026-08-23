@@ -53,6 +53,9 @@ start() {
 }
 
 install_only() {
+  # Same stale-name guard start() applies; a crashed prior --rm run can leave
+  # the name behind and podman refuses to reuse it.
+  podman rm -f "$NAME-install" 2>/dev/null || true
   podman run --rm --name "$NAME-install" "${COMMON[@]}" "$IMAGE"
 }
 
@@ -63,14 +66,22 @@ stop() {
   # A readiness pre-check avoids a stale /dev/tcp session racing a container
   # that was just (re)started and answering telnet on the same host port.
   if podman ps --format '{{.Names}}' | grep -qx "$NAME"; then
+    echo "requesting save + shutdown via telnet ..."
     if timeout 3 bash -c "exec 3<>/dev/tcp/127.0.0.1/${TELNET_PORT}" >/dev/null 2>&1; then
       timeout 10 bash -c "exec 3<>/dev/tcp/127.0.0.1/${TELNET_PORT}; printf '${TELNET_PASSWORD}\nshutdown\n' >&3; cat <&3" \
         >/dev/null 2>&1 || true
+    else
+      echo "telnet not reachable on $TELNET_PORT; falling back to forced stop"
     fi
+    # podman ps only lists running containers, so poll State.Running directly;
+    # this breaks out as soon as the game exits instead of waiting forever.
     for _ in $(seq 1 45); do
-      podman ps --format '{{.Status}}' --filter "name=$NAME" | grep -q "Exited" && break
+      [[ "$(podman inspect -f '{{.State.Running}}' "$NAME" 2>/dev/null)" != "true" ]] && break
       sleep 2
     done
+    if [[ "$(podman inspect -f '{{.State.Running}}' "$NAME" 2>/dev/null)" == "true" ]]; then
+      echo "container still running after telnet shutdown; forcing stop"
+    fi
   fi
   podman stop -t 30 "$NAME" 2>/dev/null || true
 }
