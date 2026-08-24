@@ -33,6 +33,22 @@ lint:
 	mypy && echo "mypy strict OK"
 	set -euo pipefail; \
 	yamllint $(YAML) && echo "yamllint OK"
+	# Containerfile structure: entrypoint.sh sources lib-env.sh from the exact
+	# path this file COPYs it to, so the image shape is load-bearing; pin it
+	# here so dev and CI run one identical gate (single-owner rule as above).
+	set -euo pipefail; \
+	grep -Eq '^FROM[[:space:]]+' Containerfile; \
+	grep -Eq '^COPY[[:space:]]+entrypoint\.sh' Containerfile; \
+	grep -Eq '^COPY[[:space:]]+scripts/lib-env\.sh' Containerfile; \
+	grep -Eq '^ENTRYPOINT[[:space:]]+\[' Containerfile; \
+	test -x entrypoint.sh || { echo "entrypoint.sh is not executable" >&2; exit 1; }; \
+	while read -r kw; do \
+	  case "$$kw" in \
+	    FROM|RUN|COPY|ENTRYPOINT|USER) ;; \
+	    *) echo "unknown Containerfile directive: $$kw" >&2; exit 1 ;; \
+	  esac; \
+	done < <(awk '/^[A-Z]+[[:space:]]/ {print $$1}' Containerfile | sort -u); \
+	echo "Containerfile OK"
 
 test:
 	bash scripts/test_lib_env.sh

@@ -5,10 +5,14 @@ Tolerates probe connections, records every byte of the first connection that
 sends data, replies once, then closes (the EOF ends the helper instead of its
 timeout) and writes the recorded bytes to the output path.
 
-Usage: fake-telnet-server.py PORT OUTPUT_PATH
+Usage: fake-telnet-server.py PORT OUTPUT_PATH [--hold]
 
 PORT 0 binds an ephemeral port and prints the chosen port on stdout (flushed)
 once listening; the test reads it instead of racing on a fixed port.
+
+--hold accepts the first connection and then goes silent forever (never
+replies, never closes): the endpoint behind the bounded-session test, which
+asserts the client side ends itself at its timeout instead of hanging.
 
 Framing is quiescence-based: input is collected until QUIET seconds pass with
 nothing new or the peer closes, so the exchange stays byte-exact no matter how
@@ -19,16 +23,25 @@ quiescence are both just end-of-input signals here.
 
 import socket
 import sys
+import time
 
 QUIET = 0.4  # seconds of silence that end input collection
+HOLD_SECS = 300  # --hold silence span; the client timeout must fire long before
 
 port, out = int(sys.argv[1]), sys.argv[2]
+hold = "--hold" in sys.argv[3:]
 srv = socket.socket()
 srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 srv.bind(("127.0.0.1", port))
 srv.listen(1)
 if port == 0:
     print(srv.getsockname()[1], flush=True)
+if hold:
+    conn, _ = srv.accept()
+    time.sleep(HOLD_SECS)
+    conn.close()
+    srv.close()
+    sys.exit(0)
 while True:
     conn, _ = srv.accept()
     buf = bytearray()

@@ -6,7 +6,8 @@
 #   reject_unsafe_*    every forbidden character class plus length rules
 #   init_telnet_env    default fill + validation wiring (host and container)
 #   check_telnet_port  numeric/range boundaries incl. the octal leading-zero bug
-#   telnet_session     real wire bytes against a fake telnet endpoint
+#   telnet_session     real wire bytes against a fake telnet endpoint, and
+#                      self-termination at its timeout against a silent one
 # Each block runs in a subshell so a FATAL exit marks only that case failed.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -171,9 +172,11 @@ echo "telnet port rules OK"
 if ( TELNET_PASSWORD='a|b' TELNET_PORT=8087 init_telnet_env ) 2>/dev/null; then
   echo "FAIL: init_telnet_env accepted unsafe TELNET_PASSWORD" >&2; exit 1
 fi
-if ( TELNET_PASSWORD='retest' TELNET_PORT='abc' init_telnet_env ) 2>/dev/null; then
-  echo "FAIL: init_telnet_env accepted non-numeric TELNET_PORT" >&2; exit 1
-fi
+for bad in 'abc' '65536'; do
+  if ( TELNET_PASSWORD='retest' TELNET_PORT="$bad" init_telnet_env ) 2>/dev/null; then
+    echo "FAIL: init_telnet_env accepted invalid TELNET_PORT: '$bad'" >&2; exit 1
+  fi
+done
 echo "init_telnet_env validation OK"
 
 # telnet_session guards its own boundary: a non-numeric port would make
@@ -190,13 +193,14 @@ done
 echo "telnet_session port guard OK"
 
 # Wire-level integration: ephemeral port from the fake server (no fixed-port
-# collisions); the server prints its port once listening. Sets FAKE_PORT and
-# registers the pid for the EXIT cleanup hook; not run in a command
-# substitution so those assignments survive.
-start_fake_server() { # received_bytes_path
+# collisions); the server prints its port once listening. Extra arguments are
+# forwarded to the fake server (e.g. --hold for the silent endpoint). Sets
+# FAKE_PORT and registers the pid for the EXIT cleanup hook; not run in a
+# command substitution so those assignments survive.
+start_fake_server() { # received_bytes_path [fake-server args...]
   local port_file="$tmp/port.txt"
   : > "$port_file"
-  python3 "$ROOT/scripts/fake-telnet-server.py" 0 "$1" >"$port_file" &
+  python3 "$ROOT/scripts/fake-telnet-server.py" 0 "$@" >"$port_file" &
   server_pid=$!
   for _ in $(seq 1 100); do
     [[ -s "$port_file" ]] && break
@@ -241,3 +245,24 @@ printf 'retest\napm status\nquit\n' > "$tmp/expected2.bin"
 cmp -s "$tmp/received2.bin" "$tmp/expected2.bin" || {
   echo "FAIL: wrong bytes on the wire (multi-command; got $(od -c "$tmp/received2.bin" | head -3))" >&2; exit 1; }
 echo "telnet_session multi-command OK"
+
+# Bounded session: an endpoint that accepts and then stays silent (the wedged
+# server case) must end the session at its timeout, rc 124 from timeout(1) --
+# never hang. The graceful-stop budget math (run.sh stop, and TimeoutStopSec
+# in systemd/7dtd-server.container, pinned by test_systemd_unit.py) assumes
+# this bound holds. The inner session timeout is 2s; an outer 8s guard turns
+# a removed inner bound into a fast failed check (elapsed > 4) instead of a
+# hung suite.
+start_fake_server ignored.bin --hold
+SECONDS=0
+session_rc=0
+reply="$(timeout 8 bash -c "
+  set -euo pipefail
+  source '$ROOT/scripts/lib-env.sh'
+  telnet_session '$FAKE_PORT' retest 'apm status' 2
+" 2>/dev/null)" || session_rc=$?
+[[ "$session_rc" == 124 ]] || {
+  echo "FAIL: silent endpoint did not end the session at its timeout (rc $session_rc)" >&2; exit 1; }
+(( SECONDS <= 4 )) || { echo "FAIL: session outlived its ${SECONDS}s budget" >&2; exit 1; }
+[[ -z "${reply:-}" ]] || { echo "FAIL: silent endpoint produced a reply" >&2; exit 1; }
+echo "telnet_session bounded timeout OK"

@@ -27,10 +27,11 @@ jobs:
           python3 -m pip install --disable-pip-version-check
           --require-hashes -r requirements-lint.txt
 
-      - name: Lint shell + Python + workflow YAML (make lint)
-        # make lint owns the script list and every check (bash -n, shellcheck,
-        # reference integrity, ruff rules/format, mypy strict, yamllint);
-        # running it here instead of inlining keeps CI from drifting from dev.
+      - name: Lint shell + Python + workflow YAML + Containerfile (make lint)
+        # make lint owns every check (bash -n, shellcheck, reference
+        # integrity, ruff rules/format, mypy strict, yamllint, Containerfile
+        # structure); running it here instead of inlining keeps CI from
+        # drifting from dev.
         run: make lint
 
       - name: Test lib-env (.env loader, password rules, telnet_session)
@@ -38,22 +39,6 @@ jobs:
         # assertions (make coverage runs the same script under kcov); running
         # it here instead of inlining the checks keeps the two from drifting.
         run: make test
-
-      - name: Validate Containerfile structure
-        run: |
-          set -euo pipefail
-          grep -Eq '^FROM[[:space:]]+' Containerfile
-          grep -Eq '^COPY[[:space:]]+entrypoint\.sh' Containerfile
-          grep -Eq '^COPY[[:space:]]+scripts/lib-env\.sh' Containerfile
-          grep -Eq '^ENTRYPOINT[[:space:]]+\[' Containerfile
-          test -x entrypoint.sh || { echo "entrypoint.sh is not executable" >&2; exit 1; }
-          while read -r kw; do
-            case "$kw" in
-              FROM|RUN|COPY|ENTRYPOINT|USER) ;;
-              *) echo "unknown Containerfile directive: $kw" >&2; exit 1 ;;
-            esac
-          done < <(awk '/^[A-Z]+[[:space:]]/ {print $1}' Containerfile | sort -u)
-          echo "Containerfile OK"
 
       # Raw + rendered template validation lives only in make test
       # (scripts/test_config_templates.py pins the token contract); no inline

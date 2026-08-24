@@ -64,9 +64,14 @@ check("0.98 renders 98%", rc == 0 and svg_texts(root) == ["coverage", "98%"])
 rc, root = render(None)
 check("missing line-rate defaults to 0%", rc == 0 and svg_texts(root) == ["coverage", "0%"])
 
-with contextlib.redirect_stderr(io.StringIO()):
+err = io.StringIO()
+with contextlib.redirect_stderr(err):
     usage_rc = coverage_badge.main(["coverage_badge"])
 check("usage error exits 2", usage_rc == 2)
+# The usage line must name both operands so a wrong invocation is diagnosable
+# without opening the script (same contract the check-config-xml tests pin).
+usage = err.getvalue()
+check("usage line names both operands", "COBERTURA_XML" in usage and "OUTPUT.svg" in usage)
 
 
 # Failure paths must exit 1 with a message naming the input, never a raw

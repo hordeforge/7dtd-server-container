@@ -2,7 +2,7 @@
 """Unit tests pinning the quadlet unit contract (systemd/7dtd-server.container).
 
 Methodology: the unit is the durable lifecycle and it must not drift from the
-decisions the ad-hoc lifecycle (scripts/run.sh) owns. Two contracts are pinned
+decisions the ad-hoc lifecycle (scripts/run.sh) owns. The contracts pinned
 here:
 
   graceful stop   the game ignores SIGTERM (no world save), so every
@@ -15,6 +15,10 @@ here:
                   scripts/lib-env.sh (baked into the image); hardcoding them
                   as Environment= lines here would create a second default
                   that can silently drift.
+  durability      Restart=always brings a crashed server back on its own,
+                  Init=true reaps orphans for the whole uptime, and
+                  Network=host is what makes the game/telnet/dashboard ports
+                  LAN-reachable at all.
 
 Each failed check prints a FAIL line; the process exits nonzero if any failed.
 """
@@ -66,6 +70,17 @@ check(
 
 init_lines = re.findall(r"^Init=(.*)$", text, re.MULTILINE)
 check("Init=true (catatonit zombie reaper, same as start() in run.sh)", init_lines == ["true"])
+
+# Durability: a crashed or host-rebooted server must come back on its own
+# (AGENTS.md: the quadlet is the durable lifecycle), and the game/telnet/
+# dashboard ports are only reachable on the LAN through host networking.
+restart_lines = re.findall(r"^Restart=(.*)$", text, re.MULTILINE)
+check("Restart=always (a dead server must come back on its own)", restart_lines == ["always"])
+network_lines = re.findall(r"^Network=(.*)$", text, re.MULTILINE)
+check(
+    "Network=host (game 26900 / telnet / dashboard ports are LAN-reachable)",
+    network_lines == ["host"],
+)
 
 if failed_checks:
     sys.exit(1)
