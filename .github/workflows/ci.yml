@@ -8,29 +8,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Syntax-check shell scripts
-        run: |
-          set -euo pipefail
-          for f in entrypoint.sh start.sh stop.sh scripts/*.sh; do
-            bash -n "$f"
-            echo "bash -n OK: $f"
-          done
-
-      - name: Static-analyze shell scripts (shellcheck)
-        run: |
-          set -euo pipefail
-          for f in entrypoint.sh start.sh stop.sh scripts/*.sh; do
-            shellcheck -x "$f"
-            echo "shellcheck OK: $f"
-          done
-
-      - name: Verify internal script references exist
-        run: |
-          set -euo pipefail
-          for ref in $(grep -hoE 'scripts/[-a-z_]+\.sh' *.sh scripts/*.sh | sort -u); do
-            test -f "$ref" || { echo "missing referenced script: $ref" >&2; exit 1; }
-          done
-          echo "all internal script references exist"
+      - name: Lint shell scripts (bash -n, shellcheck, reference integrity)
+        # make lint owns the script list and the checks; running it here
+        # instead of inlining the loops keeps CI from drifting from local dev.
+        run: make lint
 
       - name: Test lib-env (.env loader, password rules, telnet_session)
         # scripts/test_lib_env.sh is the single source of truth for these

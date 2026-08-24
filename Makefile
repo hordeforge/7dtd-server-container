@@ -1,6 +1,23 @@
 ROOT := $(CURDIR)
 
-.PHONY: test coverage
+# Every shell script CI lints: one owner of the list so a new script is
+# covered by bash -n, shellcheck, and the reference check automatically.
+SCRIPTS := entrypoint.sh start.sh stop.sh $(sort $(wildcard scripts/*.sh))
+
+.DEFAULT_GOAL := test
+.PHONY: lint test coverage
+
+lint:
+	set -euo pipefail; \
+	for f in $(SCRIPTS); do bash -n "$$f" && echo "bash -n OK: $$f"; done
+	set -euo pipefail; \
+	for f in $(SCRIPTS); do shellcheck -x "$$f" && echo "shellcheck OK: $$f"; done
+	set -euo pipefail; \
+	for ref in $$(grep -hoE 'scripts/[-a-z_]+\.sh' $(SCRIPTS) | sort -u); do \
+	  test -f "$$ref" || { echo "missing referenced script: $$ref" >&2; exit 1; }; \
+	done; \
+	echo "all internal script references exist"
+
 test:
 	bash scripts/test_lib_env.sh
 	python3 scripts/test_coverage_badge.py
