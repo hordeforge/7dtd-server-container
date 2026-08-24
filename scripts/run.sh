@@ -104,7 +104,7 @@ stop() {
   # command, wait for the container to exit, then force-stop as a fallback.
   # A readiness pre-check avoids a stale /dev/tcp session racing a container
   # that was just (re)started and answering telnet on the same host port.
-  if podman ps --format '{{.Names}}' | grep -qx "$NAME"; then
+  if podman ps --format '{{.Names}}' | grep -Fx "$NAME"; then
     echo "requesting save + shutdown via telnet ..."
     if telnet_probe "$TELNET_PORT" 3 >/dev/null 2>&1; then
       telnet_session "$TELNET_PORT" "$TELNET_PASSWORD" 'shutdown' 10 >/dev/null 2>&1 || true
@@ -116,7 +116,7 @@ stop() {
     # when the 90s budget runs out with the container still up, which is the
     # force-stop signal; any other failure (e.g. container already gone)
     # falls through silently to the idempotent stop below.
-    wait_rc=0
+    local wait_rc=0
     timeout 90 podman wait "$NAME" >/dev/null 2>&1 || wait_rc=$?
     if [[ "$wait_rc" == 124 ]]; then
       echo "container still running after telnet shutdown; forcing stop"
@@ -126,7 +126,7 @@ stop() {
   # (the normal no-op) or real trouble; a real failure must not read as
   # success, because the world save may never have happened.
   if ! podman stop -t 30 "$NAME" >/dev/null 2>&1; then
-    if podman ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$NAME"; then
+    if podman ps -a --format '{{.Names}}' 2>/dev/null | grep -Fx "$NAME"; then
       echo "FATAL: podman stop failed but $NAME still exists; check podman logs/events" >&2
       exit 1
     fi

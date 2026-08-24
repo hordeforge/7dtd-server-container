@@ -115,10 +115,9 @@ seed_admin_file() {
     minted=1
   fi
   check_webadmin_password
-  local hex b64
-  hex="$(printf '%s' "$WEBADMIN_PASSWORD" | md5sum)"
-  hex="${hex%% *}"
-  b64="$(printf '%b' "$(printf '%s' "$hex" | sed 's/\(..\)/\\x\1/g')" | base64)"
+  # Digest rendering lives in the shared lib (same copy the unit test pins).
+  local b64
+  b64="$(webadmin_password_digest "$WEBADMIN_PASSWORD")"
   # Atomic rename, same rationale as render_config. Extra weight here: the
   # seed is skipped whenever serveradmin.xml exists, so a truncated in-place
   # write would persist forever and silently lock the dashboard out.

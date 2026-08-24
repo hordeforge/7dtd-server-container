@@ -98,7 +98,7 @@ init_telnet_env() {
 # timeout or EOF. Callers must have run init_telnet_env first (the port is
 # re-checked here). The payload is a printf format
 # fragment; separate commands with \n, e.g. 'shutdown' or 'apm status\nquit'.
-telnet_session() { # port password payload timeout_seconds
+telnet_session() { # port password payload timeout_secs
   local port="$1" password="$2" payload="$3" timeout_secs="$4"
   # An empty or non-numeric port would make /dev/tcp fall back to the http
   # port and hang the session; callers run check_telnet_port, this pins the
@@ -127,4 +127,14 @@ telnet_probe() { # port timeout_seconds
   [[ "$port" =~ ^[0-9]+$ ]] || return 1
   # shellcheck disable=SC2016  # non-expansion is the point: port passed as "$1" to bash -c
   timeout "$2" bash -c 'exec 3<>/dev/tcp/127.0.0.1/$1' telnet_probe "$port"
+}
+
+# Render a webadmin password as the base64 MD5 digest the dashboard expects in
+# serveradmin.xml (<user pass="...">). One owner shared by the entrypoint seed
+# path and its test vector, so the two cannot drift apart.
+webadmin_password_digest() { # password; digest on stdout
+  local hex
+  hex="$(printf '%s' "$1" | md5sum)"
+  hex="${hex%% *}"
+  printf '%b' "$(printf '%s' "$hex" | sed 's/\(..\)/\\x\1/g')" | base64
 }

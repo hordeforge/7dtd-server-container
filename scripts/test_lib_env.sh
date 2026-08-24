@@ -124,8 +124,9 @@ fi
 if ! ( WEBADMIN_PASSWORD='12345678' check_webadmin_password ) 2>/dev/null; then
   echo "FAIL: 8-character WEBADMIN_PASSWORD rejected" >&2; exit 1
 fi
-hex="$(printf '%s' admin | md5sum)"; hex="${hex%% *}"
-b64="$(printf '%b' "$(printf '%s' "$hex" | sed 's/\(..\)/\\x\1/g')" | base64)"
+# The digest renderer must produce the exact bytes the dashboard expects;
+# the golden vector pins md5("admin") base64 independent of the implementation.
+b64="$(webadmin_password_digest admin)"
 [[ "$b64" == "ISMvKXpXpadDiUoOSoAfww==" ]] || { echo "FAIL: md5-base64 digest vector" >&2; exit 1; }
 echo "webadmin password rules OK"
 
