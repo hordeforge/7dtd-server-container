@@ -11,7 +11,8 @@ jobs:
 
       - name: Install pinned Python analyzers
         # Same versions as the local dev machine so `make lint` enforces
-        # identical rules here and locally.
+        # identical rules here and locally. (shellcheck and bash come with the
+        # runner image and are not pinned; expect minor version drift there.)
         run: >
           python3 -m pip install --disable-pip-version-check
           ruff==0.16.4 mypy==2.1.0 yamllint==1.38.0

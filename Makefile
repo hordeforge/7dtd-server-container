@@ -8,7 +8,9 @@ SCRIPTS := entrypoint.sh start.sh stop.sh $(sort $(wildcard scripts/*.sh))
 # Python helpers + CI YAML get the same treatment (ruff, mypy, yamllint);
 # their configuration lives in pyproject.toml / .yamllint.yaml.
 PY := $(sort $(wildcard scripts/*.py))
-YAML := $(sort $(wildcard .github/workflows/*.yml))
+# The yamllint config itself is YAML; a broken config must fail lint, not
+# silently fall back to defaults.
+YAML := $(sort $(wildcard .github/workflows/*.yml)) .yamllint.yaml
 
 .DEFAULT_GOAL := test
 .PHONY: lint test coverage

@@ -23,6 +23,9 @@ select = [
     "PERF",
     "PLW", "PLE", "PLC",
     "FLY", "ICN", "PIE", "TID", "YTT", "RSE", "RET",
+    "A",    # no shadowing builtins
+    "SLF",  # no reaching into other modules' private names
+    "RUF",  # ruff-native: unused noqa, implicit Optional, ambiguous unicode
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -34,3 +37,6 @@ select = [
 strict = true
 python_version = "3.10"
 files = ["scripts"]
+# Not part of `strict`: flags code that can never run (dead branches after
+# exhaustive returns, impossible conditions).
+warn_unreachable = true
