@@ -107,7 +107,17 @@ stop() {
   if podman ps --format '{{.Names}}' | grep -Fx "$NAME"; then
     echo "requesting save + shutdown via telnet ..."
     if telnet_probe "$TELNET_PORT" 3 >/dev/null 2>&1; then
-      telnet_session "$TELNET_PORT" "$TELNET_PASSWORD" 'shutdown' 10 >/dev/null 2>&1 || true
+      # A failed shutdown request (rejected password, dropped connection) must
+      # name its cause here: swallowing it would surface only as the 90s wait
+      # timeout below, and the resulting forced stop skips the world save --
+      # the exact loss this function exists to prevent.
+      local reply
+      if reply="$(telnet_session "$TELNET_PORT" "$TELNET_PASSWORD" 'shutdown' 10 2>&1)"; then
+        :
+      else
+        echo "WARN: telnet shutdown request failed; forcing stop without a world save" >&2
+        printf '%s\n' "${reply:-<no output>}" | tail -n 3 >&2
+      fi
     else
       echo "telnet not reachable on $TELNET_PORT; falling back to forced stop"
     fi
