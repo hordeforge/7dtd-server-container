@@ -3,6 +3,11 @@ name: ci
 
 on: [push, pull_request]
 
+# Least privilege by default: the lint/test/check job needs no token access.
+# The badge job below overrides this with contents: write for its push.
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest

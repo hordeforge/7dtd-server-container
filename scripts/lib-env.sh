@@ -107,15 +107,18 @@ telnet_session() { # port password payload timeout_secs
     echo "FATAL: telnet_session: port must be numeric (got '$port')" >&2
     exit 1
   }
-  # Values travel as positional parameters, never inside the command string,
-  # so nothing needs shell quoting. The payload keeps %b; the password is
-  # data, so %s, which would otherwise mangle a '%' in it.
-  # shellcheck disable=SC2016  # non-expansion is the point: values are passed as "$1".."$4" below
-  timeout "$timeout_secs" bash -c '
-    exec 3<>/dev/tcp/127.0.0.1/$1
-    printf "%s\n%b\n" "$2" "$3" >&3
-    cat <&3
-  ' telnet_session "$port" "$password" "$payload"
+  # Values travel as environment variables, never as arguments: argv is
+  # world-readable via /proc/<pid>/cmdline for the whole session, while
+  # environ is readable only by the owning user. The payload keeps %b; the
+  # password is data, so %s, which would otherwise mangle a '%' in it.
+  # shellcheck disable=SC2016  # non-expansion is the point: values reach bash -c through the environment below
+  TELNET_SESSION_PORT="$port" TELNET_SESSION_PASSWORD="$password" \
+    TELNET_SESSION_PAYLOAD="$payload" \
+    timeout "$timeout_secs" bash -c '
+      exec 3<>/dev/tcp/127.0.0.1/"$TELNET_SESSION_PORT"
+      printf "%s\n%b\n" "$TELNET_SESSION_PASSWORD" "$TELNET_SESSION_PAYLOAD" >&3
+      cat <&3
+    '
 }
 
 # Reachability probe without authenticating: does something accept a TCP

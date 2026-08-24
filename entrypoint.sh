@@ -78,6 +78,11 @@ EOF
 
 render_config() {
   log "render serverconfig.xml (telnet port $TELNET_PORT)"
+  # These renders embed credentials (TelnetPassword here, MD5 digests in
+  # serveradmin.xml); 077 keeps both off the world-readable default so other
+  # host accounts cannot read them out of data/. The game runs as this same
+  # user inside the container, so restrictive modes break nothing.
+  umask 077
   # Render to a sibling temp file and rename: a sed killed midway must never
   # leave a truncated serverconfig.xml for the game to choke on at boot.
   local out="$GAME_DIR/.serverconfig.xml.tmp"
@@ -90,6 +95,8 @@ render_config() {
 }
 
 seed_admin_file() {
+  # Credential-bearing output (see render_config for the umask rationale).
+  umask 077
   # The game creates Saves/ on its own first run, but this seed happens
   # before that; without it a fresh host crashes here writing serveradmin.xml.
   mkdir -p "$USERDATA_DIR/Saves"
