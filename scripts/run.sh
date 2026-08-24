@@ -53,14 +53,16 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-STEAMCMD_UPDATE="${STEAMCMD_UPDATE:-1}"
-STEAMCMD_ONLY="${STEAMCMD_ONLY:-0}"
-
 # Telnet values come from the environment or .env, get the shared lab defaults
 # if still unset, and are validated before any container starts (the password
 # is sent by telnet_session in stop() and rendered into serverconfig.xml
 # inside the container; rationale and rules: scripts/lib-env.sh).
 init_telnet_env
+
+# Same boundary treatment for the steamcmd switches: defaults applied, values
+# pinned to {0,1}. A typo like STEAMCMD_UPDATE=true must fail here instead of
+# silently disabling the per-boot depot validation (init_steamcmd_env).
+init_steamcmd_env
 
 # Optional dashboard webuser password: when provided it is validated here so a
 # bad value fails on the host instead of mid-boot in the container. When
@@ -178,12 +180,15 @@ stop() {
   # that was just (re)started and answering telnet on the same host port.
   if podman ps --format '{{.Names}}' | grep -Fx "$NAME"; then
     echo "requesting save + shutdown via telnet ..."
+    # Declared before the branches that fill it: the forced-stop path below
+    # dumps the reply whether or not the probe/session branches ran, and set
+    # -u would abort on an undeclared variable there.
+    local reply=""
     if telnet_probe "$TELNET_PORT" 3 >/dev/null 2>&1; then
       # A failed shutdown request (rejected password, dropped connection) must
       # name its cause here: swallowing it would surface only as the 90s wait
       # timeout below, and the resulting forced stop skips the world save --
       # the exact loss this function exists to prevent.
-      local reply
       if reply="$(telnet_session "$TELNET_PORT" "$TELNET_PASSWORD" 'shutdown' 10 2>&1)"; then
         :
       else
@@ -202,6 +207,13 @@ stop() {
     timeout 90 podman wait "$NAME" >/dev/null 2>&1 || wait_rc=$?
     if [[ "$wait_rc" == 124 ]]; then
       echo "container still running after telnet shutdown; forcing stop"
+      # The server accepted the session but did not shut down (rejected
+      # password, refused command are the usual causes): its own last output
+      # names that cause, so surface the tail instead of leaving the operator
+      # to guess why the save path was skipped.
+      if [[ -n "$reply" ]]; then
+        printf '%s\n' "$reply" | tail -n 3 >&2
+      fi
     fi
   fi
   # Idempotent final stop. Failure means either an already-gone container

@@ -129,6 +129,28 @@ init_telnet_env() {
   check_telnet_port
 }
 
+# Fill unset STEAMCMD_UPDATE/STEAMCMD_ONLY with the committed defaults, then
+# pin both to the documented {0,1} domain. Every reader compares the values
+# literally (run.sh forwards them via podman -e; the entrypoint tests == 1 /
+# == 0), so a natural spelling like STEAMCMD_UPDATE=true would silently mean
+# "skip depot validation on every boot": reject anything outside {0,1} up
+# front, the same boundary treatment init_telnet_env gives its values.
+init_steamcmd_env() {
+  STEAMCMD_UPDATE="${STEAMCMD_UPDATE:-1}"
+  STEAMCMD_ONLY="${STEAMCMD_ONLY:-0}"
+  local name value
+  for name in STEAMCMD_UPDATE STEAMCMD_ONLY; do
+    value="${!name}"
+    case "$value" in
+      0|1) ;;
+      *)
+        echo "FATAL: $name must be 0 or 1 (got '$value')" >&2
+        exit 1
+        ;;
+    esac
+  done
+}
+
 # Single owner of the telnet wire exchange: open one /dev/tcp session to
 # 127.0.0.1, send the password, send the payload, print the reply until
 # timeout or EOF. Callers must have run init_telnet_env first (the port is

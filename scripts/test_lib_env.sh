@@ -5,6 +5,7 @@
 #   load_env_file      literal-value semantics, precedence, malformed lines
 #   reject_unsafe_*    every forbidden character class plus length rules
 #   init_telnet_env    default fill + validation wiring (host and container)
+#   init_steamcmd_env  default fill + strict {0,1} domain for both switches
 #   check_telnet_port  numeric/range boundaries incl. the octal leading-zero bug
 #   telnet_session     real wire bytes against a fake telnet endpoint, and
 #                      self-termination at its timeout against a silent one
@@ -233,6 +234,41 @@ for bad in 'abc' '65536'; do
   fi
 done
 echo "init_telnet_env validation OK"
+
+# init_steamcmd_env: defaults fill, provided values kept, and the strict
+# {0,1} domain. Every reader compares these flags as literal strings, so a
+# natural spelling like STEAMCMD_UPDATE=true must be refused up front instead
+# of silently meaning "skip depot validation every boot".
+(
+  set -euo pipefail
+  source "$ROOT/scripts/lib-env.sh"
+  unset STEAMCMD_UPDATE STEAMCMD_ONLY
+  init_steamcmd_env
+  [[ "${STEAMCMD_UPDATE:-}" == "1" && "${STEAMCMD_ONLY:-}" == "0" ]] || {
+    echo "FAIL: init_steamcmd_env did not apply defaults (got '${STEAMCMD_UPDATE-}'/'${STEAMCMD_ONLY-}')" >&2; exit 1; }
+  # Plain assignments before the call (prefix assignments on a function call
+  # do not persist past the return outside posix mode).
+  STEAMCMD_UPDATE=0 STEAMCMD_ONLY=1
+  init_steamcmd_env
+  [[ "${STEAMCMD_UPDATE:-}" == "0" && "${STEAMCMD_ONLY:-}" == "1" ]] || {
+    echo "FAIL: init_steamcmd_env clobbered provided values" >&2; exit 1; }
+  echo "init_steamcmd_env defaults OK"
+)
+# Both natural truthy/falsy spellings and near-miss numerics must fail:
+# each would pass through podman -e unchanged and silently flip behavior.
+# (An empty value keeps the long-standing ${VAR:-default} fallback, so it is
+# not in the rejected set.)
+for bad in 'true' 'false' 'yes' 'no' '2' '-1' '01' '1x' ' 1'; do
+  if ( STEAMCMD_UPDATE="$bad" init_steamcmd_env ) 2>/dev/null; then
+    echo "FAIL: init_steamcmd_env accepted invalid STEAMCMD_UPDATE: '$bad'" >&2; exit 1
+  fi
+done
+for bad in 'true' 'yes' '0x1' '10'; do
+  if ( STEAMCMD_ONLY="$bad" init_steamcmd_env ) 2>/dev/null; then
+    echo "FAIL: init_steamcmd_env accepted invalid STEAMCMD_ONLY: '$bad'" >&2; exit 1
+  fi
+done
+echo "init_steamcmd_env validation OK"
 
 # telnet_session guards its own boundary: a non-numeric port would make
 # /dev/tcp fall back to another port and hang, so it must exit up front.

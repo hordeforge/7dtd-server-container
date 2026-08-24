@@ -19,8 +19,6 @@ fatal() { echo "[entrypoint] FATAL: $*" >&2; exit 1; }
 # the Containerfile), so a PATH lookup is the one supported resolution.
 STEAMCMD="$(command -v steamcmd)" || fatal "steamcmd not found"
 STEAM_APPID=294420
-UPDATE="${STEAMCMD_UPDATE:-1}"      # 1 = steamcmd validate every start, 0 = skip
-INSTALL_ONLY="${STEAMCMD_ONLY:-0}"  # 1 = install/update then exit (pre-warm)
 
 # Shared telnet defaults + value validation (same rules the host ops scripts
 # use). The lib is shipped into the image by the Containerfile so both sides
@@ -28,6 +26,11 @@ INSTALL_ONLY="${STEAMCMD_ONLY:-0}"  # 1 = install/update then exit (pre-warm)
 # shellcheck disable=SC1091  # the lib lives at this absolute path inside the image, not on the host
 source /usr/local/lib/7dtd-lib-env.sh
 init_telnet_env
+
+# Same boundary for the steamcmd switches (defaults, {0,1} domain): a typo
+# like STEAMCMD_UPDATE=true must fail here instead of silently skipping the
+# per-boot depot validation below (init_steamcmd_env).
+init_steamcmd_env
 
 # Assert every template placeholder was replaced: an unrendered @TOKEN@ means
 # template and render script drifted, which must fail here rather than surface
@@ -210,12 +213,12 @@ sync_mods() {
 }
 
 mkdir -p "$GAME_DIR" "$USERDATA_DIR/Logs"
-if [[ "$UPDATE" == "1" || ! -x "$GAME_DIR/7DaysToDieServer.x86_64" ]]; then
+if [[ "$STEAMCMD_UPDATE" == "1" || ! -x "$GAME_DIR/7DaysToDieServer.x86_64" ]]; then
   install_or_update
 else
   log "STEAMCMD_UPDATE=0: skipping steamcmd (server binary present)"
 fi
-if [[ "$INSTALL_ONLY" == "1" ]]; then
+if [[ "$STEAMCMD_ONLY" == "1" ]]; then
   log "STEAMCMD_ONLY=1: install/update complete, exiting"
   exit 0
 fi

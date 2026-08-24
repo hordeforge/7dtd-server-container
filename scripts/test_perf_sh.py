@@ -17,6 +17,9 @@ top-level and nested "Enabled" flags; then:
   negatives  off without a config, and off against a config whose format
              drifted out of the sed's reach, must fatal-exit naming the
              cause and must not restart the container
+  measure    against an unreachable console must fatal-exit carrying the
+              session's own diagnostics (the connect refusal), not just a
+              generic message
 
 Each failed check prints a FAIL line; the process exits nonzero if any failed.
 """
@@ -24,6 +27,7 @@ Each failed check prints a FAIL line; the process exits nonzero if any failed.
 from __future__ import annotations
 
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -78,11 +82,17 @@ def make_sandbox(tmpdir: Path, config: str | None) -> Path:
     return tmpdir
 
 
-def run_perf(args: list[str], root: Path) -> subprocess.CompletedProcess[bytes]:
+def run_perf(
+    args: list[str], root: Path, extra_env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[bytes]:
     return subprocess.run(
         [str(root / "scripts" / "perf.sh"), *args],
         cwd=root,
-        env={"PATH": "/usr/bin:/bin", "PERF_STUB_LOG": str(root / "restarts.log")},
+        env={
+            "PATH": "/usr/bin:/bin",
+            "PERF_STUB_LOG": str(root / "restarts.log"),
+            **(extra_env or {}),
+        },
         capture_output=True,
         check=False,
         timeout=60,
@@ -159,6 +169,26 @@ with tempfile.TemporaryDirectory() as tmp:
         cfg_path(root).read_text(encoding="utf-8") == reformatted,
     )
     check("drifted off restarted nothing", not (root / "restarts.log").exists())
+
+    # measure against a dead console: the FATAL must carry the session's own
+    # captured output (the connect refusal), so the operator sees what
+    # actually happened instead of only which step failed.
+    root = make_sandbox(Path(tmp) / "measure-dead", CONFIG_ON)
+    probe_sock = socket.socket()
+    probe_sock.bind(("127.0.0.1", 0))
+    dead_port = str(probe_sock.getsockname()[1])
+    probe_sock.close()
+    proc = run_perf(["measure"], root, {"TELNET_PORT": dead_port})
+    err = proc.stderr.decode(errors="replace")
+    check("measure against a dead console fatal-exits", proc.returncode != 0 and "FATAL" in err)
+    check(
+        "measure failure names the port",
+        f"port {dead_port}" in err,
+    )
+    check(
+        "measure failure carries the session's diagnostics",
+        "connection refused" in err.lower(),
+    )
 
 if failed_checks:
     sys.exit(1)

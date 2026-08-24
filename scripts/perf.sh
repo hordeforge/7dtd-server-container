@@ -64,8 +64,12 @@ case "${1:-status}" in
     # Capture the reply before the display pipeline: a failed session
     # (container down, timeout) must print why, not die silently inside the
     # pipe where pipefail surfaces only as a bare nonzero exit with no output.
+    # The session's own captured output (connection refused, timeout notice)
+    # rides along: the generic FATAL line says which step failed, the reply
+    # tail says what actually happened on the wire.
     reply="$(telnet_session "$TELNET_PORT" "$TELNET_PASSWORD" 'apm status\nquit' 15 2>&1)" || {
       echo "FATAL: telnet session on port $TELNET_PORT failed (is the container up?); no apm status" >&2
+      printf '%s\n' "${reply:-<no output>}" | tail -n 3 >&2
       exit 1
     }
     # Strip control bytes without binutils(1) strings, which a minimal podman
