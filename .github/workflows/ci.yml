@@ -1,3 +1,4 @@
+---
 name: ci
 
 on: [push, pull_request]
@@ -8,9 +9,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Lint shell scripts (bash -n, shellcheck, reference integrity)
-        # make lint owns the script list and the checks; running it here
-        # instead of inlining the loops keeps CI from drifting from local dev.
+      - name: Install pinned Python analyzers
+        # Same versions as the local dev machine so `make lint` enforces
+        # identical rules here and locally.
+        run: >
+          python3 -m pip install --disable-pip-version-check
+          ruff==0.16.4 mypy==2.1.0 yamllint==1.38.0
+
+      - name: Lint shell + Python + workflow YAML (make lint)
+        # make lint owns the script list and every check (bash -n, shellcheck,
+        # reference integrity, ruff rules/format, mypy strict, yamllint);
+        # running it here instead of inlining keeps CI from drifting from dev.
         run: make lint
 
       - name: Test lib-env (.env loader, password rules, telnet_session)

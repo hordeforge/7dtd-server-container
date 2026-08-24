@@ -3,6 +3,7 @@
 
 Usage: check-config-xml.py FILE [FILE ...]
 """
+
 import sys
 import xml.etree.ElementTree as ET
 

@@ -16,6 +16,7 @@ TCP segments the client's write and no matter how many lines the payload spans.
 The client never half-closes while waiting for the reply, so peer-close and
 quiescence are both just end-of-input signals here.
 """
+
 import socket
 import sys
 

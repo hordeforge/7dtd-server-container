@@ -10,6 +10,7 @@ Methodology: pin the rendering contract at its boundaries.
              whose value rect carries the band colour
 Each failed check prints a FAIL line; the process exits nonzero if any failed.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -23,16 +24,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import coverage_badge
 
 NS = "{http://www.w3.org/2000/svg}"
-failures = 0
+failed_checks: list[str] = []
 
 
 def check(name: str, cond: bool) -> None:
-    global failures
     if cond:
         print(f"OK: {name}")
     else:
         print(f"FAIL: {name}", file=sys.stderr)
-        failures += 1
+        failed_checks.append(name)
 
 
 def render(line_rate_attr: str | None) -> tuple[int, ET.Element]:
@@ -67,10 +67,14 @@ check("usage error exits 2", usage_rc == 2)
 
 # Colour bands: thresholds inclusive, the value below falls through.
 for pct, fill in [
-    (90, "#4c1"), (89, "#97ca00"),
-    (75, "#97ca00"), (74, "#dfb317"),
-    (60, "#dfb317"), (59, "#fe7d37"),
-    (40, "#fe7d37"), (39, "#e05d44"),
+    (90, "#4c1"),
+    (89, "#97ca00"),
+    (75, "#97ca00"),
+    (74, "#dfb317"),
+    (60, "#dfb317"),
+    (59, "#fe7d37"),
+    (40, "#fe7d37"),
+    (39, "#e05d44"),
     (0, "#e05d44"),
 ]:
     check(f"colour({pct}) == {fill}", coverage_badge.colour(pct) == fill)
@@ -79,6 +83,6 @@ _, root = render("0.75")
 fills = [r.get("fill") for r in root.iter(f"{NS}rect")]
 check("value rect carries the band colour", "#97ca00" in fills)
 
-if failures:
+if failed_checks:
     sys.exit(1)
 print("coverage_badge rules OK")

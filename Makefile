@@ -3,6 +3,10 @@ ROOT := $(CURDIR)
 # Every shell script CI lints: one owner of the list so a new script is
 # covered by bash -n, shellcheck, and the reference check automatically.
 SCRIPTS := entrypoint.sh start.sh stop.sh $(sort $(wildcard scripts/*.sh))
+# Python helpers + CI YAML get the same treatment (ruff, mypy, yamllint);
+# their configuration lives in pyproject.toml / .yamllint.yaml.
+PY := $(sort $(wildcard scripts/*.py))
+YAML := $(sort $(wildcard .github/workflows/*.yml))
 
 .DEFAULT_GOAL := test
 .PHONY: lint test coverage
@@ -17,6 +21,14 @@ lint:
 	  test -f "$$ref" || { echo "missing referenced script: $$ref" >&2; exit 1; }; \
 	done; \
 	echo "all internal script references exist"
+	set -euo pipefail; \
+	ruff check $(PY) && echo "ruff rules OK"
+	set -euo pipefail; \
+	ruff format --check $(PY) && echo "ruff format OK"
+	set -euo pipefail; \
+	mypy && echo "mypy strict OK"
+	set -euo pipefail; \
+	yamllint $(YAML) && echo "yamllint OK"
 
 test:
 	bash scripts/test_lib_env.sh
