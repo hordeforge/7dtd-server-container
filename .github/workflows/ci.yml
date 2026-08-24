@@ -66,8 +66,13 @@ jobs:
       - name: Install kcov (v42 prebuilt; Ubuntu 24.04 has no kcov package)
         run: |
           set -euo pipefail
-          curl -fsSL https://github.com/SimonKagstrom/kcov/releases/download/v42/kcov-amd64.tar.gz |
-            tar xz -C /usr/local --strip-components=1
+          curl -fsSL -o /tmp/kcov.tar.gz \
+            https://github.com/SimonKagstrom/kcov/releases/download/v42/kcov-amd64.tar.gz
+          tar xz -C /tmp -f /tmp/kcov.tar.gz
+          # Archive layout has shifted between releases; find the binary
+          # instead of assuming a fixed strip depth.
+          kcov_bin="$(find /tmp -type f -name kcov -path '*bin*' | head -1)"
+          install -m755 "$kcov_bin" /usr/local/bin/kcov
           kcov --version
       - run: make coverage
       - run: python3 scripts/coverage_badge.py coverage.cobertura.xml "$RUNNER_TEMP/coverage.svg"
