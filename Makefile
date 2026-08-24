@@ -1,5 +1,9 @@
 ROOT := $(CURDIR)
 
+# Recipes use `set -euo pipefail`, which dash rejects; every recipe here
+# assumes bash semantics.
+SHELL := /bin/bash
+
 # Every shell script CI lints: one owner of the list so a new script is
 # covered by bash -n, shellcheck, and the reference check automatically.
 SCRIPTS := entrypoint.sh start.sh stop.sh $(sort $(wildcard scripts/*.sh))
