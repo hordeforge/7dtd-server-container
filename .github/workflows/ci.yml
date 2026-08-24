@@ -63,8 +63,12 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Install kcov
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends kcov
+      - name: Install kcov (v42 prebuilt; Ubuntu 24.04 has no kcov package)
+        run: |
+          set -euo pipefail
+          curl -fsSL https://github.com/SimonKagstrom/kcov/releases/download/v42/kcov-amd64.tar.gz |
+            tar xz -C /usr/local --strip-components=1
+          kcov --version
       - run: make coverage
       - run: python3 scripts/coverage_badge.py coverage.cobertura.xml "$RUNNER_TEMP/coverage.svg"
       - name: Publish the badge to the badges branch
