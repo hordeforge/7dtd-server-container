@@ -86,6 +86,8 @@ def failing(content: str, out_name: str = "badge.svg") -> int:
 
 check("malformed XML exits 1", failing("<coverage><unclosed>") == 1)
 check("non-numeric line-rate exits 1", failing('<coverage line-rate="abc"/>') == 1)
+# An empty attribute is the realistic truncation shape a broken report takes.
+check("empty line-rate exits 1", failing('<coverage line-rate=""/>') == 1)
 
 # Unwritable output directory: OSError must surface as exit 1, not a crash.
 with tempfile.TemporaryDirectory() as tmp:

@@ -65,9 +65,17 @@ with tempfile.TemporaryDirectory() as tmp:
     check("missing file exits 1", r.returncode == 1)
     check("missing file named in error", b"absent.xml" in r.stderr)
 
-    # Multiple files: one bad apple must fail the batch even after a good one.
+    # Multiple files: one bad apple must fail the batch even after a good one,
+    # and name it so the operator goes straight to the culprit.
     r = run(str(good), str(malformed))
     check("one bad file fails the batch", r.returncode == 1)
+    check("batch failure names the bad file", b"bad.xml" in r.stderr)
+
+    # OSError path beyond a missing file: a directory opens but cannot be
+    # parsed (IsADirectoryError); must exit 1 cleanly, not traceback.
+    r = run(str(tmpdir))
+    check("directory input exits 1", r.returncode == 1)
+    check("directory input named in error", tmpdir.name.encode() in r.stderr)
 
 if failed_checks:
     sys.exit(1)
