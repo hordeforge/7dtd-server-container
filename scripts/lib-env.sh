@@ -33,19 +33,15 @@ load_env_file() {
   done < "$1"
 }
 
-# TELNET_PASSWORD is embedded into double-quoted shell strings by the telnet
-# helpers in run.sh/perf.sh and rendered into serverconfig.xml inside the
-# container (an XML attribute value, where < is illegal); TELNET_PORT goes
-# into both too. Reject unsafe values up front instead of failing later as a
+# Shared character policy for values that travel through double-quoted shell
+# strings in the ops scripts (telnet_session) and are rendered by sed into XML
+# attribute values (serverconfig.xml, serveradmin.xml; < is illegal there):
+# reject unsafe values up front instead of escaping, because the game reads
+# the rendered files and a mangled value fails far from the cause as a
 # boot-time config parse error, a silent forced stop (no world save), or a
 # container that dies on startup. The entrypoint sources this same file from
 # the image (/usr/local/lib/7dtd-lib-env.sh), so host scripts and container
 # enforce one shared copy of these rules.
-# Shared character policy for secret values that are rendered by sed into XML
-# attribute values (serverconfig.xml, serveradmin.xml) and travel through
-# double-quoted shell strings in the ops scripts (see telnet_session). Reject
-# unsafe values up front instead of escaping: the game reads the rendered
-# files, and a mangled value fails far from the cause.
 reject_unsafe_value() { # name value
   local name="$1" value="$2"
   # The pattern matches each forbidden character literally; the escaped quote

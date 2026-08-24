@@ -15,11 +15,9 @@ cd "$ROOT"
 GAME_DIR="$ROOT/data/game"
 USERDATA_DIR="$ROOT/data/userdata"
 
-# Load the git-ignored .env via scripts/lib-env.sh. Precedence: variables
-# already in the environment win over .env, .env fills the rest, and the
-# built-in defaults below come last. Unlike a blind `source`, an explicit
-# override such as `TELNET_PORT=9099 ./scripts/run.sh stop` always takes
-# effect, and nothing in .env is executed: values are data, not code.
+# Load the git-ignored .env via scripts/lib-env.sh (precedence as documented
+# in the header). Values are data, never executed, and an explicit override
+# such as `TELNET_PORT=9099 ./scripts/run.sh stop` always takes effect.
 source "$ROOT/scripts/lib-env.sh"
 if [[ -f "$ROOT/.env" ]]; then
   load_env_file "$ROOT/.env"
@@ -108,13 +106,11 @@ stop() {
     else
       echo "telnet not reachable on $TELNET_PORT; falling back to forced stop"
     fi
-    # Event-driven exit wait: one `podman wait` blocks until the container
-    # exits instead of re-spawning a heavyweight rootless `podman inspect`
-    # every 2s (up to 45 spawns) and reacting up to one interval late. The
-    # budget matches the old 45x2s poll ceiling; timeout(1) exits 124 only on
-    # that budget running out with the container still up, which is the force-
-    # stop signal. Any other failure (e.g. container already gone) falls
-    # through silently to the idempotent stop below, as the poll did.
+    # Event-driven exit wait: one blocking `podman wait` instead of spawning
+    # a rootless `podman inspect` on an interval. timeout(1) exits 124 only
+    # when the 90s budget runs out with the container still up, which is the
+    # force-stop signal; any other failure (e.g. container already gone)
+    # falls through silently to the idempotent stop below.
     wait_rc=0
     timeout 90 podman wait "$NAME" >/dev/null 2>&1 || wait_rc=$?
     if [[ "$wait_rc" == 124 ]]; then
