@@ -42,5 +42,7 @@ test:
 
 coverage:
 	rm -rf coverage
-	kcov --clean --include-pattern=lib-env.sh --exclude-pattern=fake-telnet-server.py coverage bash scripts/test_lib_env.sh
-	cp coverage/cobertura.xml coverage.cobertura.xml 2>/dev/null || cp coverage/*/cobertura.xml coverage.cobertura.xml 2>/dev/null || find coverage -name cobertura.xml | head -1 | xargs -I{} cp {} coverage.cobertura.xml
+	# Direct exec (not `bash script`): kcov traces the shebang interpreter;
+	# through an extra bash layer it produces an empty report.
+	kcov --clean --include-pattern=lib-env.sh coverage ./scripts/test_lib_env.sh
+	find coverage -name cobertura.xml | head -1 | xargs -I{} cp {} coverage.cobertura.xml
