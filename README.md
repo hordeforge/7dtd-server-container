@@ -167,6 +167,14 @@ systemctl --user enable --now 7dtd-server
 loginctl enable-linger maci
 ```
 
+Stops and restarts of the service go through the same graceful path as
+`./stop.sh` (telnet save + shutdown before the container is killed), via the
+unit's `ExecStop`. The unit pins no `TELNET_PASSWORD`/`TELNET_PORT`: those
+defaults live in `scripts/lib-env.sh`, shared with the ops scripts. If you
+override them (or `WEBADMIN_PASSWORD`) via `Environment=` lines in the unit,
+mirror the telnet values in `.env` on the server host so the graceful-stop
+login still matches.
+
 ## Troubleshooting
 
 - **Game downloads on first start only.** `podman logs 7dtd-server` shows

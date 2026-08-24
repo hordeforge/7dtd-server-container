@@ -21,8 +21,14 @@ Network=host
 # as zombies until the container restarts (same rationale as start() in
 # scripts/run.sh).
 Init=true
-Environment=TELNET_PASSWORD=retest
-Environment=TELNET_PORT=8087
+# TELNET_PASSWORD/TELNET_PORT are deliberately not pinned here: the entrypoint
+# sources scripts/lib-env.sh (baked into the image) whose init_telnet_env owns
+# the lab defaults and validation for both lifecycles, so this unit cannot
+# drift from them. To override, set Environment= lines here AND keep the same
+# values in .env / the environment used by scripts/run.sh, or the graceful
+# stop below will fail its telnet login and fall back to a forced stop.
+# Environment=TELNET_PASSWORD=change-me
+# Environment=TELNET_PORT=8087
 # Dashboard webuser password; when unset the entrypoint mints a random one at
 # first seed and logs it once. Set a value here to control it:
 # Environment=WEBADMIN_PASSWORD=change-me
@@ -35,6 +41,15 @@ Volume=%h/7dtd-server/config:/config:ro,Z
 
 [Service]
 Restart=always
+# The dedicated server ignores SIGTERM (observed: no save, hung until the
+# stop timeout), so the default signal-based container stop kills it with no
+# world save. Route every systemd-driven stop/restart/shutdown through the
+# same graceful path the ad-hoc lifecycle uses: telnet save+shutdown, a
+# bounded wait, then a forced-stop fallback (scripts/run.sh stop).
+# TimeoutStopSec must cover the worst case: telnet probe 3s + session 10s +
+# podman wait 90s + podman stop 30s.
+ExecStop=%h/7dtd-server/scripts/run.sh stop
+TimeoutStopSec=180
 
 [Install]
 WantedBy=default.target
