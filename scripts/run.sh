@@ -108,13 +108,16 @@ stop() {
     else
       echo "telnet not reachable on $TELNET_PORT; falling back to forced stop"
     fi
-    # podman ps only lists running containers, so poll State.Running directly;
-    # this breaks out as soon as the game exits instead of waiting forever.
-    for _ in $(seq 1 45); do
-      [[ "$(podman inspect -f '{{.State.Running}}' "$NAME" 2>/dev/null)" != "true" ]] && break
-      sleep 2
-    done
-    if [[ "$(podman inspect -f '{{.State.Running}}' "$NAME" 2>/dev/null)" == "true" ]]; then
+    # Event-driven exit wait: one `podman wait` blocks until the container
+    # exits instead of re-spawning a heavyweight rootless `podman inspect`
+    # every 2s (up to 45 spawns) and reacting up to one interval late. The
+    # budget matches the old 45x2s poll ceiling; timeout(1) exits 124 only on
+    # that budget running out with the container still up, which is the force-
+    # stop signal. Any other failure (e.g. container already gone) falls
+    # through silently to the idempotent stop below, as the poll did.
+    wait_rc=0
+    timeout 90 podman wait "$NAME" >/dev/null 2>&1 || wait_rc=$?
+    if [[ "$wait_rc" == 124 ]]; then
       echo "container still running after telnet shutdown; forcing stop"
     fi
   fi
