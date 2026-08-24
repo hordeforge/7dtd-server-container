@@ -99,11 +99,14 @@ seed_admin_file() {
   # dashboard admin + webuser once so the APM panel is reachable after wipes.
   # The webuser credential never ships in the image or repo: WEBADMIN_PASSWORD
   # wins when set, otherwise a random value is minted for this seed. Only the
-  # MD5 digest the dashboard expects is written to serveradmin.xml; the
-  # plaintext is printed once, below (host-user-readable container log).
+  # MD5 digest the dashboard expects is written to serveradmin.xml. A minted
+  # password is printed once, below, because that log line is the only record
+  # of it; an operator-provided one is never echoed into the log.
+  local minted=0
   if [[ -z "${WEBADMIN_PASSWORD:-}" ]]; then
     WEBADMIN_PASSWORD="$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
     export WEBADMIN_PASSWORD
+    minted=1
   fi
   check_webadmin_password
   local hex b64
@@ -113,7 +116,11 @@ seed_admin_file() {
   sed -e "s|@WEBADMIN_PASSWORD_HASH@|${b64}|g" \
     /config/serveradmin_seed.xml > "$USERDATA_DIR/Saves/serveradmin.xml"
   assert_rendered "$USERDATA_DIR/Saves/serveradmin.xml" '@WEBADMIN_PASSWORD_HASH@'
-  log "seeded serveradmin.xml (dashboard webuser admin, password: $WEBADMIN_PASSWORD)"
+  if (( minted == 1 )); then
+    log "seeded serveradmin.xml (dashboard webuser admin, password: $WEBADMIN_PASSWORD)"
+  else
+    log "seeded serveradmin.xml (dashboard webuser admin, WEBADMIN_PASSWORD applied)"
+  fi
 }
 
 sync_mods() {
