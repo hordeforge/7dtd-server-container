@@ -9,8 +9,9 @@ SCRIPTS := entrypoint.sh start.sh stop.sh $(sort $(wildcard scripts/*.sh))
 # their configuration lives in pyproject.toml / .yamllint.yaml.
 PY := $(sort $(wildcard scripts/*.py))
 # The yamllint config itself is YAML; a broken config must fail lint, not
-# silently fall back to defaults.
-YAML := $(sort $(wildcard .github/workflows/*.yml)) .yamllint.yaml
+# silently fall back to defaults. Dependabot's file is YAML too and gets the
+# same gate as the workflows.
+YAML := $(sort $(wildcard .github/workflows/*.yml)) .yamllint.yaml .github/dependabot.yml
 
 .DEFAULT_GOAL := test
 .PHONY: lint test coverage
