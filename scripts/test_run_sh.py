@@ -33,7 +33,6 @@ Each failed check prints a FAIL line; the process exits nonzero if any failed.
 
 from __future__ import annotations
 
-import glob
 import os
 import re
 import signal
@@ -55,6 +54,28 @@ def check(name: str, cond: bool) -> None:
     else:
         print(f"FAIL: {name}", file=sys.stderr)
         failed_checks.append(name)
+
+
+def install_podman_stub(root: Path, stub_text: str) -> Path:
+    """Write stub_text as an executable <root>/bin/podman; return the bin dir."""
+    bindir = root / "bin"
+    bindir.mkdir()
+    stub = bindir / "podman"
+    stub.write_text(stub_text)
+    stub.chmod(0o755)
+    return bindir
+
+
+def stub_invocations(log: Path) -> list[list[bytes]]:
+    """Split the stub's log into one argv list per podman invocation."""
+    return [rec.split(b"\0") for rec in log.read_bytes().split(b"\0\0") if rec]
+
+
+def envfile_paths(records: list[list[bytes]]) -> list[str]:
+    """Paths passed to --env-file across invocations, in order."""
+    return [
+        rec[i + 1].decode() for rec in records for i, arg in enumerate(rec) if arg == b"--env-file"
+    ]
 
 
 # Recording stand-in for podman: append each invocation's argv NUL-separated,
@@ -86,51 +107,31 @@ NAME = "7dtd-server"  # run.sh's default SEVENDTD_CONTAINER_NAME
 
 # Same recorder, but `podman run` blocks long enough for the signal-path test
 # to interrupt run.sh while the env file exists and cleanup is still pending.
-BLOCKING_PODMAN_STUB = """#!/usr/bin/env python3
-import os
-import shutil
-import sys
-import time
-
-argv = sys.argv[1:]
-with open(os.environ["STUB_LOG"], "ab") as log:
-    log.write(b"\\0".join(a.encode() for a in argv) + b"\\0\\0")
-if "ps" in argv:
-    sys.stdout.write(os.environ.get("STUB_PS_OUTPUT", ""))
-if "--env-file" in argv:
-    src = argv[argv.index("--env-file") + 1]
-    shutil.copy2(src, os.environ["STUB_SNAPSHOT"])
-    mode = oct(os.stat(src).st_mode & 0o777)
-    with open(os.environ["STUB_MODE"], "w", encoding="utf-8") as f:
-        f.write(mode)
-if "run" in argv:
-    time.sleep(30)
-"""
+BLOCKING_PODMAN_STUB = (
+    PODMAN_STUB.replace("import sys\n", "import sys\nimport time\n")
+    + 'if "run" in argv:\n    time.sleep(30)\n'
+)
 
 with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
-    bindir = tmpdir / "bin"
-    bindir.mkdir()
-    stub = bindir / "podman"
-    stub.write_text(PODMAN_STUB)
-    stub.chmod(0o755)
+    bindir = install_podman_stub(tmpdir, PODMAN_STUB)
 
     log = tmpdir / "podman-argv.log"
     snapshot = tmpdir / "envfile.snapshot"
     mode_file = tmpdir / "envfile.mode"
 
-    env = os.environ.copy()
     # Explicit values win over any local .env (load_env_file precedence), so
     # the run sees known secrets regardless of host state.
-    env.update(
-        PATH=f"{bindir}{os.pathsep}{env.get('PATH', '')}",
-        STUB_LOG=str(log),
-        STUB_SNAPSHOT=str(snapshot),
-        STUB_MODE=str(mode_file),
-        TELNET_PASSWORD=TELNET_PASSWORD,
-        TELNET_PORT="8087",
-        WEBADMIN_PASSWORD=WEBADMIN_PASSWORD,
-    )
+    env = {
+        **os.environ,
+        "PATH": f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}",
+        "STUB_LOG": str(log),
+        "STUB_SNAPSHOT": str(snapshot),
+        "STUB_MODE": str(mode_file),
+        "TELNET_PASSWORD": TELNET_PASSWORD,
+        "TELNET_PORT": "8087",
+        "WEBADMIN_PASSWORD": WEBADMIN_PASSWORD,
+    }
 
     try:
         proc = subprocess.run(
@@ -147,16 +148,11 @@ with tempfile.TemporaryDirectory() as tmp:
     if proc.returncode != 0:
         print(proc.stderr.decode(errors="replace"), file=sys.stderr)
 
-    invocations = [i for i in log.read_bytes().split(b"\0\0") if i]
-    args = [a for inv in invocations for a in inv.split(b"\0")]
+    invocations = stub_invocations(log)
+    args = [a for rec in invocations for a in rec]
     check("podman was invoked", bool(invocations))
 
-    envfile_args = [
-        inv.split(b"\0")[i + 1].decode()
-        for inv in invocations
-        for i, a in enumerate(inv.split(b"\0"))
-        if a == b"--env-file"
-    ]
+    envfile_args = envfile_paths(invocations)
     check("podman received --env-file", len(envfile_args) > 0)
     live_envfile = envfile_args[-1] if envfile_args else ""
 
@@ -195,11 +191,7 @@ with tempfile.TemporaryDirectory() as tmp:
 #              uses its own --rm container name
 with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
-    bindir = tmpdir / "bin"
-    bindir.mkdir()
-    stub = bindir / "podman"
-    stub.write_text(PODMAN_STUB)
-    stub.chmod(0o755)
+    bindir = install_podman_stub(tmpdir, PODMAN_STUB)
     log = tmpdir / "podman-argv.log"
 
     base_env = {
@@ -243,8 +235,8 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     if allowed.returncode != 0:
         print(allowed.stderr.decode(errors="replace"), file=sys.stderr)
-    invocations = [i for i in log.read_bytes().split(b"\0\0") if i]
-    tokens = [t for inv in invocations for t in inv.split(b"\0")]
+    invocations = stub_invocations(log)
+    tokens = [a for rec in invocations for a in rec]
     check(
         "pre-warm forces STEAMCMD_ONLY=1 despite the environment's 0",
         b"STEAMCMD_ONLY=1" in tokens,
@@ -262,11 +254,7 @@ with tempfile.TemporaryDirectory() as tmp:
 # file; the INT handler must route through the EXIT cleanup and exit 130.
 with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
-    bindir = tmpdir / "bin"
-    bindir.mkdir()
-    stub = bindir / "podman"
-    stub.write_text(BLOCKING_PODMAN_STUB)
-    stub.chmod(0o755)
+    bindir = install_podman_stub(tmpdir, BLOCKING_PODMAN_STUB)
     log = tmpdir / "podman-argv.log"
 
     env = {
@@ -290,9 +278,12 @@ with tempfile.TemporaryDirectory() as tmp:
         stderr=subprocess.DEVNULL,
         start_new_session=True,  # its own process group, as a foreground Ctrl-C target
     )
+    # SIGINT only once the stub has recorded --env-file: killing on the env
+    # file's mere existence can land before the stub's first log write, which
+    # would leave the deletion assert below with no recorded path to check.
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
-        if glob.glob(str(tmpdir / "7dtd-container-env.*")):
+        if log.exists() and b"--env-file" in log.read_bytes():
             break
         if sig_proc.poll() is not None:
             break
@@ -301,13 +292,8 @@ with tempfile.TemporaryDirectory() as tmp:
     os.killpg(sig_proc.pid, signal.SIGINT)
     rc = sig_proc.wait(timeout=30)
 
-    invocations = [i for i in log.read_bytes().split(b"\0\0") if i]
-    sig_envfiles = [
-        inv.split(b"\0")[i + 1].decode()
-        for inv in invocations
-        for i, a in enumerate(inv.split(b"\0"))
-        if a == b"--env-file"
-    ]
+    invocations = stub_invocations(log)
+    sig_envfiles = envfile_paths(invocations)
     check("SIGINT mid-start ends run.sh with 130", rc == 130)
     check(
         "SIGINT mid-start removed the secret env file",
@@ -319,11 +305,7 @@ with tempfile.TemporaryDirectory() as tmp:
 # live owner's file is never touched.
 with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
-    bindir = tmpdir / "bin"
-    bindir.mkdir()
-    stub = bindir / "podman"
-    stub.write_text(PODMAN_STUB)
-    stub.chmod(0o755)
+    bindir = install_podman_stub(tmpdir, PODMAN_STUB)
     log = tmpdir / "podman-argv.log"
 
     dead = subprocess.Popen(["true"])
@@ -359,13 +341,8 @@ with tempfile.TemporaryDirectory() as tmp:
         live.exists() and live.read_bytes() == b"TELNET_PASSWORD=live\n",
     )
 
-    invocations = [i for i in log.read_bytes().split(b"\0\0") if i]
-    envfile_args = [
-        inv.split(b"\0")[i + 1].decode()
-        for inv in invocations
-        for i, a in enumerate(inv.split(b"\0"))
-        if a == b"--env-file"
-    ]
+    invocations = stub_invocations(log)
+    envfile_args = envfile_paths(invocations)
     name = Path(envfile_args[-1]).name if envfile_args else ""
     check(
         "the fresh env file name carries the owning PID (sweep contract)",
