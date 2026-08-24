@@ -71,7 +71,8 @@ jobs:
           tar xz -C /tmp -f /tmp/kcov.tar.gz
           # Archive layout has shifted between releases; find the binary
           # instead of assuming a fixed strip depth.
-          install -m755 "$(find /tmp -type f -name kcov -path '*bin*' | head -1)" /usr/local/bin/kcov
+          kcov_bin="$(find /tmp -type f -name kcov -path '*bin*' | head -1)"
+          install -m755 "$kcov_bin" /usr/local/bin/kcov
           kcov --version
       - run: make coverage
       - run: python3 scripts/coverage_badge.py coverage.cobertura.xml "$RUNNER_TEMP/coverage.svg"
