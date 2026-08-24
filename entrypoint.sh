@@ -7,8 +7,8 @@
 # mods, config); this container is disposable.
 set -euo pipefail
 
-GAME_DIR="${GAME_DIR:-/root/7dtd}"
-USERDATA_DIR="${USERDATA_DIR:-/root/.local/share/7DaysToDie}"
+GAME_DIR=/root/7dtd
+USERDATA_DIR=/root/.local/share/7DaysToDie
 if command -v steamcmd >/dev/null 2>&1; then
   STEAMCMD="$(command -v steamcmd)"
 elif [[ -x /root/.local/share/Steam/steamcmd/steamcmd.sh ]]; then
@@ -17,7 +17,7 @@ else
   echo "[entrypoint] FATAL: steamcmd not found" >&2
   exit 1
 fi
-STEAM_APPID="${STEAM_APPID:-294420}"
+STEAM_APPID=294420
 UPDATE="${STEAMCMD_UPDATE:-1}"      # 1 = steamcmd validate every start, 0 = skip
 INSTALL_ONLY="${STEAMCMD_ONLY:-0}"  # 1 = install/update then exit (pre-warm)
 

@@ -59,10 +59,6 @@ reject_unsafe_value() { # name value
   esac
 }
 
-check_telnet_password() {
-  reject_unsafe_value TELNET_PASSWORD "$TELNET_PASSWORD"
-}
-
 check_webadmin_password() {
   reject_unsafe_value WEBADMIN_PASSWORD "$WEBADMIN_PASSWORD"
   if (( ${#WEBADMIN_PASSWORD} < 8 )); then
@@ -95,14 +91,14 @@ check_telnet_port() {
 init_telnet_env() {
   TELNET_PASSWORD="${TELNET_PASSWORD:-retest}"
   TELNET_PORT="${TELNET_PORT:-8087}"
-  check_telnet_password
+  reject_unsafe_value TELNET_PASSWORD "$TELNET_PASSWORD"
   check_telnet_port
 }
 
 # Single owner of the telnet wire exchange: open one /dev/tcp session to
 # 127.0.0.1, send the password, send the payload, print the reply until
-# timeout or EOF. Callers must have run check_telnet_password/check_telnet_port
-# first (the port is re-checked here). The payload is a printf format
+# timeout or EOF. Callers must have run init_telnet_env first (the port is
+# re-checked here). The payload is a printf format
 # fragment; separate commands with \n, e.g. 'shutdown' or 'apm status\nquit'.
 telnet_session() { # port password payload timeout_seconds
   local port="$1" password="$2" payload="$3" timeout_secs="$4"
