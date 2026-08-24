@@ -63,19 +63,18 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Install kcov (v42 prebuilt; Ubuntu 24.04 has no kcov package)
+      # No prebuilt kcov works here: apt has no noble package and the v42
+      # tarball links against Ubuntu 22.04's binutils (libopcodes-2.38).
+      # Build a pinned release from source instead.
+      - name: Build kcov v43 from source
         run: |
           set -euo pipefail
-          curl -fsSL -o /tmp/kcov.tar.gz \
-            https://github.com/SimonKagstrom/kcov/releases/download/v42/kcov-amd64.tar.gz
-          # Own extraction dir: searching all of /tmp trips over the
-          # root-owned systemd-private dirs (find exits nonzero under set -e),
-          # and the archive layout has shifted between releases, so locate
-          # the binary instead of assuming a strip depth.
-          mkdir -p /tmp/kcov-x
-          tar xz -C /tmp/kcov-x -f /tmp/kcov.tar.gz
-          kcov_bin="$(find /tmp/kcov-x -type f -name kcov -path '*bin*' | head -1)"
-          install -m755 "$kcov_bin" /usr/local/bin/kcov
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends \
+            cmake libelf-dev libbz2-dev zlib1g-dev libcurl4-openssl-dev binutils-dev
+          git clone --depth 1 --branch v43 https://github.com/SimonKagstrom/kcov /tmp/kcov-src
+          cmake -S /tmp/kcov-src -B /tmp/kcov-build -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/kcov-build --parallel 2
+          sudo cmake --install /tmp/kcov-build
           kcov --version
       - run: make coverage
       - run: python3 scripts/coverage_badge.py coverage.cobertura.xml "$RUNNER_TEMP/coverage.svg"
