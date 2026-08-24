@@ -12,3 +12,4 @@ scripts/__pycache__/
 
 # Local scratch space (never commit).
 .scratch/
+*.lock
