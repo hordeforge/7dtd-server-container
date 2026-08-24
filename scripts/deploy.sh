@@ -44,6 +44,11 @@ echo "deployed $ROOT -> ${SSH_USER}@${HOST}:${DEST_DIR}/"
 if [[ "$RESTART" == "1" ]]; then
   # DEST_DIR travels as stdin data, never inside the remote command string, so
   # no character in SEVENDTD_SERVER_DIR can change what the remote shell runs.
+  # The whole remote restart is bounded (update_mods restage + run.sh stop's
+  # 133s worst case + start), and timeout(1) kills a wedged local ssh instead
+  # of pinning the session open forever like every unbounded wait here would;
+  # the remote script keeps running to its own bounded completion.
+  # shellcheck disable=SC2016  # non-expansion is the point: dest_dir belongs to the remote shell
   printf '%s\n' "$DEST_DIR" \
-    | ssh -o ConnectTimeout=10 "${SSH_USER}@${HOST}" 'read -r dest_dir && cd "$dest_dir" && ./scripts/update_mods.sh'
+    | timeout 300 ssh -o ConnectTimeout=10 "${SSH_USER}@${HOST}" 'read -r dest_dir && cd "$dest_dir" && ./scripts/update_mods.sh'
 fi

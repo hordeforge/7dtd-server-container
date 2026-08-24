@@ -9,12 +9,26 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 if [[ -d mods-available ]]; then
+  # Sweep staging leftovers from a previously killed run: hidden, so the
+  # mods/*/ loop and the entrypoint's cp of /mods/. would otherwise carry
+  # them into the game's Mods dir as litter.
+  rm -rf mods/.*.tmp.* 2>/dev/null || true
   for d in mods/*/; do
     [[ -d "$d" ]] || continue
     name="$(basename "$d")"
     if [[ -d "mods-available/$name" ]]; then
+      # Copy to a sibling temp name and rename: a cp killed midway (disk
+      # full, Ctrl-C) must never leave a half-written mod dir in mods/ for
+      # the entrypoint to copy into the game.
+      staging="mods/.${name}.tmp.$$"
+      rm -rf "$staging"
+      if ! cp -a "mods-available/$name" "$staging"; then
+        rm -rf "$staging"
+        echo "FATAL: failed to stage $name from mods-available/$name; keeping existing mods/" >&2
+        exit 1
+      fi
       rm -rf "$d"
-      cp -a "mods-available/$name" "$d"
+      mv "$staging" "$d"
       echo "restaged $name from mods-available/"
     fi
   done

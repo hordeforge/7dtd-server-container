@@ -30,12 +30,28 @@ IMAGE="${SEVENDTD_IMAGE:-localhost/7dtd-server:latest}"
 # container (written by make_common, removed at exit). Empty when no
 # container was started, e.g. on stop/status.
 SECRET_ENV_FILE=""
+# Release every env file this run owns, keyed on the PID embedded in the
+# name rather than on $SECRET_ENV_FILE: acquisition spans the mktemp
+# subprocess and the assignment, and a signal arriving in between must still
+# find a working release path (the CI suite races exactly that window).
 cleanup_secret_env_file() {
-  if [[ -n "$SECRET_ENV_FILE" ]]; then
-    rm -f "$SECRET_ENV_FILE"
-  fi
+  local f
+  for f in "${TMPDIR:-/tmp}"/7dtd-container-env."$$".*; do
+    if [[ -f "$f" ]]; then
+      rm -f -- "$f" || true
+    fi
+  done
 }
 trap cleanup_secret_env_file EXIT
+# Bash runs EXIT traps on a normal exit or after a trapped signal only:
+# killed by an untrapped SIGINT/SIGTERM/SIGHUP it dies without cleanup, and
+# an everyday Ctrl-C during the multi-minute podman run would strand the
+# credential-bearing env file. Each handler routes through the EXIT trap and
+# exits with the conventional 128+N status. SIGKILL stays uncovered here;
+# make_common sweeps what it leaves behind.
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 STEAMCMD_UPDATE="${STEAMCMD_UPDATE:-1}"
 STEAMCMD_ONLY="${STEAMCMD_ONLY:-0}"
@@ -56,6 +72,25 @@ fi
 
 mkdir -p "$GAME_DIR" "$USERDATA_DIR" "$ROOT/mods" "$ROOT/config"
 
+# Secret env files orphaned by a killed previous run (SIGKILL bypasses every
+# trap) would accumulate in $TMPDIR forever: mktemp never reuses a name and
+# each file carries both secrets. The owning PID therefore rides in the file
+# name, and make_common sweeps entries whose owner is gone; a live concurrent
+# run's file (its PID answers kill -0) is left alone. A PID recycled to an
+# unrelated process only shields one stale file until that process exits.
+sweep_stale_secret_env_files() {
+  local f base pid
+  for f in "${TMPDIR:-/tmp}"/7dtd-container-env.*.*; do
+    [[ -f "$f" ]] || continue
+    base="${f##*/7dtd-container-env.}"
+    pid="${base%%.*}"
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
+    if ! kill -0 "$pid" 2>/dev/null; then
+      rm -f -- "$f" 2>/dev/null || true
+    fi
+  done
+}
+
 # Shared container env + mounts.
 make_common() {
   # Secrets travel through an owner-only env file, never the podman command
@@ -67,7 +102,8 @@ make_common() {
   # check_webadmin_password, whose character rules keep them byte-exact
   # through the env-file format: no backslash/quote/$ metacharacters and no
   # leading or trailing whitespace (which podman's parser would trim).
-  SECRET_ENV_FILE="$(mktemp "${TMPDIR:-/tmp}/7dtd-container-env.XXXXXX")"
+  sweep_stale_secret_env_files
+  SECRET_ENV_FILE="$(mktemp "${TMPDIR:-/tmp}/7dtd-container-env.$$.XXXXXX")"
   {
     printf 'TELNET_PASSWORD=%s\n' "$TELNET_PASSWORD"
     printf 'WEBADMIN_PASSWORD=%s\n' "${WEBADMIN_PASSWORD:-}"
@@ -109,6 +145,14 @@ start() {
 }
 
 install_only() {
+  # steamcmd rewrites data/game in place; overlapped with a running server it
+  # swaps files out from under the live game. Pre-warm is a
+  # before-first-start step, so refuse instead of racing the depot (start()
+  # is the only sanctioned way to replace a running instance).
+  if podman ps --format '{{.Names}}' | grep -Fx "$NAME"; then
+    echo "FATAL: $NAME is running; stop it first (install-only must not rewrite data/game under a live server)" >&2
+    exit 1
+  fi
   # Same stale-name guard start() applies; a crashed prior --rm run can leave
   # the name behind and podman refuses to reuse it.
   podman rm -f "$NAME-install" 2>/dev/null || true

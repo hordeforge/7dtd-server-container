@@ -84,14 +84,21 @@ render_config() {
   # user inside the container, so restrictive modes break nothing.
   umask 077
   # Render to a sibling temp file and rename: a sed killed midway must never
-  # leave a truncated serverconfig.xml for the game to choke on at boot.
+  # leave a truncated serverconfig.xml for the game to choke on at boot. The
+  # EXIT trap removes the temp file when any step below fails (sed error,
+  # unrendered placeholder), so a failed boot leaves no stale half-rendered
+  # credential-bearing file beside the real one; disarmed once renamed.
   local out="$GAME_DIR/.serverconfig.xml.tmp"
-  sed -e "s|@TELNET_PASSWORD@|${TELNET_PASSWORD}|g" \
-      -e "s|@TELNET_PORT@|${TELNET_PORT}|g" \
-      -e "s|@USERDATA_DIR@|${USERDATA_DIR}|g" \
-      /config/serverconfig.tmpl.xml > "$out"
+  trap 'rm -f "$GAME_DIR/.serverconfig.xml.tmp"' EXIT
+  if ! sed -e "s|@TELNET_PASSWORD@|${TELNET_PASSWORD}|g" \
+       -e "s|@TELNET_PORT@|${TELNET_PORT}|g" \
+       -e "s|@USERDATA_DIR@|${USERDATA_DIR}|g" \
+       /config/serverconfig.tmpl.xml > "$out"; then
+    fatal "render_config: sed failed on /config/serverconfig.tmpl.xml"
+  fi
   assert_rendered "$out" '@TELNET_PASSWORD@' '@TELNET_PORT@' '@USERDATA_DIR@'
   mv -f "$out" "$GAME_DIR/serverconfig.xml"
+  trap - EXIT
 }
 
 seed_admin_file() {
@@ -128,21 +135,40 @@ seed_admin_file() {
   b64="$(webadmin_password_digest "$WEBADMIN_PASSWORD")"
   # Atomic rename, same rationale as render_config. Extra weight here: the
   # seed is skipped whenever serveradmin.xml exists, so a truncated in-place
-  # write would persist forever and silently lock the dashboard out.
+  # write would persist forever and silently lock the dashboard out. The EXIT
+  # trap (below) removes the temp files when any step fails, so a failed boot
+  # leaves neither a half-rendered admin file nor a half-written credential
+  # record for the next boot to inherit.
   local out="$USERDATA_DIR/Saves/.serveradmin.xml.tmp"
-  sed -e "s|@WEBADMIN_PASSWORD_HASH@|${b64}|g" \
-    /config/serveradmin_seed.xml > "$out"
-  assert_rendered "$out" '@WEBADMIN_PASSWORD_HASH@'
-  mv -f "$out" "$USERDATA_DIR/Saves/serveradmin.xml"
-  # The credential record lives under the umask-077 scope above, so it lands
-  # 0600. A stale record from a previous mint must not survive a seed that
-  # applied an operator password instead.
   local record="$USERDATA_DIR/Saves/.webadmin-password"
+  local record_tmp="$USERDATA_DIR/Saves/.webadmin-password.tmp"
+  trap 'rm -f "$USERDATA_DIR/Saves/.serveradmin.xml.tmp" "$USERDATA_DIR/Saves/.webadmin-password.tmp"' EXIT
+  sed -e "s|@WEBADMIN_PASSWORD_HASH@|${b64}|g" \
+    /config/serveradmin_seed.xml > "$out" \
+    || { fatal "seed_admin_file: sed failed on /config/serveradmin_seed.xml"; }
+  assert_rendered "$out" '@WEBADMIN_PASSWORD_HASH@'
+  # The credential record lives under the umask-077 scope above, so both the
+  # temp write and the renamed record land 0600. The record must land BEFORE
+  # the seeded admin file: the seed is skipped whenever serveradmin.xml
+  # exists, so writing the record after the
+  # rename would let a crash in between strand a dashboard password that is
+  # recorded nowhere and can never be re-seeded. Record first keeps every
+  # outcome recoverable: a failure before the rename leaves no seeded file,
+  # so the next boot re-runs the whole seed and overwrites the record; after
+  # it, both files exist.
   if (( minted == 1 )); then
-    printf '%s\n' "$WEBADMIN_PASSWORD" > "$record"
+    printf '%s\n' "$WEBADMIN_PASSWORD" > "$record_tmp"
+    mv -f "$record_tmp" "$record"
+  else
+    # A stale record from a previous mint must not survive a seed that
+    # applied an operator password instead.
+    rm -f "$record"
+  fi
+  mv -f "$out" "$USERDATA_DIR/Saves/serveradmin.xml"
+  trap - EXIT
+  if (( minted == 1 )); then
     log "seeded serveradmin.xml (dashboard webuser admin); minted password written to $record"
   else
-    rm -f "$record"
     log "seeded serveradmin.xml (dashboard webuser admin, WEBADMIN_PASSWORD applied)"
   fi
 }

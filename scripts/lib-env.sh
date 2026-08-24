@@ -8,6 +8,12 @@
 # quotes is stripped. The file is data, never code: nothing in it is eval'd.
 load_env_file() {
   local line key value q
+  # An unreadable file would otherwise abort the caller with a bare redirect
+  # error naming neither the operation nor which script asked for the file.
+  if [[ ! -r "$1" ]]; then
+    echo "FATAL: cannot read env file '$1'" >&2
+    exit 1
+  fi
   while IFS= read -r line || [[ -n "$line" ]]; do
     case "$line" in
       ''|'#'*) continue ;;
