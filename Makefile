@@ -57,6 +57,7 @@ test:
 	python3 scripts/test_config_templates.py
 	python3 scripts/test_systemd_unit.py
 	python3 scripts/test_run_sh.py
+	python3 scripts/test_perf_sh.py
 
 coverage:
 	rm -rf coverage
