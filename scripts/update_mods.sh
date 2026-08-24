@@ -2,8 +2,8 @@
 # Restage enabled mods from mods-available/ (if present) and restart the
 # container so the entrypoint re-syncs the game's Mods/ dir.
 # No image rebuild involved: mods are bind-mounted from ./mods.
-# Run on the server host, e.g. after `deploy.sh` from the workstation:
-#   ./scripts/deploy.sh --restart
+# Runs on the server host; the usual trigger is remote, `./scripts/deploy.sh
+# --restart` from the workstation rsyncs and then calls this script there.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"

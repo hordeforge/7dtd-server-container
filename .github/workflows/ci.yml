@@ -34,10 +34,11 @@ jobs:
         # drifting from dev.
         run: make lint
 
-      - name: Test lib-env (.env loader, password rules, telnet_session)
-        # scripts/test_lib_env.sh is the single source of truth for these
-        # assertions (make coverage runs the same script under kcov); running
-        # it here instead of inlining the checks keeps the two from drifting.
+      - name: Test suites (.env loader, render contracts, lifecycle scripts)
+        # Each suite pins its own contract; scripts/test_lib_env.sh covers the
+        # .env loader, password rules, and telnet_session (make coverage reruns
+        # that one under kcov). Running everything via make test keeps CI from
+        # drifting from dev.
         run: make test
 
       # Raw + rendered template validation lives only in make test
