@@ -70,6 +70,11 @@ build() {
 }
 
 start() {
+  # Recreating over a live container must go through the graceful stop first:
+  # podman rm -f on a running game kills it with no world save, the exact loss
+  # stop() exists to prevent. stop() no-ops fast when nothing is running; a
+  # wedged container falls through to its forced-stop path (~2 min worst case).
+  stop
   podman rm -f "$NAME" 2>/dev/null || true
   make_common
   # --init: catatonit takes PID 1 and reaps orphans/zombies for the game's

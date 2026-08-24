@@ -94,6 +94,11 @@ seed_admin_file() {
   # before that; without it a fresh host crashes here writing serveradmin.xml.
   mkdir -p "$USERDATA_DIR/Saves"
   if [[ -f "$USERDATA_DIR/Saves/serveradmin.xml" ]]; then
+    # A password provided after the one-time seed cannot apply to the existing
+    # file; say so instead of letting the operator value vanish silently.
+    if [[ -n "${WEBADMIN_PASSWORD:-}" ]]; then
+      log "WARN: WEBADMIN_PASSWORD set but serveradmin.xml already exists in $USERDATA_DIR/Saves; seed skipped (delete that file to re-seed)"
+    fi
     return 0
   fi
   # The server regenerates an empty serveradmin.xml on fresh saves; re-seed the
