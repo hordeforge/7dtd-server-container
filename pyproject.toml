@@ -29,6 +29,9 @@ select = [
     "ERA",  # no commented-out code left behind
     "ARG",  # unused parameters are usually forgotten call sites
     "ISC",  # implicit string concatenation across lines hides missing commas
+    "PGH",  # blanket noqa / bare type-ignore are banned (suppression hygiene)
+    "EM",   # exception messages are built before the raise site
+    "PTH",  # pathlib APIs instead of os.path / builtin open
     "RUF",  # ruff-native: unused noqa, implicit Optional, ambiguous unicode
 ]
 
@@ -51,11 +54,18 @@ disallow_any_unimported = true
 disallow_any_decorated = true
 # Extra error codes outside `strict`, each proven clean on this tree:
 # redundant conditions, always-true tests, reads of variables mypy cannot
-# prove were assigned, plus bare ignores/reveals that would dodge review.
+# prove were assigned, incompatible mutable-attribute overrides, functions
+# used in boolean context without being called, silent str/bytes coercion,
+# narrowing assignments to non-subtypes, plus bare ignores/reveals that
+# would dodge review.
 enable_error_code = [
     "redundant-expr",
     "truthy-bool",
     "possibly-undefined",
     "ignore-without-code",
     "unimported-reveal",
+    "mutable-override",
+    "truthy-function",
+    "str-bytes-safe",
+    "narrowed-type-not-subtype",
 ]

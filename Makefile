@@ -10,8 +10,9 @@ SCRIPTS := entrypoint.sh start.sh stop.sh $(sort $(wildcard scripts/*.sh))
 PY := $(sort $(wildcard scripts/*.py))
 # The yamllint config itself is YAML; a broken config must fail lint, not
 # silently fall back to defaults. Dependabot's file is YAML too and gets the
-# same gate as the workflows.
-YAML := $(sort $(wildcard .github/workflows/*.yml)) .yamllint.yaml .github/dependabot.yml
+# same gate as the workflows. Workflows match on both .yml and .yaml so a
+# differently-suffixed file cannot slip past the gate.
+YAML := $(sort $(wildcard .github/workflows/*.yml) $(wildcard .github/workflows/*.yaml)) .yamllint.yaml .github/dependabot.yml
 
 .DEFAULT_GOAL := test
 .PHONY: lint test coverage

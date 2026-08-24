@@ -48,7 +48,8 @@ def main(argv: list[str]) -> int:
             # raising and would blow up in int() with an uncaught ValueError;
             # Infinity fails later inside quantize. Reject both here so every
             # bad value takes the one clean failure path.
-            raise InvalidOperation(f"line-rate must be finite, got '{rate}'")
+            msg = f"line-rate must be finite, got '{rate}'"
+            raise InvalidOperation(msg)
         pct = int((rate * 100).quantize(Decimal(1), rounding=ROUND_HALF_UP))
         Path(argv[2]).write_text(badge(pct, colour(pct)))
     except (OSError, ET.ParseError, ArithmeticError) as exc:

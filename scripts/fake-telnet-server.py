@@ -24,6 +24,7 @@ quiescence are both just end-of-input signals here.
 import socket
 import sys
 import time
+from pathlib import Path
 
 QUIET = 0.4  # seconds of silence that end input collection
 HOLD_SECS = 300  # --hold silence span; the client timeout must fire long before
@@ -61,5 +62,5 @@ while True:
     conn.close()
     break
 srv.close()
-with open(out, "wb") as f:
+with Path(out).open("wb") as f:
     f.write(buf)
