@@ -173,7 +173,7 @@ stop() {
 }
 
 restart() {
-  stop
+  # start() opens with the graceful stop, so restarting needs nothing else.
   start
 }
 

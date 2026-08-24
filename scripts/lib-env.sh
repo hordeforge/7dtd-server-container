@@ -96,7 +96,16 @@ check_telnet_port() {
 # enforce the value rules above. One owner of both the defaults and the
 # validate step so host scripts and the container entrypoint cannot drift
 # apart. Call after load_env_file where a .env is in play.
+#
+# The lab default password is public (it ships in this repo), and a set
+# TelnetPassword makes the game listen for telnet on all interfaces, so a boot
+# that silently fell back to it would expose a console to everyone on the LAN.
+# Applying the default therefore warns on stderr every time, in the ops
+# scripts and in the container's captured boot log alike.
 init_telnet_env() {
+  if [[ -z "${TELNET_PASSWORD:-}" ]]; then
+    echo "WARN: TELNET_PASSWORD unset; falling back to the public lab default. Set a private value in .env or the environment." >&2
+  fi
   TELNET_PASSWORD="${TELNET_PASSWORD:-retest}"
   TELNET_PORT="${TELNET_PORT:-8087}"
   reject_unsafe_value TELNET_PASSWORD "$TELNET_PASSWORD"

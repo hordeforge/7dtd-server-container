@@ -165,9 +165,19 @@ echo "telnet port rules OK"
   set -euo pipefail
   source "$ROOT/scripts/lib-env.sh"
   unset TELNET_PASSWORD TELNET_PORT
-  init_telnet_env
+  # Capture stderr beside (not around) the call: wrapping it in a command
+  # substitution would run init_telnet_env in a nested subshell and lose the
+  # assignments this block asserts on.
+  warn_file="$tmp/default-warn.txt"
+  init_telnet_env 2>"$warn_file"
+  out="$( < "$warn_file" )"
   [[ "${TELNET_PASSWORD:-}" == "retest" && "${TELNET_PORT:-}" == "8087" ]] || {
     echo "FAIL: init_telnet_env did not apply defaults (got '${TELNET_PASSWORD-}'/'${TELNET_PORT-}')" >&2; exit 1; }
+  # The default password is public (it ships in this repo) and a set telnet
+  # password makes the game listen on all interfaces, so the fallback must be
+  # visible on stderr instead of silent.
+  [[ "$out" == *WARN* ]] || {
+    echo "FAIL: applying the default TELNET_PASSWORD must warn (got '$out')" >&2; exit 1; }
   echo "init_telnet_env defaults OK"
 )
 (
@@ -176,9 +186,11 @@ echo "telnet port rules OK"
   # Callers (run.sh, perf.sh, entrypoint.sh) invoke init_telnet_env at top
   # level with the values already in the environment; mirror that here.
   export TELNET_PASSWORD='s3cret-pass' TELNET_PORT=26902
-  init_telnet_env
+  out="$(init_telnet_env 2>&1)"
   [[ "${TELNET_PASSWORD:-}" == "s3cret-pass" && "${TELNET_PORT:-}" == "26902" ]] || {
     echo "FAIL: init_telnet_env clobbered provided values" >&2; exit 1; }
+  [[ -z "$out" ]] || {
+    echo "FAIL: an operator-supplied TELNET_PASSWORD must not warn (got '$out')" >&2; exit 1; }
   echo "init_telnet_env precedence OK"
 )
 if ( TELNET_PASSWORD='a|b' TELNET_PORT=8087 init_telnet_env ) 2>/dev/null; then
