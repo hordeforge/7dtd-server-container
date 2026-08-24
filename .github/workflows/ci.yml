@@ -83,6 +83,9 @@ jobs:
           fi
           cp "$RUNNER_TEMP/coverage.svg" badge-repo/
           cd badge-repo
+          # The clone path already has an origin (the token URL); drop it so
+          # this works identically on both the fresh-init and cloned paths.
+          git remote remove origin 2>/dev/null || true
           git remote add origin "$url"
           git config user.name "hordeforge-ci"
           git config user.email "ci@hordeforge.noreply.github.com"
