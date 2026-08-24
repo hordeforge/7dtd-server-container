@@ -28,6 +28,16 @@ The env file's resource lifecycle gets the same treatment on real paths:
              next start (owner PID embedded in the name); a live owner's
              file survives, and the freshly created name carries the PID
 
+stop() is the world-save path, so its three shapes run against the same
+stub plus the real fake telnet endpoint:
+
+  graceful   container running + telnet answering: password + `shutdown`
+             reach the wire byte-exact and podman sees ps -> wait -> stop
+  fallback   container running + telnet dead: the same wait -> stop tail
+             still runs (never skip the stop because the console is down)
+  idle       nothing running: a bare no-op that never creates a secret
+             env file (stop must not call make_common)
+
 Each failed check prints a FAIL line; the process exits nonzero if any failed.
 """
 
@@ -36,6 +46,7 @@ from __future__ import annotations
 import os
 import re
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -43,7 +54,8 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-RUN_SH = ROOT / "scripts" / "run.sh"
+SCRIPTS = ROOT / "scripts"
+RUN_SH = SCRIPTS / "run.sh"
 
 failed_checks: list[str] = []
 
@@ -348,6 +360,128 @@ with tempfile.TemporaryDirectory() as tmp:
         "the fresh env file name carries the owning PID (sweep contract)",
         bool(re.fullmatch(rf"7dtd-container-env\.{sweep_proc.pid}\.[A-Za-z0-9_]+", name)),
     )
+
+
+# Graceful stop against a live telnet endpoint: the shutdown request is the
+# only thing standing between a running game and a forced stop without a
+# world save, so the wire bytes and the podman verb sequence are pinned here.
+def start_fake_telnet(output: Path) -> tuple[subprocess.Popen[bytes], str]:
+    """Start fake-telnet-server.py on an ephemeral port; return (proc, port)."""
+    proc = subprocess.Popen(
+        [sys.executable, str(SCRIPTS / "fake-telnet-server.py"), "0", str(output)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    assert proc.stdout is not None
+    return proc, proc.stdout.readline().decode().strip()
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    bindir = install_podman_stub(tmpdir, PODMAN_STUB)
+    log = tmpdir / "podman-argv.log"
+    wire = tmpdir / "wire.bin"
+    server, port = start_fake_telnet(wire)
+    try:
+        check("fake telnet endpoint reported a port", port.isdigit())
+        env = {
+            **os.environ,
+            "PATH": f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}",
+            "STUB_LOG": str(log),
+            "STUB_SNAPSHOT": str(tmpdir / "envfile.snapshot"),
+            "STUB_MODE": str(tmpdir / "envfile.mode"),
+            "STUB_PS_OUTPUT": f"{NAME}\n",
+            "TELNET_PASSWORD": TELNET_PASSWORD,
+            "TELNET_PORT": port,
+        }
+        proc = subprocess.run(
+            [str(RUN_SH), "stop"],
+            env=env,
+            capture_output=True,
+            check=False,
+            timeout=120,
+        )
+    finally:
+        server.kill()
+        server.wait()
+    check("graceful stop exits 0", proc.returncode == 0)
+    if proc.returncode != 0:
+        print(proc.stderr.decode(errors="replace"), file=sys.stderr)
+    check(
+        "graceful stop sent password + shutdown over telnet",
+        wire.read_bytes() == f"{TELNET_PASSWORD}\nshutdown\n".encode(),
+    )
+    verbs = [rec[0] for rec in stub_invocations(log) if rec]
+    check("graceful stop drives podman ps -> wait -> stop", verbs == [b"ps", b"wait", b"stop"])
+    check("stop never writes the secret env file", b"--env-file" not in log.read_bytes())
+
+# Telnet unreachable mid-stop: the forced-stop fallback must still drive the
+# same wait -> stop tail and exit 0; skipping the stop because the console is
+# down would leave the container running (or kill it without a save).
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    bindir = install_podman_stub(tmpdir, PODMAN_STUB)
+    log = tmpdir / "podman-argv.log"
+    # A just-bound-then-closed ephemeral port: connect gets refused now.
+    probe_sock = socket.socket()
+    probe_sock.bind(("127.0.0.1", 0))
+    dead_port = str(probe_sock.getsockname()[1])
+    probe_sock.close()
+    env = {
+        **os.environ,
+        "PATH": f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}",
+        "STUB_LOG": str(log),
+        "STUB_SNAPSHOT": str(tmpdir / "envfile.snapshot"),
+        "STUB_MODE": str(tmpdir / "envfile.mode"),
+        "STUB_PS_OUTPUT": f"{NAME}\n",
+        "TELNET_PASSWORD": TELNET_PASSWORD,
+        "TELNET_PORT": dead_port,
+    }
+    proc = subprocess.run(
+        [str(RUN_SH), "stop"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    out = proc.stdout + proc.stderr
+    check("stop with dead telnet exits 0", proc.returncode == 0)
+    check(
+        "dead-telnet stop names its fallback",
+        b"not reachable" in out or b"forcing stop" in out,
+    )
+    verbs = [rec[0] for rec in stub_invocations(log) if rec]
+    check("forced-stop fallback still drives wait -> stop", verbs == [b"ps", b"wait", b"stop"])
+
+# Nothing running: stop must be a fast no-op -- only the state probe plus the
+# idempotent final stop -- and never create a secret env file.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    bindir = install_podman_stub(tmpdir, PODMAN_STUB)
+    log = tmpdir / "podman-argv.log"
+    env = {
+        **os.environ,
+        "PATH": f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}",
+        "STUB_LOG": str(log),
+        "STUB_SNAPSHOT": str(tmpdir / "envfile.snapshot"),
+        "STUB_MODE": str(tmpdir / "envfile.mode"),
+        "STUB_PS_OUTPUT": "",
+        "TELNET_PASSWORD": TELNET_PASSWORD,
+        "TELNET_PORT": "8087",
+    }
+    proc = subprocess.run(
+        [str(RUN_SH), "stop"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    check("stop with nothing running exits 0", proc.returncode == 0)
+    if proc.returncode != 0:
+        print(proc.stderr.decode(errors="replace"), file=sys.stderr)
+    verbs = [rec[0] for rec in stub_invocations(log) if rec]
+    check("idle stop only probes state then stops", verbs == [b"ps", b"stop"])
+    check("idle stop never writes the secret env file", b"--env-file" not in log.read_bytes())
 
 if failed_checks:
     sys.exit(1)

@@ -60,6 +60,7 @@ test:
 	python3 scripts/test_systemd_unit.py
 	python3 scripts/test_run_sh.py
 	python3 scripts/test_perf_sh.py
+	python3 scripts/test_stage_mods.py
 
 coverage:
 	rm -rf coverage

@@ -10,10 +10,13 @@ owned here). A sandbox ROOT gets copies of perf.sh + lib-env.sh, a stub
 run.sh recording restart invocations, and a fixture config carrying both
 top-level and nested "Enabled" flags; then:
 
-  status   reports on/off/missing (missing is reported, not fatal)
-  off      rewrites only the top-level flag byte-exactly, leaves every
-           nested flag untouched, reports (was <old>), and restarts once
-  on       same contract in reverse
+  status     reports on/off/missing (missing is reported, not fatal)
+  off        rewrites only the top-level flag byte-exactly, leaves every
+             nested flag untouched, reports (was <old>), and restarts once
+  on         same contract in reverse
+  negatives  off without a config, and off against a config whose format
+             drifted out of the sed's reach, must fatal-exit naming the
+             cause and must not restart the container
 
 Each failed check prints a FAIL line; the process exits nonzero if any failed.
 """
@@ -128,6 +131,34 @@ with tempfile.TemporaryDirectory() as tmp:
         "on restored the exact original bytes",
         cfg_path(root).read_text(encoding="utf-8") == CONFIG_ON,
     )
+
+    # Negative: off without a config must refuse loudly instead of restarting
+    # an unchanged container and reporting success.
+    root = make_sandbox(Path(tmp) / "missing-off", None)
+    proc = run_perf(["off"], root)
+    check(
+        "off without a config fatal-exits naming it",
+        proc.returncode != 0 and "FATAL" in proc.stderr.decode(errors="replace"),
+    )
+    check("refused off restarted nothing", not (root / "restarts.log").exists())
+
+    # The documented silent-no-op mode: a future mod build reformats the
+    # top-level flag out of the sed's reach (here: deeper indent). The
+    # post-edit verify must catch that, fatal-exit, leave the config
+    # untouched, and never restart.
+    reformatted = CONFIG_ON.replace('\n  "Enabled"', '\n      "Enabled"')
+    root = make_sandbox(Path(tmp) / "drifted-off", reformatted)
+    proc = run_perf(["off"], root)
+    err = proc.stderr.decode(errors="replace")
+    check(
+        "off on a drifted config fatal-exits naming the format change",
+        proc.returncode != 0 and "config format changed" in err,
+    )
+    check(
+        "drifted off left the config byte-exact",
+        cfg_path(root).read_text(encoding="utf-8") == reformatted,
+    )
+    check("drifted off restarted nothing", not (root / "restarts.log").exists())
 
 if failed_checks:
     sys.exit(1)
