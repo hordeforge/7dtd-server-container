@@ -113,8 +113,9 @@ seed_admin_file() {
   # The webuser credential never ships in the image or repo: WEBADMIN_PASSWORD
   # wins when set, otherwise a random value is minted for this seed. Only the
   # MD5 digest the dashboard expects is written to serveradmin.xml. A minted
-  # password is printed once, below, because that log line is the only record
-  # of it; an operator-provided one is never echoed into the log.
+  # password is recorded once, below, in an owner-only file beside the seeded
+  # admin file; it must not go into the log, which podman/journald retain
+  # indefinitely and every process in the user session can read.
   local minted=0
   if [[ -z "${WEBADMIN_PASSWORD:-}" ]]; then
     WEBADMIN_PASSWORD="$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
@@ -133,9 +134,15 @@ seed_admin_file() {
     /config/serveradmin_seed.xml > "$out"
   assert_rendered "$out" '@WEBADMIN_PASSWORD_HASH@'
   mv -f "$out" "$USERDATA_DIR/Saves/serveradmin.xml"
+  # The credential record lives under the umask-077 scope above, so it lands
+  # 0600. A stale record from a previous mint must not survive a seed that
+  # applied an operator password instead.
+  local record="$USERDATA_DIR/Saves/.webadmin-password"
   if (( minted == 1 )); then
-    log "seeded serveradmin.xml (dashboard webuser admin, password: $WEBADMIN_PASSWORD)"
+    printf '%s\n' "$WEBADMIN_PASSWORD" > "$record"
+    log "seeded serveradmin.xml (dashboard webuser admin); minted password written to $record"
   else
+    rm -f "$record"
     log "seeded serveradmin.xml (dashboard webuser admin, WEBADMIN_PASSWORD applied)"
   fi
 }

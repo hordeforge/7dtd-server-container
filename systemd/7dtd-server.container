@@ -30,7 +30,8 @@ Init=true
 # Environment=TELNET_PASSWORD=change-me
 # Environment=TELNET_PORT=8087
 # Dashboard webuser password; when unset the entrypoint mints a random one at
-# first seed and logs it once. Set a value here to control it:
+# first seed and records it in the owner-only file
+# data/userdata/Saves/.webadmin-password. Set a value here to control it:
 # Environment=WEBADMIN_PASSWORD=change-me
 # :Z relabels the sources to container_file_t (SELinux enforcing RHEL host).
 # mods is rw for the /api/perf toggle (EfficientServer config).

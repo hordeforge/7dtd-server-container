@@ -65,7 +65,7 @@ cd ~/7dtd-server
 |---|---|
 | 26900 | Game: client "Connect to IP" (LiteNetLib) |
 | 26902 | LiteNetLib data port (loadgen bots connect here) |
-| 8080 | Web dashboard + APM bridge panel (webuser `admin`, password: `WEBADMIN_PASSWORD` or the first-seed log line) |
+| 8080 | Web dashboard + APM bridge panel (webuser `admin`, password: `WEBADMIN_PASSWORD` or the minted-record file `data/userdata/Saves/.webadmin-password`) |
 | 8087 | Telnet console (`TELNET_PORT`) |
 
 Networking is host mode: the server binds directly on the host, no NAT.
@@ -126,14 +126,16 @@ export TELNET_PASSWORD=change-me            # telnet console password (default r
 export TELNET_PORT=8087                     # telnet port (default 8087)
 export WEBADMIN_PASSWORD=change-me          # dashboard webuser password; if unset a
                                             # random one is minted at first seed and
-                                            # logged once (container log / journalctl)
+                                            # written to data/userdata/Saves/.webadmin-password
 export STEAMCMD_UPDATE=0                    # skip steamcmd validate on next start
 ```
 
 The dashboard webuser password is never stored in the repo: at first seed the
 entrypoint takes `WEBADMIN_PASSWORD` (min 8 chars) or generates a random value,
 writes only its MD5 digest into `data/userdata/Saves/serveradmin.xml`, and
-prints the plaintext once. For the quadlet path, add
+records a minted plaintext once in the owner-only file
+`data/userdata/Saves/.webadmin-password` (never in the container log, which
+journald retains indefinitely). For the quadlet path, add
 `Environment=WEBADMIN_PASSWORD=...` to `systemd/7dtd-server.container` before
 installing it.
 
