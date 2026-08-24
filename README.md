@@ -29,10 +29,10 @@ and disposable.
 | `scripts/perf.sh` | EfficientServer toggle (`on`/`off`/`status`) + telnet `apm status` snapshot (`measure`) |
 | `scripts/lib-env.sh` | Shared `.env` loader, telnet value validation, telnet session helper (sourced by the ops scripts) |
 | `start.sh` / `stop.sh` | Top-level daily shortcuts: start / graceful stop (wrap `run.sh`) |
-| `Makefile` | `make test` (lib-env + badge + config-check unit tests), `make lint` (bash -n + shellcheck + reference check over every shell script; ruff rules/format, mypy strict, yamllint over Python and CI YAML; Containerfile structure check) |
+| `Makefile` | `make test`, `make lint` (bash -n + shellcheck + reference check over every shell script; ruff rules/format, mypy strict, yamllint over Python and CI YAML; Containerfile structure check) |
 | `pyproject.toml`, `.yamllint.yaml` | Static analysis config: ruff (rules + 100-col format), mypy strict, yamllint; enforced by `make lint` locally and in CI with pinned versions |
 | `.github/workflows/ci.yml` | CI: lint, tests, Containerfile and config-template validation; publishes the coverage badge on main |
-| `scripts/test_lib_env.sh`, `scripts/test_coverage_badge.py`, `scripts/test_check_config_xml.py`, `scripts/test_config_templates.py` | Tests behind `make test`; `fake-telnet-server.py` is their fake telnet endpoint fixture |
+| `scripts/test_lib_env.sh`, `scripts/test_coverage_badge.py`, `scripts/test_check_config_xml.py`, `scripts/test_config_templates.py`, `scripts/test_systemd_unit.py`, `scripts/test_run_sh.py` | Tests behind `make test`; `fake-telnet-server.py` is their fake telnet endpoint fixture |
 | `scripts/check-config-xml.py`, `scripts/coverage_badge.py` | CI helpers: config XML well-formedness check, coverage badge renderer |
 | `systemd/7dtd-server.container` | Quadlet for a durable rootless user service |
 | `mods/` (runtime) | Enabled mods, bind-mounted into the container |
