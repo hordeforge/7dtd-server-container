@@ -25,6 +25,10 @@ select = [
     "FLY", "ICN", "PIE", "TID", "YTT", "RSE", "RET",
     "A",    # no shadowing builtins
     "SLF",  # no reaching into other modules' private names
+    "C90",  # cyclomatic complexity ceiling (default 10)
+    "ERA",  # no commented-out code left behind
+    "ARG",  # unused parameters are usually forgotten call sites
+    "ISC",  # implicit string concatenation across lines hides missing commas
     "RUF",  # ruff-native: unused noqa, implicit Optional, ambiguous unicode
 ]
 
@@ -40,3 +44,8 @@ files = ["scripts"]
 # Not part of `strict`: flags code that can never run (dead branches after
 # exhaustive returns, impossible conditions).
 warn_unreachable = true
+# Not part of `strict` either: pin down every explicit or import-carried `Any`
+# so no untyped escape hatch can enter the codebase silently.
+disallow_any_explicit = true
+disallow_any_unimported = true
+disallow_any_decorated = true
