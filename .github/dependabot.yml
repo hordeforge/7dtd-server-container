@@ -1,0 +1,15 @@
+---
+# Keeps the two dependency surfaces of this repo current:
+# - github-actions: the checkout SHA pin in ci.yml
+# - pip: requirements-lint.txt (hashed analyzer toolchain; PRs must keep
+#   hashes in sync, see the header comment in that file)
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
