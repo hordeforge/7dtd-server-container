@@ -1,0 +1,4 @@
+# Every tracked file is consumed by Linux tooling (bash by shebang, sed
+# rendering of the config templates, make, python3). CRLF checkouts, e.g.
+# git's default core.autocrlf=true on Windows, break all of them.
+* text=auto eol=lf
