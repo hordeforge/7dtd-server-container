@@ -4,10 +4,12 @@
 Methodology: pin the rendering contract at its boundaries.
   main()     Cobertura line-rate parsing, half-up rounding of exact ties
              (the documented binary-float distortion case), the missing-
-             attribute default, and the usage-error exit code
+             attribute default, the usage-error exit code, and clean
+             nonzero failures (with a named-input message) for malformed
+             XML, non-numeric line-rate values, and unwritable outputs
   colour()   every threshold inclusive; one step below drops to the next band
   badge SVG  well-formed XML whose text nodes carry label + percentage and
-             whose value rect carries the band colour
+            whose value rect carries the band colour
 Each failed check prints a FAIL line; the process exits nonzero if any failed.
 """
 
@@ -64,6 +66,37 @@ check("missing line-rate defaults to 0%", rc == 0 and svg_texts(root) == ["cover
 with contextlib.redirect_stderr(io.StringIO()):
     usage_rc = coverage_badge.main(["coverage_badge"])
 check("usage error exits 2", usage_rc == 2)
+
+
+# Failure paths must exit 1 with a message naming the input, never a raw
+# traceback (the badge step runs unattended in CI; the operator needs the
+# culprit file, not a stack).
+def failing(content: str, out_name: str = "badge.svg") -> int:
+    with tempfile.TemporaryDirectory() as tmp:
+        tmpdir = Path(tmp)
+        src = tmpdir / "cobertura.xml"
+        dst = tmpdir / out_name
+        src.write_text(content)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = coverage_badge.main(["coverage_badge", str(src), str(dst)])
+        check(f"failure names the input ({content!r})", "cobertura.xml" in err.getvalue())
+        return rc
+
+
+check("malformed XML exits 1", failing("<coverage><unclosed>") == 1)
+check("non-numeric line-rate exits 1", failing('<coverage line-rate="abc"/>') == 1)
+
+# Unwritable output directory: OSError must surface as exit 1, not a crash.
+with tempfile.TemporaryDirectory() as tmp:
+    src = Path(tmp) / "cobertura.xml"
+    src.write_text('<coverage line-rate="0.5"/>')
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        rc = coverage_badge.main(
+            ["coverage_badge", str(src), str(Path(tmp) / "no-such-dir" / "badge.svg")]
+        )
+check("unwritable output exits 1", rc == 1)
 
 # Colour bands: thresholds inclusive, the value below falls through.
 for pct, fill in [

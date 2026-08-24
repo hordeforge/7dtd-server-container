@@ -61,11 +61,17 @@ case "${1:-status}" in
     echo "EfficientServer: $state"
     ;;
   measure)
+    # Capture the reply before the display pipeline: a failed session
+    # (container down, timeout) must print why, not die silently inside the
+    # pipe where pipefail surfaces only as a bare nonzero exit with no output.
+    reply="$(telnet_session "$TELNET_PORT" "$TELNET_PASSWORD" 'apm status\nquit' 15 2>&1)" || {
+      echo "FATAL: telnet session on port $TELNET_PORT failed (is the container up?); no apm status" >&2
+      exit 1
+    }
     # Strip control bytes without binutils(1) strings, which a minimal podman
     # host may not ship: keep only printable ASCII plus tab/newline (CR goes,
     # so telnet's \r\n ends up as plain lines; IAC/high bytes go with it).
-    telnet_session "$TELNET_PORT" "$TELNET_PASSWORD" 'apm status\nquit' 15 2>&1 \
-      | LC_ALL=C tr -cd '\11\12\40-\176' | tail -30
+    printf '%s\n' "$reply" | LC_ALL=C tr -cd '\11\12\40-\176' | tail -30
     ;;
   *)
     echo "usage: $0 {on|off|status|measure}" >&2

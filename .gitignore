@@ -9,3 +9,6 @@ coverage/
 coverage.cobertura.xml
 # Python bytecode from importing coverage_badge in its unit tests.
 scripts/__pycache__/
+
+# Local scratch space (never commit).
+.scratch/

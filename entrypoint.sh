@@ -81,11 +81,15 @@ EOF
 
 render_config() {
   log "render serverconfig.xml (telnet port $TELNET_PORT)"
+  # Render to a sibling temp file and rename: a sed killed midway must never
+  # leave a truncated serverconfig.xml for the game to choke on at boot.
+  local out="$GAME_DIR/.serverconfig.xml.tmp"
   sed -e "s|@TELNET_PASSWORD@|${TELNET_PASSWORD}|g" \
       -e "s|@TELNET_PORT@|${TELNET_PORT}|g" \
       -e "s|@USERDATA_DIR@|${USERDATA_DIR}|g" \
-      /config/serverconfig.tmpl.xml > "$GAME_DIR/serverconfig.xml"
-  assert_rendered "$GAME_DIR/serverconfig.xml" '@TELNET_PASSWORD@' '@TELNET_PORT@' '@USERDATA_DIR@'
+      /config/serverconfig.tmpl.xml > "$out"
+  assert_rendered "$out" '@TELNET_PASSWORD@' '@TELNET_PORT@' '@USERDATA_DIR@'
+  mv -f "$out" "$GAME_DIR/serverconfig.xml"
 }
 
 seed_admin_file() {
@@ -113,9 +117,14 @@ seed_admin_file() {
   hex="$(printf '%s' "$WEBADMIN_PASSWORD" | md5sum)"
   hex="${hex%% *}"
   b64="$(printf '%b' "$(printf '%s' "$hex" | sed 's/\(..\)/\\x\1/g')" | base64)"
+  # Atomic rename, same rationale as render_config. Extra weight here: the
+  # seed is skipped whenever serveradmin.xml exists, so a truncated in-place
+  # write would persist forever and silently lock the dashboard out.
+  local out="$USERDATA_DIR/Saves/.serveradmin.xml.tmp"
   sed -e "s|@WEBADMIN_PASSWORD_HASH@|${b64}|g" \
-    /config/serveradmin_seed.xml > "$USERDATA_DIR/Saves/serveradmin.xml"
-  assert_rendered "$USERDATA_DIR/Saves/serveradmin.xml" '@WEBADMIN_PASSWORD_HASH@'
+    /config/serveradmin_seed.xml > "$out"
+  assert_rendered "$out" '@WEBADMIN_PASSWORD_HASH@'
+  mv -f "$out" "$USERDATA_DIR/Saves/serveradmin.xml"
   if (( minted == 1 )); then
     log "seeded serveradmin.xml (dashboard webuser admin, password: $WEBADMIN_PASSWORD)"
   else

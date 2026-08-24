@@ -24,7 +24,9 @@ esac
 
 "$ROOT/scripts/stage_mods.sh"
 
-rsync -a --delete \
+# Bound the network waits: ConnectTimeout stops a dead host from hanging the
+# TCP connect, --timeout aborts a stalled transfer after 60s of no data.
+rsync -a --delete --timeout=60 -e "ssh -o ConnectTimeout=10" \
   --exclude .git \
   --exclude data \
   "$ROOT/" "${SSH_USER}@${HOST}:${DEST_DIR}/"
@@ -34,5 +36,5 @@ if [[ "$RESTART" == "1" ]]; then
   # DEST_DIR travels as stdin data, never inside the remote command string, so
   # no character in SEVENDTD_SERVER_DIR can change what the remote shell runs.
   printf '%s\n' "$DEST_DIR" \
-    | ssh "${SSH_USER}@${HOST}" 'read -r dest_dir && cd "$dest_dir" && ./scripts/update_mods.sh'
+    | ssh -o ConnectTimeout=10 "${SSH_USER}@${HOST}" 'read -r dest_dir && cd "$dest_dir" && ./scripts/update_mods.sh'
 fi

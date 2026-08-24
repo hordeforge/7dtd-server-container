@@ -37,6 +37,7 @@ lint:
 test:
 	bash scripts/test_lib_env.sh
 	python3 scripts/test_coverage_badge.py
+	python3 scripts/test_check_config_xml.py
 
 coverage:
 	rm -rf coverage

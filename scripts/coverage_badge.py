@@ -37,14 +37,19 @@ def main(argv: list[str]) -> int:
     if len(argv) != 3:
         print(f"usage: {argv[0]} COBERTURA_XML OUTPUT.svg", file=sys.stderr)
         return 2
-    root = ET.parse(argv[1]).getroot()
-    # Parse the ratio as an exact decimal and round half-up to a whole
-    # percent: going through binary float distorts ties unpredictably
-    # (0.985 * 100 reads back as 98.4999... and displays 98 instead of 99).
-    pct = int(
-        (Decimal(root.get("line-rate", "0")) * 100).quantize(Decimal(1), rounding=ROUND_HALF_UP)
-    )
-    Path(argv[2]).write_text(badge(pct, colour(pct)))
+    try:
+        root = ET.parse(argv[1]).getroot()
+        # Parse the ratio as an exact decimal and round half-up to a whole
+        # percent: going through binary float distorts ties unpredictably
+        # (0.985 * 100 reads back as 98.4999... and displays 98 instead of 99).
+        pct = int(
+            (Decimal(root.get("line-rate", "0")) * 100).quantize(Decimal(1), rounding=ROUND_HALF_UP)
+        )
+        Path(argv[2]).write_text(badge(pct, colour(pct)))
+    except (OSError, ET.ParseError, ArithmeticError) as exc:
+        # InvalidOperation (a non-numeric line-rate) is an ArithmeticError.
+        print(f"{argv[0]}: cannot render badge from {argv[1]}: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 

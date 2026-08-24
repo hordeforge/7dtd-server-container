@@ -117,7 +117,20 @@ stop() {
       echo "container still running after telnet shutdown; forcing stop"
     fi
   fi
-  podman stop -t 30 "$NAME" 2>/dev/null || true
+  # Idempotent final stop. Failure means either an already-gone container
+  # (the normal no-op) or real trouble; a real failure must not read as
+  # success, because the world save may never have happened.
+  if ! podman stop -t 30 "$NAME" >/dev/null 2>&1; then
+    if podman ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$NAME"; then
+      echo "FATAL: podman stop failed but $NAME still exists; check podman logs/events" >&2
+      exit 1
+    fi
+    if ! podman info >/dev/null 2>&1; then
+      echo "FATAL: podman stop failed and podman is unreachable; container state unknown" >&2
+      exit 1
+    fi
+    # Daemon reachable and the container is gone: the idempotent no-op case.
+  fi
 }
 
 restart() {
