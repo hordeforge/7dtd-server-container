@@ -26,7 +26,9 @@ load_env_file() {
     fi
     value="${line#*=}"
     q="${value:0:1}"
-    if [[ ${#value} -ge 2 && ( "$q" == '"' || "$q" == "'" ) && "${value: -1}" == "$q" ]]; then
+    # Last char via arithmetic offset, not a negative one (${var: -1} needs
+    # bash 4.2; this form works back to bash 3.x).
+    if [[ ${#value} -ge 2 && ( "$q" == '"' || "$q" == "'" ) && "${value:$(( ${#value} - 1 )):1}" == "$q" ]]; then
       value="${value:1:$(( ${#value} - 2 ))}"
     fi
     export "$key=$value"

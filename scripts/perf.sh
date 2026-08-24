@@ -61,8 +61,11 @@ case "${1:-status}" in
     echo "EfficientServer: $state"
     ;;
   measure)
+    # Strip control bytes without binutils(1) strings, which a minimal podman
+    # host may not ship: keep only printable ASCII plus tab/newline (CR goes,
+    # so telnet's \r\n ends up as plain lines; IAC/high bytes go with it).
     telnet_session "$TELNET_PORT" "$TELNET_PASSWORD" 'apm status\nquit' 15 2>&1 \
-      | strings | tail -30
+      | LC_ALL=C tr -cd '\11\12\40-\176' | tail -30
     ;;
   *)
     echo "usage: $0 {on|off|status|measure}" >&2
