@@ -16,8 +16,16 @@ Wants=network-online.target
 Image=localhost/7dtd-server:latest
 ContainerName=7dtd-server
 Network=host
+# catatonit takes PID 1 and reaps orphans/zombies for the game's whole
+# uptime; without it, children the server forks but never waits on accumulate
+# as zombies until the container restarts (same rationale as start() in
+# scripts/run.sh).
+Init=true
 Environment=TELNET_PASSWORD=retest
 Environment=TELNET_PORT=8087
+# Dashboard webuser password; when unset the entrypoint mints a random one at
+# first seed and logs it once. Set a value here to control it:
+# Environment=WEBADMIN_PASSWORD=change-me
 # :Z relabels the sources to container_file_t (SELinux enforcing RHEL host).
 # mods is rw for the /api/perf toggle (EfficientServer config).
 Volume=%h/7dtd-server/data/game:/root/7dtd:Z

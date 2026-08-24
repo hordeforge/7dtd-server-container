@@ -1,0 +1,42 @@
+# Static analysis for the Python helpers in scripts/. Enforced by `make lint`
+# (local) and the ci workflow (blocking); versions are pinned in CI so both
+# gates run identical rules.
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors incl. E501 hard cap at 100 columns
+    "W",
+    "F",    # pyflakes
+    "B",    # bugbear: bug-prone patterns
+    "UP",   # pyupgrade: keep syntax current
+    "SIM",
+    "I",    # import order
+    "N",    # pep8-naming
+    "C4",
+    "INP",
+    "DTZ",
+    "EXE",  # shebang/exec-bit consistency
+    "FURB",
+    "PERF",
+    "PLW", "PLE", "PLC",
+    "FLY", "ICN", "PIE", "TID", "YTT", "RSE", "RET",
+    "A",    # no shadowing builtins
+    "SLF",  # no reaching into other modules' private names
+    "RUF",  # ruff-native: unused noqa, implicit Optional, ambiguous unicode
+]
+
+[tool.ruff.lint.per-file-ignores]
+# badge() embeds the SVG template as one long literal per element; wrapping
+# would break the markup, so only there the 100-column cap cannot apply.
+"scripts/coverage_badge.py" = ["E501"]
+
+[tool.mypy]
+strict = true
+python_version = "3.10"
+files = ["scripts"]
+# Not part of `strict`: flags code that can never run (dead branches after
+# exhaustive returns, impossible conditions).
+warn_unreachable = true

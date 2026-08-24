@@ -26,28 +26,43 @@ load_env_file() {
     fi
     value="${line#*=}"
     q="${value:0:1}"
-    if [[ ${#value} -ge 2 && ( "$q" == '"' || "$q" == "'" ) && "${value: -1}" == "$q" ]]; then
+    # Last char via arithmetic offset, not a negative one (${var: -1} needs
+    # bash 4.2; this form works back to bash 3.x).
+    if [[ ${#value} -ge 2 && ( "$q" == '"' || "$q" == "'" ) && "${value:$(( ${#value} - 1 )):1}" == "$q" ]]; then
       value="${value:1:$(( ${#value} - 2 ))}"
     fi
     export "$key=$value"
   done < "$1"
 }
 
-# TELNET_PASSWORD is embedded into double-quoted shell strings by the telnet
-# helpers in run.sh/perf.sh and rendered into serverconfig.xml inside the
-# container (an XML attribute value, where < is illegal); TELNET_PORT goes
-# into both too. Reject unsafe values up front instead of failing later as a
+# Shared character policy for values that travel through double-quoted shell
+# strings in the ops scripts (telnet_session) and are rendered by sed into XML
+# attribute values (serverconfig.xml, serveradmin.xml; < is illegal there):
+# reject unsafe values up front instead of escaping, because the game reads
+# the rendered files and a mangled value fails far from the cause as a
 # boot-time config parse error, a silent forced stop (no world save), or a
 # container that dies on startup. The entrypoint sources this same file from
 # the image (/usr/local/lib/7dtd-lib-env.sh), so host scripts and container
 # enforce one shared copy of these rules.
-check_telnet_password() {
-  case "$TELNET_PASSWORD" in
+reject_unsafe_value() { # name value
+  local name="$1" value="$2"
+  # The pattern matches each forbidden character literally; the escaped quote
+  # inside it is the only way to write a literal single quote in a pattern.
+  # shellcheck disable=SC1003  # intentional literal-quote case pattern
+  case "$value" in
     *'\'*|*'|'*|*'&'*|*"'"*|*'"'*|*'$'*|*'`'*|*'<'*|*'>'*|*[![:print:]]*)
-      echo "FATAL: TELNET_PASSWORD must avoid backslash, |, &, ', \", \$, backtick, <, >, and control characters" >&2
+      echo "FATAL: $name must avoid backslash, |, &, ', \", \$, backtick, <, >, and control characters" >&2
       exit 1
       ;;
   esac
+}
+
+check_webadmin_password() {
+  reject_unsafe_value WEBADMIN_PASSWORD "$WEBADMIN_PASSWORD"
+  if (( ${#WEBADMIN_PASSWORD} < 8 )); then
+    echo "FATAL: WEBADMIN_PASSWORD must be at least 8 characters" >&2
+    exit 1
+  fi
 }
 
 check_telnet_port() {
@@ -67,12 +82,23 @@ check_telnet_port() {
   fi
 }
 
+# Fill unset TELNET_PASSWORD/TELNET_PORT with the committed lab defaults, then
+# enforce the value rules above. One owner of both the defaults and the
+# validate step so host scripts and the container entrypoint cannot drift
+# apart. Call after load_env_file where a .env is in play.
+init_telnet_env() {
+  TELNET_PASSWORD="${TELNET_PASSWORD:-retest}"
+  TELNET_PORT="${TELNET_PORT:-8087}"
+  reject_unsafe_value TELNET_PASSWORD "$TELNET_PASSWORD"
+  check_telnet_port
+}
+
 # Single owner of the telnet wire exchange: open one /dev/tcp session to
 # 127.0.0.1, send the password, send the payload, print the reply until
-# timeout or EOF. Callers must have run check_telnet_password/check_telnet_port
-# first (the port is re-checked here). The payload is a printf format
+# timeout or EOF. Callers must have run init_telnet_env first (the port is
+# re-checked here). The payload is a printf format
 # fragment; separate commands with \n, e.g. 'shutdown' or 'apm status\nquit'.
-telnet_session() { # port password payload timeout_seconds
+telnet_session() { # port password payload timeout_secs
   local port="$1" password="$2" payload="$3" timeout_secs="$4"
   # An empty or non-numeric port would make /dev/tcp fall back to the http
   # port and hang the session; callers run check_telnet_port, this pins the
@@ -81,14 +107,37 @@ telnet_session() { # port password payload timeout_seconds
     echo "FATAL: telnet_session: port must be numeric (got '$port')" >&2
     exit 1
   }
-  # Values travel as positional parameters, never inside the command string,
-  # so nothing needs shell quoting. The payload is a printf format fragment
-  # (separate commands with \n, e.g. 'shutdown' or 'apm status\nquit') and
-  # keeps %b; the password is data, so %s, which would otherwise mangle a
-  # '%' in it.
-  timeout "$timeout_secs" bash -c '
-    exec 3<>/dev/tcp/127.0.0.1/$1
-    printf "%s\n%b\n" "$2" "$3" >&3
-    cat <&3
-  ' telnet_session "$port" "$password" "$payload"
+  # Values travel as environment variables, never as arguments: argv is
+  # world-readable via /proc/<pid>/cmdline for the whole session, while
+  # environ is readable only by the owning user. The payload keeps %b; the
+  # password is data, so %s, which would otherwise mangle a '%' in it.
+  # shellcheck disable=SC2016  # non-expansion is the point: values reach bash -c through the environment below
+  TELNET_SESSION_PORT="$port" TELNET_SESSION_PASSWORD="$password" \
+    TELNET_SESSION_PAYLOAD="$payload" \
+    timeout "$timeout_secs" bash -c '
+      exec 3<>/dev/tcp/127.0.0.1/"$TELNET_SESSION_PORT"
+      printf "%s\n%b\n" "$TELNET_SESSION_PASSWORD" "$TELNET_SESSION_PAYLOAD" >&3
+      cat <&3
+    '
+}
+
+# Reachability probe without authenticating: does something accept a TCP
+# connection on the port right now. stop() uses it to avoid sending the
+# password into a session racing a container restart. Returns nonzero on a
+# non-numeric port or when the connect times out.
+telnet_probe() { # port timeout_seconds
+  local port="$1"
+  [[ "$port" =~ ^[0-9]+$ ]] || return 1
+  # shellcheck disable=SC2016  # non-expansion is the point: port passed as "$1" to bash -c
+  timeout "$2" bash -c 'exec 3<>/dev/tcp/127.0.0.1/$1' telnet_probe "$port"
+}
+
+# Render a webadmin password as the base64 MD5 digest the dashboard expects in
+# serveradmin.xml (<user pass="...">). One owner shared by the entrypoint seed
+# path and its test vector, so the two cannot drift apart.
+webadmin_password_digest() { # password; digest on stdout
+  local hex
+  hex="$(printf '%s' "$1" | md5sum)"
+  hex="${hex%% *}"
+  printf '%b' "$(printf '%s' "$hex" | sed 's/\(..\)/\\x\1/g')" | base64
 }

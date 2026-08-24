@@ -24,13 +24,26 @@ esac
 
 "$ROOT/scripts/stage_mods.sh"
 
-rsync -a --delete \
+# Bound the network waits: ConnectTimeout stops a dead host from hanging the
+# TCP connect, --timeout aborts a stalled transfer after 60s of no data.
+# data/ is server-owned state; the rest are workstation-local caches that must
+# not accumulate on the server host (.env travels on purpose so the
+# server-side scripts render and validate the same values).
+rsync -a --delete --timeout=60 -e "ssh -o ConnectTimeout=10" \
   --exclude .git \
   --exclude data \
+  --exclude .mypy_cache \
+  --exclude .ruff_cache \
+  --exclude __pycache__ \
+  --exclude coverage \
+  --exclude coverage.cobertura.xml \
+  --exclude .scratch \
   "$ROOT/" "${SSH_USER}@${HOST}:${DEST_DIR}/"
 
 echo "deployed $ROOT -> ${SSH_USER}@${HOST}:${DEST_DIR}/"
 if [[ "$RESTART" == "1" ]]; then
-  echo "restarting container to re-sync Mods/ ..."
-  ssh "${SSH_USER}@${HOST}" "cd ${DEST_DIR} && ./scripts/update_mods.sh"
+  # DEST_DIR travels as stdin data, never inside the remote command string, so
+  # no character in SEVENDTD_SERVER_DIR can change what the remote shell runs.
+  printf '%s\n' "$DEST_DIR" \
+    | ssh -o ConnectTimeout=10 "${SSH_USER}@${HOST}" 'read -r dest_dir && cd "$dest_dir" && ./scripts/update_mods.sh'
 fi

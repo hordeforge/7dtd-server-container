@@ -58,8 +58,8 @@ Off by default in the shipped config: `TickGuard`, `AnimatorLod`,
 ### 7dtd-server-apm-bridge (`7dtd-server-apm`) v2.2.3 - measurement
 
 Timing-only in-server instrumentation. It plugs a **web panel into the stock
-dashboard** at `http://192.168.0.100:8080` (web login `admin` / `admin`, or
-Steam). Values from `mods/7dtd-server-apm-bridge/Config/apmbridge.json`:
+dashboard** at `http://192.168.0.100:8080` (web login `admin` with the
+`WEBADMIN_PASSWORD`, or Steam). Values from `mods/7dtd-server-apm-bridge/Config/apmbridge.json`:
 
 | Setting | Value | Meaning |
 |---|---|---|

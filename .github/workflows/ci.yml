@@ -1,6 +1,12 @@
+---
 name: ci
 
 on: [push, pull_request]
+
+# Least privilege by default: the lint/test/check job needs no token access.
+# The badge job below overrides this with contents: write for its push.
+permissions:
+  contents: read
 
 jobs:
   check:
@@ -8,131 +14,34 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Syntax-check shell scripts
-        run: |
-          set -euo pipefail
-          for f in entrypoint.sh start.sh stop.sh scripts/*.sh; do
-            bash -n "$f"
-            echo "bash -n OK: $f"
-          done
+      - name: Install pinned Python analyzers
+        # Same versions as the local dev machine so `make lint` enforces
+        # identical rules here and locally. (shellcheck and bash come with the
+        # runner image and are not pinned; expect minor version drift there.)
+        run: >
+          python3 -m pip install --disable-pip-version-check
+          ruff==0.16.4 mypy==2.1.0 yamllint==1.38.0
 
-      - name: Verify internal script references exist
-        run: |
-          set -euo pipefail
-          for ref in $(grep -hoE 'scripts/[-a-z_]+\.sh' *.sh scripts/*.sh | sort -u); do
-            test -f "$ref" || { echo "missing referenced script: $ref" >&2; exit 1; }
-          done
-          echo "all internal script references exist"
+      - name: Lint shell + Python + workflow YAML (make lint)
+        # make lint owns the script list and every check (bash -n, shellcheck,
+        # reference integrity, ruff rules/format, mypy strict, yamllint);
+        # running it here instead of inlining keeps CI from drifting from dev.
+        run: make lint
 
-      - name: Test .env loader (scripts/lib-env.sh)
-        run: |
-          set -euo pipefail
-          tmp="$(mktemp -d)"
-          trap 'rm -rf "$tmp"' EXIT
-          cat > "$tmp/test.env" <<'ENV'
-          # comment line
-
-          PLAIN=hello
-          DOUBLE="double quoted"
-          SINGLE='single'
-          EVIL=$(touch ./pwned-marker)
-          EMPTY=
-          export EXPORTED=yes
-          NOEQUALS
-          KEY2=a=b
-          ENV
-          # Values are literal data: no expansion, no command substitution.
-          (
-            cd "$tmp"
-            set -euo pipefail
-            source "$GITHUB_WORKSPACE/scripts/lib-env.sh"
-            load_env_file test.env
-            [[ "${PLAIN:-}" == "hello" ]] || { echo "FAIL: PLAIN" >&2; exit 1; }
-            [[ "${DOUBLE:-}" == "double quoted" ]] || { echo "FAIL: DOUBLE quote stripping" >&2; exit 1; }
-            [[ "${SINGLE:-}" == "single" ]] || { echo "FAIL: SINGLE quote stripping" >&2; exit 1; }
-            [[ "${EVIL:-}" == '$(touch ./pwned-marker)' ]] || { echo "FAIL: EVIL must stay literal" >&2; exit 1; }
-            [[ ! -e ./pwned-marker ]] || { echo "FAIL: .env value was executed" >&2; exit 1; }
-            [[ -z "${EMPTY:-}" && -n "${EMPTY+x}" ]] || { echo "FAIL: EMPTY must be set but empty" >&2; exit 1; }
-            [[ "${EXPORTED:-}" == "yes" ]] || { echo "FAIL: export prefix" >&2; exit 1; }
-            [[ -z "${NOEQUALS+x}" ]] || { echo "FAIL: lines without = must be skipped" >&2; exit 1; }
-            [[ "${KEY2:-}" == "a=b" ]] || { echo "FAIL: KEY2 value with =" >&2; exit 1; }
-            echo "loader literal semantics OK"
-          )
-          # Variables already in the environment win over the file.
-          (
-            cd "$tmp"
-            set -euo pipefail
-            export PLAIN=fromenv EMPTY=fromenv
-            source "$GITHUB_WORKSPACE/scripts/lib-env.sh"
-            load_env_file test.env
-            [[ "${PLAIN:-}" == "fromenv" ]] || { echo "FAIL: environment must win (PLAIN)" >&2; exit 1; }
-            [[ "${EMPTY:-}" == "fromenv" ]] || { echo "FAIL: environment must win (EMPTY)" >&2; exit 1; }
-            echo "loader precedence OK"
-          )
-
-      - name: Test telnet_session helper (scripts/lib-env.sh)
-        run: |
-          set -euo pipefail
-          tmp="$(mktemp -d)"
-          trap 'rm -rf "$tmp"' EXIT
-          port=18087
-          # Fake telnet endpoint: tolerate probe connections, record every
-          # byte of the first connection that sends data, reply, then close
-          # (the EOF ends the helper instead of its timeout).
-          python3 - "$port" "$tmp/received.bin" <<'PY' &
-          import socket, sys
-          port, out = int(sys.argv[1]), sys.argv[2]
-          srv = socket.socket()
-          srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-          srv.bind(("127.0.0.1", port))
-          srv.listen(1)
-          while True:
-              conn, _ = srv.accept()
-              conn.settimeout(8)
-              try:
-                  data = conn.recv(4096)
-                  if not data:
-                      continue  # readiness probe; wait for the real client
-                  while data.count(b"\n") < 2:
-                      chunk = conn.recv(4096)
-                      if not chunk:
-                          break
-                      data += chunk
-                  conn.sendall(b"telnet ok\n")
-                  break
-              finally:
-                  conn.close()
-          srv.close()
-          with open(out, "wb") as f:
-              f.write(data)
-          PY
-          server_pid=$!
-          source "$GITHUB_WORKSPACE/scripts/lib-env.sh"
-          for _ in $(seq 1 50); do
-            if timeout 1 bash -c "exec 3<>/dev/tcp/127.0.0.1/${port}" 2>/dev/null; then break; fi
-            sleep 0.1
-          done
-          out="$(telnet_session "$port" retest 'apm status' 10)"
-          kill "$server_pid" 2>/dev/null || true
-          wait "$server_pid" 2>/dev/null || true
-          [[ "$out" == *"telnet ok"* ]] || { echo "FAIL: reply not relayed" >&2; exit 1; }
-          printf 'retest\napm status\n' > "$tmp/expected.bin"
-          cmp -s "$tmp/received.bin" "$tmp/expected.bin" || { echo "FAIL: wrong bytes on the wire (got $(od -c "$tmp/received.bin" | head -3))" >&2; exit 1; }
-          echo "telnet_session OK"
+      - name: Test lib-env (.env loader, password rules, telnet_session)
+        # scripts/test_lib_env.sh is the single source of truth for these
+        # assertions (make coverage runs the same script under kcov); running
+        # it here instead of inlining the checks keeps the two from drifting.
+        run: make test
 
       - name: Validate Containerfile structure
         run: |
           set -euo pipefail
-          # Required directives for a working image: base image, entrypoint
-          # copy and exec bit, shared telnet validation lib copy (sourced by
-          # the entrypoint), entrypoint array.
           grep -Eq '^FROM[[:space:]]+' Containerfile
           grep -Eq '^COPY[[:space:]]+entrypoint\.sh' Containerfile
           grep -Eq '^COPY[[:space:]]+scripts/lib-env\.sh' Containerfile
           grep -Eq '^ENTRYPOINT[[:space:]]+\[' Containerfile
           test -x entrypoint.sh || { echo "entrypoint.sh is not executable" >&2; exit 1; }
-          # No unknown directive keywords (mistyped instructions would silently
-          # be treated as shell commands in a RUN).
           while read -r kw; do
             case "$kw" in
               FROM|RUN|COPY|ENTRYPOINT|USER) ;;
@@ -141,23 +50,40 @@ jobs:
           done < <(awk '/^[A-Z]+[[:space:]]/ {print $1}' Containerfile | sort -u)
           echo "Containerfile OK"
 
-      - name: Validate config XML (raw and rendered)
+      # Raw + rendered template validation lives only in make test
+      # (scripts/test_config_templates.py pins the token contract); no inline
+      # copy here, same single-owner rule as lint above.
+
+  coverage-badge:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kcov
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends kcov
+      - run: make coverage
+      - run: python3 scripts/coverage_badge.py coverage.cobertura.xml "$RUNNER_TEMP/coverage.svg"
+      - name: Publish the badge to the badges branch
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import xml.etree.ElementTree as ET
-          for f in ("config/serverconfig.tmpl.xml", "config/serveradmin_seed.xml"):
-              ET.parse(f)
-              print(f, "well-formed")
-          PY
-          # Render the template the same way entrypoint.sh does and require the
-          # result to be valid XML with no leftover placeholders.
-          sed -e 's|@TELNET_PASSWORD@|retest|g' \
-              -e 's|@TELNET_PORT@|8087|g' \
-              -e 's|@USERDATA_DIR@|/root/.local/share/7DaysToDie|g' \
-              config/serverconfig.tmpl.xml > /tmp/serverconfig.xml
-          if grep -q '@' /tmp/serverconfig.xml; then
-            echo "unrendered template placeholder left in serverconfig.xml" >&2
-            exit 1
+          url="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git ls-remote --exit-code --heads origin badges >/dev/null 2>&1; then
+            git clone --depth 1 --branch badges "$url" badge-repo
+          else
+            git init -q -b badges badge-repo
           fi
-          python3 -c 'import xml.etree.ElementTree as ET; ET.parse("/tmp/serverconfig.xml"); print("rendered serverconfig.xml OK")'
+          cp "$RUNNER_TEMP/coverage.svg" badge-repo/
+          cd badge-repo
+          # The clone path already has an origin (the token URL); drop it so
+          # this works identically on both the fresh-init and cloned paths.
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "$url"
+          git config user.name "hordeforge-ci"
+          git config user.email "ci@hordeforge.noreply.github.com"
+          git add coverage.svg
+          git diff --cached --quiet || git commit -m "update coverage badge"
+          git push origin badges

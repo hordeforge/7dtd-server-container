@@ -1,0 +1,9 @@
+---
+extends: default
+rules:
+  truthy:
+    # GitHub Actions declares triggers under the `on:` key; that is workflow
+    # syntax, not a YAML boolean to warn about.
+    check-keys: false
+  line-length:
+    max: 100
