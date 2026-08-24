@@ -46,6 +46,16 @@ load_env_file() {
 # enforce one shared copy of these rules.
 reject_unsafe_value() { # name value
   local name="$1" value="$2"
+  # Leading or trailing whitespace would not survive the trip through the
+  # podman --env-file renderer in run.sh (its parser trims each line), so the
+  # value the container sees would silently differ from the one validated
+  # here; reject both edges up front. Interior whitespace is kept.
+  case "$value" in
+    [[:space:]]*|*[[:space:]])
+      echo "FATAL: $name must not start or end with whitespace" >&2
+      exit 1
+      ;;
+  esac
   # The pattern matches each forbidden character literally; the escaped quote
   # inside it is the only way to write a literal single quote in a pattern.
   # shellcheck disable=SC1003  # intentional literal-quote case pattern

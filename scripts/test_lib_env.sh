@@ -125,6 +125,18 @@ fi
 if ! ( WEBADMIN_PASSWORD='12345678' check_webadmin_password ) 2>/dev/null; then
   echo "FAIL: 8-character WEBADMIN_PASSWORD rejected" >&2; exit 1
 fi
+# Whitespace edges: run.sh renders values into a podman --env-file whose
+# parser trims each line, so leading/trailing whitespace would silently
+# change between validation and container start; both edges must be
+# rejected while interior spaces survive byte-exact.
+for bad_ws in 'abc def ' ' abc def' $'abc\t'; do
+  if ( WEBADMIN_PASSWORD="$bad_ws" check_webadmin_password ) 2>/dev/null; then
+    echo "FAIL: edge-whitespace WEBADMIN_PASSWORD accepted: '$bad_ws'" >&2; exit 1
+  fi
+done
+if ! ( WEBADMIN_PASSWORD='pass word 12' check_webadmin_password ) 2>/dev/null; then
+  echo "FAIL: interior-space WEBADMIN_PASSWORD rejected" >&2; exit 1
+fi
 # The digest renderer must produce the exact bytes the dashboard expects;
 # the golden vector pins md5("admin") base64 independent of the implementation.
 b64="$(webadmin_password_digest admin)"
@@ -171,6 +183,9 @@ echo "telnet port rules OK"
 )
 if ( TELNET_PASSWORD='a|b' TELNET_PORT=8087 init_telnet_env ) 2>/dev/null; then
   echo "FAIL: init_telnet_env accepted unsafe TELNET_PASSWORD" >&2; exit 1
+fi
+if ( TELNET_PASSWORD='retest ' TELNET_PORT=8087 init_telnet_env ) 2>/dev/null; then
+  echo "FAIL: init_telnet_env accepted trailing-space TELNET_PASSWORD" >&2; exit 1
 fi
 for bad in 'abc' '65536'; do
   if ( TELNET_PASSWORD='retest' TELNET_PORT="$bad" init_telnet_env ) 2>/dev/null; then

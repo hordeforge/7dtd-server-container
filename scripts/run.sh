@@ -26,6 +26,17 @@ fi
 NAME="${SEVENDTD_CONTAINER_NAME:-7dtd-server}"
 IMAGE="${SEVENDTD_IMAGE:-localhost/7dtd-server:latest}"
 
+# Owner-only file carrying TELNET_PASSWORD/WEBADMIN_PASSWORD into the
+# container (written by make_common, removed at exit). Empty when no
+# container was started, e.g. on stop/status.
+SECRET_ENV_FILE=""
+cleanup_secret_env_file() {
+  if [[ -n "$SECRET_ENV_FILE" ]]; then
+    rm -f "$SECRET_ENV_FILE"
+  fi
+}
+trap cleanup_secret_env_file EXIT
+
 STEAMCMD_UPDATE="${STEAMCMD_UPDATE:-1}"
 STEAMCMD_ONLY="${STEAMCMD_ONLY:-0}"
 
@@ -47,11 +58,24 @@ mkdir -p "$GAME_DIR" "$USERDATA_DIR" "$ROOT/mods" "$ROOT/config"
 
 # Shared container env + mounts.
 make_common() {
+  # Secrets travel through an owner-only env file, never the podman command
+  # line: `-e K=V` keeps V world-readable via /proc/<pid>/cmdline for the
+  # whole run (minutes during an install-only download) and stores it in the
+  # container config; --env-file carries the same bytes with mktemp's 0600
+  # mode. The same argv-versus-environment rule telnet_session applies
+  # (scripts/lib-env.sh). Values arrive pre-validated by init_telnet_env /
+  # check_webadmin_password, whose character rules keep them byte-exact
+  # through the env-file format: no backslash/quote/$ metacharacters and no
+  # leading or trailing whitespace (which podman's parser would trim).
+  SECRET_ENV_FILE="$(mktemp "${TMPDIR:-/tmp}/7dtd-container-env.XXXXXX")"
+  {
+    printf 'TELNET_PASSWORD=%s\n' "$TELNET_PASSWORD"
+    printf 'WEBADMIN_PASSWORD=%s\n' "${WEBADMIN_PASSWORD:-}"
+  } >"$SECRET_ENV_FILE"
   COMMON=(
     --network host
-    -e TELNET_PASSWORD="$TELNET_PASSWORD"
+    --env-file "$SECRET_ENV_FILE"
     -e TELNET_PORT="$TELNET_PORT"
-    -e WEBADMIN_PASSWORD="${WEBADMIN_PASSWORD:-}"
     -e STEAMCMD_UPDATE="$STEAMCMD_UPDATE"
     -e STEAMCMD_ONLY="$STEAMCMD_ONLY"
     # :Z relabels the sources to container_file_t (SELinux enforcing RHEL host).
