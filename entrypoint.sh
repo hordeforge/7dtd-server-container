@@ -187,7 +187,12 @@ sync_mods() {
     done
   )
   if [[ -d /mods ]]; then
-    cp -a /mods/. "$GAME_DIR/Mods/"
+    # Same named-failure treatment the host staging scripts give their copies:
+    # a bare cp error under set -e would abort the boot naming paths only,
+    # leaving the operator to guess which boot step failed.
+    if ! cp -a /mods/. "$GAME_DIR/Mods/"; then
+      fatal "sync_mods: failed to copy staged mods from /mods into $GAME_DIR/Mods"
+    fi
   fi
   if [[ ! -d "$GAME_DIR/Mods/0_TFP_Harmony" ]]; then
     log "WARN: 0_TFP_Harmony not present in depot Mods; C# mods will not load" >&2

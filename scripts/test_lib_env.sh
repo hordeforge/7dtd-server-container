@@ -104,6 +104,34 @@ printf 'DUP=first\nDUP=second\nEMPTYQ=""\nHASH=a#b\nCRVAL=abc\r\n' > "$tmp/corne
   fi
   echo "loader literal corners OK"
 )
+# Malformed lines are skipped, but every skip must be visible: a typo'd key
+# (e.g. TELNET_PASSWD=) would otherwise fall back to the shared default with
+# no trace of why the operator's line had no effect. Warnings name the key
+# side only; a malformed line can still carry a secret value.
+printf 'GOOD=kept\n1BAD=x\nBAD-KEY=y\nNOEQUALS\n' > "$tmp/malformed.env"
+(
+  cd "$tmp"
+  set -euo pipefail
+  source "$ROOT/scripts/lib-env.sh"
+  warn_file="$tmp/loader-warn.txt"
+  load_env_file malformed.env 2>"$warn_file"
+  [[ "${GOOD:-}" == "kept" ]] || { echo "FAIL: valid line beside malformed ones was dropped" >&2; exit 1; }
+  envlist="$(env)"
+  [[ "$envlist" != *'1BAD='* && "$envlist" != *'BAD-KEY='* && "$envlist" != *'NOEQUALS='* ]] || {
+    echo "FAIL: malformed lines must stay unloaded" >&2; exit 1; }
+  warns="$( < "$warn_file" )"
+  [[ "$warns" == *WARN* ]] || {
+    echo "FAIL: skipping malformed lines must warn on stderr (got '$warns')" >&2; exit 1; }
+  [[ "$warns" == *"invalid key '1BAD'"* && "$warns" == *"invalid key 'BAD-KEY'"* ]] || {
+    echo "FAIL: invalid-key warnings must name the key side (got '$warns')" >&2; exit 1; }
+  [[ "$warns" == *"without '=': NOEQUALS"* ]] || {
+    echo "FAIL: no-'=' warning must name the offending line (got '$warns')" >&2; exit 1; }
+  printf 'SECRET-KEY=hunter2\n' > leak.env
+  if load_env_file leak.env 2>>"$warn_file"; grep -qF hunter2 "$warn_file"; then
+    echo "FAIL: warning leaked a malformed line's value to stderr" >&2; exit 1
+  fi
+  echo "loader malformed-line visibility OK"
+)
 source "$ROOT/scripts/lib-env.sh"
 WEBADMIN_PASSWORD='correct-horse-battery' check_webadmin_password
 # shellcheck disable=SC2016  # single-quoted literals: each bad value must reach the checker unexpanded

@@ -6,6 +6,9 @@
 # KEY=value lines only; values are taken literally (no variable expansion, no
 # command substitution, no word splitting); one matching pair of surrounding
 # quotes is stripped. The file is data, never code: nothing in it is eval'd.
+# Malformed lines are skipped, but each skip warns on stderr: a typo'd key
+# (e.g. TELNET_PASSWD=) must not silently fall back to the default value with
+# no trace of why the operator's line had no effect.
 load_env_file() {
   local line key value q
   # An unreadable file would otherwise abort the caller with a bare redirect
@@ -21,10 +24,18 @@ load_env_file() {
     esac
     case "$line" in
       *=*) ;;
-      *) continue ;;
+      *)
+        # No '=' means no value ever reached this line, naming it verbatim
+        # cannot leak one.
+        echo "WARN: $1: ignoring line without '=': $line" >&2
+        continue
+        ;;
     esac
     key="${line%%=*}"
     if [[ ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+      # Name the key side only ('key' stops at the first '='): a malformed
+      # line can still carry a secret value that must stay out of the log.
+      echo "WARN: $1: ignoring line with invalid key '$key'" >&2
       continue
     fi
     if [[ -n "${!key+x}" ]]; then
