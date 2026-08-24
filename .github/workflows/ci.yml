@@ -70,7 +70,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update && sudo apt-get install -y --no-install-recommends \
-            cmake libelf-dev libbz2-dev zlib1g-dev libcurl4-openssl-dev binutils-dev
+            cmake libelf-dev libdw-dev libbz2-dev zlib1g-dev libcurl4-openssl-dev binutils-dev
           git clone --depth 1 --branch v43 https://github.com/SimonKagstrom/kcov /tmp/kcov-src
           cmake -S /tmp/kcov-src -B /tmp/kcov-build -DCMAKE_BUILD_TYPE=Release
           cmake --build /tmp/kcov-build --parallel 2
