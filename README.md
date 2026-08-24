@@ -155,9 +155,9 @@ Add players to the admin list via telnet after joining, e.g.
   itself. Set `STEAMCMD_UPDATE=0` for offline/fast restarts.
 - Saves live in `data/userdata/Saves/` on the host, never inside the
   container. Delete and recreate the container freely.
-- The server also updates configs/`serverconfig.xml` (rendered copy) and the
-  game files under `data/game/` on the host, so backups are a plain copy of
-  the `data/` directory.
+- Runtime state beyond saves lives on the host too: the rendered
+  `serverconfig.xml` (`data/game/serverconfig.xml`) and the game install
+  under `data/game/`. Backups are therefore a plain copy of `data/`.
 
 ## Durable service (optional)
 

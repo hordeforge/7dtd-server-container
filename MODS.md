@@ -98,7 +98,7 @@ Key options from `mods/BotMod/Config/botmod.json`:
 | `LoseTargetRange` / `LoseTargetTimeSec` | 85 / 4.5 | Target loss |
 | `AttackRange` / `FireRateSec` | 45 / 0.18 | Engagement range / fire rate |
 | `RespawnDelaySec` / `SpawnProtectionSec` | 3 / 1.2 | Respawn cadence / post-spawn protection window |
-| `UseNeuralBrain` | GA net | Optional evolved neural controller (`evolved/best.json`) |
+| `UseNeuralBrain` | true | GA-evolved neural controller (weights: `evolved/best.json`) |
 
 Live console (telnet `8087`, password from `TELNET_PASSWORD`):
 `bot status`, `bot count <n>`, `bot skill <0-4>`, `bot spawn [n]`,
