@@ -10,6 +10,10 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 CFG="mods/EfficientServer/Config/efficientserver.json"
+# Top-level "Enabled" line only (2-space indent); group-level Enabled flags
+# (AiLod/DynamicMesh/Gc/Governor/...) keep their shipped values. One shared
+# prefix for get/set/verify below so the three cannot drift apart.
+ENABLED_LINE_RE='^  "Enabled"[[:space:]]*:[[:space:]]*'
 
 # Same precedence as run.sh: environment beats .env, .env beats the shared
 # defaults. Values are literal (see scripts/lib-env.sh); nothing in .env is
@@ -22,11 +26,9 @@ fi
 # shared defaults + validation must run before anything else happens.
 init_telnet_env
 
-current() {
+get_state() {
   if [[ ! -f "$CFG" ]]; then echo "missing"; return 1; fi
-  # Anchor like set_state: only the top-level flag counts, otherwise any
-  # group-level Enabled (AiLod/Gc/...) makes a disabled mod read as "on".
-  grep -Eq '^  "Enabled"[[:space:]]*:[[:space:]]*true([[:space:]]*,?$)' "$CFG" && echo "on" || echo "off"
+  if grep -Eq "${ENABLED_LINE_RE}true([[:space:]]*,?\$)" "$CFG"; then echo "on"; else echo "off"; fi
 }
 
 set_state() {
@@ -35,15 +37,13 @@ set_state() {
     echo "FATAL: $CFG not found; is EfficientServer staged and enabled?" >&2
     exit 1
   fi
-  was="$(current)"
-  # Top-level "Enabled" only (2-space indent); the group-level Enabled flags
-  # (AiLod/DynamicMesh/Gc/Governor/TickGuard/...) keep their shipped values.
-  sed -i "s/^  \"Enabled\"[[:space:]]*:[[:space:]]*\(true\|false\)/  \"Enabled\": $1/" "$CFG"
+  was="$(get_state)"
+  sed -i -E "s/${ENABLED_LINE_RE}(true|false)/  \"Enabled\": $1/" "$CFG"
   # Verify the edit landed: a config reformatted by a future mod build would
   # make the sed a silent no-op, and restarting the container would change
   # nothing while reporting success.
-  if ! grep -Eq "^  \"Enabled\"[[:space:]]*:[[:space:]]*$1([[:space:]]*,?\$)" "$CFG"; then
-    echo "FATAL: failed to set top-level \"Enabled\": $1 in $CFG (state after edit: $(current)); config format changed?" >&2
+  if ! grep -Eq "${ENABLED_LINE_RE}$1([[:space:]]*,?\$)" "$CFG"; then
+    echo "FATAL: failed to set top-level \"Enabled\": $1 in $CFG (state after edit: $(get_state)); config format changed?" >&2
     exit 1
   fi
   echo "EfficientServer -> $1 (was $was)"
@@ -57,7 +57,7 @@ case "${1:-status}" in
     ./scripts/run.sh restart
     ;;
   status)
-    state="$(current || true)"
+    state="$(get_state || true)"
     echo "EfficientServer: $state"
     ;;
   measure)

@@ -101,7 +101,7 @@ stop() {
   # that was just (re)started and answering telnet on the same host port.
   if podman ps --format '{{.Names}}' | grep -qx "$NAME"; then
     echo "requesting save + shutdown via telnet ..."
-    if timeout 3 bash -c "exec 3<>/dev/tcp/127.0.0.1/${TELNET_PORT}" >/dev/null 2>&1; then
+    if telnet_probe "$TELNET_PORT" 3 >/dev/null 2>&1; then
       telnet_session "$TELNET_PORT" "$TELNET_PASSWORD" 'shutdown' 10 >/dev/null 2>&1 || true
     else
       echo "telnet not reachable on $TELNET_PORT; falling back to forced stop"
@@ -125,10 +125,10 @@ restart() {
   start
 }
 
-logs()  { podman logs -f "$NAME"; }
+logs() { podman logs -f "$NAME"; }
 # Anchor the name filter: podman treats it as a regex, and unanchored it would
 # also list the $NAME-install pre-warm container.
-status(){ podman ps -a --filter "name=^${NAME}$"; }
+status() { podman ps -a --filter "name=^${NAME}$"; }
 
 case "${1:-status}" in
   build)        build ;;

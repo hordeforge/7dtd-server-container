@@ -207,8 +207,24 @@ start_fake_server() { # received_bytes_path
 }
 source "$ROOT/scripts/lib-env.sh"
 
+# telnet_probe: non-numeric ports are refused up front, an out-of-range port
+# fails fast instead of hanging, and a listening endpoint passes (pinned
+# against the fake server below, which treats a no-data connection as a probe).
+for bad in '' 'abc' '80a'; do
+  if telnet_probe "$bad" 1 2>/dev/null; then
+    echo "FAIL: telnet_probe accepted non-numeric port: '$bad'" >&2; exit 1
+  fi
+done
+if telnet_probe 99999 5 2>/dev/null; then
+  echo "FAIL: telnet_probe reported success on invalid port 99999" >&2; exit 1
+fi
+echo "telnet_probe guard OK"
+
 # Single-command payload (the run.sh stop path).
 start_fake_server "$tmp/received.bin"
+if ! telnet_probe "$FAKE_PORT" 3; then
+  echo "FAIL: telnet_probe reported unreachable a listening endpoint" >&2; exit 1
+fi
 out="$(telnet_session "$FAKE_PORT" retest 'apm status' 10)"
 [[ "$out" == *"telnet ok"* ]] || { echo "FAIL: reply not relayed" >&2; exit 1; }
 printf 'retest\napm status\n' > "$tmp/expected.bin"

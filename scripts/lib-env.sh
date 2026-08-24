@@ -115,3 +115,14 @@ telnet_session() { # port password payload timeout_seconds
     cat <&3
   ' telnet_session "$port" "$password" "$payload"
 }
+
+# Reachability probe without authenticating: does something accept a TCP
+# connection on the port right now. stop() uses it to avoid sending the
+# password into a session racing a container restart. Returns nonzero on a
+# non-numeric port or when the connect times out.
+telnet_probe() { # port timeout_seconds
+  local port="$1"
+  [[ "$port" =~ ^[0-9]+$ ]] || return 1
+  # shellcheck disable=SC2016  # non-expansion is the point: port passed as "$1" to bash -c
+  timeout "$2" bash -c 'exec 3<>/dev/tcp/127.0.0.1/$1' telnet_probe "$port"
+}

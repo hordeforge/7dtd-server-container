@@ -9,13 +9,17 @@ set -euo pipefail
 
 GAME_DIR=/root/7dtd
 USERDATA_DIR=/root/.local/share/7DaysToDie
-if command -v steamcmd >/dev/null 2>&1; then
-  STEAMCMD="$(command -v steamcmd)"
+
+log() { echo "[entrypoint] $*"; }
+
+fatal() { echo "[entrypoint] FATAL: $*" >&2; exit 1; }
+
+if STEAMCMD="$(command -v steamcmd 2>/dev/null)"; then
+  :
 elif [[ -x /root/.local/share/Steam/steamcmd/steamcmd.sh ]]; then
   STEAMCMD=/root/.local/share/Steam/steamcmd/steamcmd.sh
 else
-  echo "[entrypoint] FATAL: steamcmd not found" >&2
-  exit 1
+  fatal "steamcmd not found"
 fi
 STEAM_APPID=294420
 UPDATE="${STEAMCMD_UPDATE:-1}"      # 1 = steamcmd validate every start, 0 = skip
@@ -28,9 +32,19 @@ INSTALL_ONLY="${STEAMCMD_ONLY:-0}"  # 1 = install/update then exit (pre-warm)
 source /usr/local/lib/7dtd-lib-env.sh
 init_telnet_env
 
-log() { echo "[entrypoint] $*"; }
-
-fatal() { echo "[entrypoint] FATAL: $*" >&2; exit 1; }
+# Assert every template placeholder was replaced: an unrendered @TOKEN@ means
+# template and render script drifted, which must fail here rather than surface
+# as a game-boot config parse error far from the cause.
+assert_rendered() { # file placeholder...
+  local file="$1"
+  shift
+  local ph
+  for ph in "$@"; do
+    if grep -qF -- "$ph" "$file"; then
+      fatal "unrendered placeholder $ph remains in $file; template mismatch"
+    fi
+  done
+}
 
 install_or_update() {
   local attempt rc max_attempts=3
@@ -71,9 +85,7 @@ render_config() {
       -e "s|@TELNET_PORT@|${TELNET_PORT}|g" \
       -e "s|@USERDATA_DIR@|${USERDATA_DIR}|g" \
       /config/serverconfig.tmpl.xml > "$GAME_DIR/serverconfig.xml"
-  if grep -q '@TELNET_PASSWORD@\|@TELNET_PORT@\|@USERDATA_DIR@' "$GAME_DIR/serverconfig.xml"; then
-    fatal "unrendered placeholders remain in $GAME_DIR/serverconfig.xml; template mismatch"
-  fi
+  assert_rendered "$GAME_DIR/serverconfig.xml" '@TELNET_PASSWORD@' '@TELNET_PORT@' '@USERDATA_DIR@'
 }
 
 seed_admin_file() {
@@ -100,23 +112,23 @@ seed_admin_file() {
   b64="$(printf '%b' "$(printf '%s' "$hex" | sed 's/\(..\)/\\x\1/g')" | base64)"
   sed -e "s|@WEBADMIN_PASSWORD_HASH@|${b64}|g" \
     /config/serveradmin_seed.xml > "$USERDATA_DIR/Saves/serveradmin.xml"
-  if grep -q '@WEBADMIN_PASSWORD_HASH@' "$USERDATA_DIR/Saves/serveradmin.xml"; then
-    fatal "unrendered placeholder remains in $USERDATA_DIR/Saves/serveradmin.xml; template mismatch"
-  fi
+  assert_rendered "$USERDATA_DIR/Saves/serveradmin.xml" '@WEBADMIN_PASSWORD_HASH@'
   log "seeded serveradmin.xml (dashboard webuser admin, password: $WEBADMIN_PASSWORD)"
 }
 
 sync_mods() {
   log "sync Mods/ from /mods (keeping stock 0_TFP_Harmony)"
   mkdir -p "$GAME_DIR/Mods"
-  cd "$GAME_DIR/Mods"
-  for d in */; do
-    [[ -d "$d" ]] || continue
-    case "$d" in
-      0_TFP_Harmony/) : ;;
-      *) rm -rf "$d" ;;
-    esac
-  done
+  (
+    cd "$GAME_DIR/Mods"
+    for d in */; do
+      [[ -d "$d" ]] || continue
+      case "$d" in
+        0_TFP_Harmony/) : ;;
+        *) rm -rf "$d" ;;
+      esac
+    done
+  )
   if [[ -d /mods ]]; then
     cp -a /mods/. "$GAME_DIR/Mods/"
   fi
