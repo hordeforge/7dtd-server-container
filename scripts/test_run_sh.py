@@ -124,9 +124,26 @@ BLOCKING_PODMAN_STUB = (
     + 'if "run" in argv:\n    time.sleep(30)\n'
 )
 
+
+def stub_env(tmpdir: Path, **extra: str) -> dict[str, str]:
+    """Environment for run.sh under the stubbed podman: the stub's recording
+    hooks (always present so every scenario can snapshot env files), explicit
+    telnet values that win over any local .env, and scenario extras last."""
+    return {
+        **os.environ,
+        "PATH": f"{tmpdir / 'bin'}{os.pathsep}{os.environ.get('PATH', '')}",
+        "STUB_LOG": str(tmpdir / "podman-argv.log"),
+        "STUB_SNAPSHOT": str(tmpdir / "envfile.snapshot"),
+        "STUB_MODE": str(tmpdir / "envfile.mode"),
+        "TELNET_PASSWORD": TELNET_PASSWORD,
+        "TELNET_PORT": "8087",
+        **extra,
+    }
+
+
 with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
-    bindir = install_podman_stub(tmpdir, PODMAN_STUB)
+    install_podman_stub(tmpdir, PODMAN_STUB)
 
     log = tmpdir / "podman-argv.log"
     snapshot = tmpdir / "envfile.snapshot"
@@ -134,16 +151,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
     # Explicit values win over any local .env (load_env_file precedence), so
     # the run sees known secrets regardless of host state.
-    env = {
-        **os.environ,
-        "PATH": f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}",
-        "STUB_LOG": str(log),
-        "STUB_SNAPSHOT": str(snapshot),
-        "STUB_MODE": str(mode_file),
-        "TELNET_PASSWORD": TELNET_PASSWORD,
-        "TELNET_PORT": "8087",
-        "WEBADMIN_PASSWORD": WEBADMIN_PASSWORD,
-    }
+    env = stub_env(tmpdir, WEBADMIN_PASSWORD=WEBADMIN_PASSWORD)
 
     try:
         proc = subprocess.run(
@@ -203,22 +211,14 @@ with tempfile.TemporaryDirectory() as tmp:
 #              uses its own --rm container name
 with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
-    bindir = install_podman_stub(tmpdir, PODMAN_STUB)
+    install_podman_stub(tmpdir, PODMAN_STUB)
     log = tmpdir / "podman-argv.log"
 
-    base_env = {
-        **os.environ,
-        "PATH": f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}",
-        "STUB_LOG": str(log),
-        # The snapshot/mode hooks exist for the start-path test above; the
-        # install-only runs still need them so the stub can record env files.
-        "STUB_SNAPSHOT": str(tmpdir / "envfile.snapshot"),
-        "STUB_MODE": str(tmpdir / "envfile.mode"),
-        "TELNET_PASSWORD": TELNET_PASSWORD,
-        "TELNET_PORT": "8087",
+    base_env = stub_env(
+        tmpdir,
         # The value a fast-restart .env would carry; the forced 1 must win.
-        "STEAMCMD_ONLY": "0",
-    }
+        STEAMCMD_ONLY="0",
+    )
 
     def run_install(extra_env: dict[str, str]) -> subprocess.CompletedProcess[bytes]:
         log.write_bytes(b"")
@@ -266,23 +266,12 @@ with tempfile.TemporaryDirectory() as tmp:
 # file; the INT handler must route through the EXIT cleanup and exit 130.
 with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
-    bindir = install_podman_stub(tmpdir, BLOCKING_PODMAN_STUB)
+    install_podman_stub(tmpdir, BLOCKING_PODMAN_STUB)
     log = tmpdir / "podman-argv.log"
 
-    env = {
-        **os.environ,
-        "PATH": f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}",
-        "STUB_LOG": str(log),
-        # The blocking stub snapshots env files like PODMAN_STUB does; without
-        # these it would die on the run invocation instead of wedging.
-        "STUB_SNAPSHOT": str(tmpdir / "envfile.snapshot"),
-        "STUB_MODE": str(tmpdir / "envfile.mode"),
-        # Keep mktemp's output inside this sandbox so assertions and the
-        # sweep's glob stay local to it (run.sh honors TMPDIR).
-        "TMPDIR": str(tmpdir),
-        "TELNET_PASSWORD": TELNET_PASSWORD,
-        "TELNET_PORT": "8087",
-    }
+    # Keep mktemp's output inside this sandbox so assertions and the
+    # sweep's glob stay local to it (run.sh honors TMPDIR).
+    env = stub_env(tmpdir, TMPDIR=str(tmpdir))
     sig_proc = subprocess.Popen(
         [str(RUN_SH), "start"],
         env=env,
@@ -317,7 +306,7 @@ with tempfile.TemporaryDirectory() as tmp:
 # live owner's file is never touched.
 with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
-    bindir = install_podman_stub(tmpdir, PODMAN_STUB)
+    install_podman_stub(tmpdir, PODMAN_STUB)
     log = tmpdir / "podman-argv.log"
 
     dead = subprocess.Popen(["true"])
@@ -327,16 +316,7 @@ with tempfile.TemporaryDirectory() as tmp:
     live = tmpdir / f"7dtd-container-env.{os.getpid()}.live"
     live.write_bytes(b"TELNET_PASSWORD=live\n")
 
-    env = {
-        **os.environ,
-        "PATH": f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}",
-        "STUB_LOG": str(log),
-        "STUB_SNAPSHOT": str(tmpdir / "envfile.snapshot"),
-        "STUB_MODE": str(tmpdir / "envfile.mode"),
-        "TMPDIR": str(tmpdir),
-        "TELNET_PASSWORD": TELNET_PASSWORD,
-        "TELNET_PORT": "8087",
-    }
+    env = stub_env(tmpdir, TMPDIR=str(tmpdir))
     sweep_proc = subprocess.Popen(
         [str(RUN_SH), "start"],
         env=env,
@@ -378,22 +358,13 @@ def start_fake_telnet(output: Path) -> tuple[subprocess.Popen[bytes], str]:
 
 with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
-    bindir = install_podman_stub(tmpdir, PODMAN_STUB)
+    install_podman_stub(tmpdir, PODMAN_STUB)
     log = tmpdir / "podman-argv.log"
     wire = tmpdir / "wire.bin"
     server, port = start_fake_telnet(wire)
     try:
         check("fake telnet endpoint reported a port", port.isdigit())
-        env = {
-            **os.environ,
-            "PATH": f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}",
-            "STUB_LOG": str(log),
-            "STUB_SNAPSHOT": str(tmpdir / "envfile.snapshot"),
-            "STUB_MODE": str(tmpdir / "envfile.mode"),
-            "STUB_PS_OUTPUT": f"{NAME}\n",
-            "TELNET_PASSWORD": TELNET_PASSWORD,
-            "TELNET_PORT": port,
-        }
+        env = stub_env(tmpdir, STUB_PS_OUTPUT=f"{NAME}\n", TELNET_PORT=port)
         proc = subprocess.run(
             [str(RUN_SH), "stop"],
             env=env,
@@ -420,23 +391,14 @@ with tempfile.TemporaryDirectory() as tmp:
 # down would leave the container running (or kill it without a save).
 with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
-    bindir = install_podman_stub(tmpdir, PODMAN_STUB)
+    install_podman_stub(tmpdir, PODMAN_STUB)
     log = tmpdir / "podman-argv.log"
     # A just-bound-then-closed ephemeral port: connect gets refused now.
     probe_sock = socket.socket()
     probe_sock.bind(("127.0.0.1", 0))
     dead_port = str(probe_sock.getsockname()[1])
     probe_sock.close()
-    env = {
-        **os.environ,
-        "PATH": f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}",
-        "STUB_LOG": str(log),
-        "STUB_SNAPSHOT": str(tmpdir / "envfile.snapshot"),
-        "STUB_MODE": str(tmpdir / "envfile.mode"),
-        "STUB_PS_OUTPUT": f"{NAME}\n",
-        "TELNET_PASSWORD": TELNET_PASSWORD,
-        "TELNET_PORT": dead_port,
-    }
+    env = stub_env(tmpdir, STUB_PS_OUTPUT=f"{NAME}\n", TELNET_PORT=dead_port)
     proc = subprocess.run(
         [str(RUN_SH), "stop"],
         env=env,
@@ -457,18 +419,9 @@ with tempfile.TemporaryDirectory() as tmp:
 # idempotent final stop -- and never create a secret env file.
 with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
-    bindir = install_podman_stub(tmpdir, PODMAN_STUB)
+    install_podman_stub(tmpdir, PODMAN_STUB)
     log = tmpdir / "podman-argv.log"
-    env = {
-        **os.environ,
-        "PATH": f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}",
-        "STUB_LOG": str(log),
-        "STUB_SNAPSHOT": str(tmpdir / "envfile.snapshot"),
-        "STUB_MODE": str(tmpdir / "envfile.mode"),
-        "STUB_PS_OUTPUT": "",
-        "TELNET_PASSWORD": TELNET_PASSWORD,
-        "TELNET_PORT": "8087",
-    }
+    env = stub_env(tmpdir, STUB_PS_OUTPUT="")
     proc = subprocess.run(
         [str(RUN_SH), "stop"],
         env=env,
