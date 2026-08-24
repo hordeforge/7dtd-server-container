@@ -158,8 +158,12 @@ install_only() {
   podman rm -f "$NAME-install" 2>/dev/null || true
   # Force the pre-warm mode: install-only must download/validate and exit,
   # never boot the game server, even if the environment or .env set
-  # STEAMCMD_ONLY=0.
+  # STEAMCMD_ONLY=0. The update flag is forced too: with STEAMCMD_UPDATE=0
+  # and an already-installed depot the container would skip steamcmd and
+  # exit 0 having validated nothing, silently defeating the one job this
+  # command documents.
   STEAMCMD_ONLY=1
+  STEAMCMD_UPDATE=1
   make_common
   # --init: same reaper as start(); steamcmd forks a bootstrap that must not
   # linger if it outlives its parent mid-download.
