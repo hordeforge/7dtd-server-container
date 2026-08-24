@@ -9,7 +9,7 @@
 ![languages](https://img.shields.io/github/languages/count/hordeforge/7dtd-server-container)
 ![top language](https://img.shields.io/github/languages/top/hordeforge/7dtd-server-container)
 
-A 7 Days to Die dedicated server (V3.1.0 line) in a rootless podman container on the LAN host `server.lan` (192.168.0.100). Stock Navezgane map, stock default difficulty and settings, with the workspace perf and APM mods loaded: **Crucible** (`7dtd-server-optimizer`) and **Geiger** (`7dtd-server-apm`). EAC is off (required for C# mods).
+A 7 Days to Die dedicated server (V3.1.0 line) in a rootless podman container on the LAN host `server.lan` (192.168.0.100). Stock Navezgane map, stock default difficulty and settings, with the workspace perf, APM and FPS-bot mods loaded: **Crucible** (`7dtd-server-optimizer`), **Geiger** (`7dtd-server-apm`) and **BotMod** (`7dtd-fps-bots`). EAC is off (required for C# mods).
 
 Everything runtime lives on the host under `data/`; the container is stateless
 and disposable.

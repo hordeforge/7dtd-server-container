@@ -18,6 +18,7 @@ Workspace root guide: [`../AGENTS.md`](../AGENTS.md) and
 | Mod staging from sibling `dist/` + enabled copies | `scripts/stage_mods.sh`, `mods/`, `mods-available/` |
 | Deploy + container lifecycle + ops scripts | `scripts/deploy.sh` (`--restart`), `scripts/update_mods.sh`, `scripts/run.sh`, `scripts/perf.sh`; shared `.env`/telnet lib: `scripts/lib-env.sh` |
 | Enabled tweaks + bot options doc | `MODS.md` |
+| CI workflow + lib-env tests and helpers | `.github/workflows/ci.yml`, `Makefile`, `scripts/test_lib_env.sh`, `scripts/fake-telnet-server.py`, `scripts/check-config-xml.py`, `scripts/coverage_badge.py` |
 | Rootless systemd service unit | `systemd/7dtd-server.container` |
 
 ## Does not own

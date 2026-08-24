@@ -16,8 +16,10 @@ Wants=network-online.target
 Image=localhost/7dtd-server:latest
 ContainerName=7dtd-server
 Network=host
-# Reap zombies for the game server's whole uptime: it becomes a child of the
-# init process instead of PID 1, so forks it never wait on do not accumulate.
+# catatonit takes PID 1 and reaps orphans/zombies for the game's whole
+# uptime; without it, children the server forks but never waits on accumulate
+# as zombies until the container restarts (same rationale as start() in
+# scripts/run.sh).
 Init=true
 Environment=TELNET_PASSWORD=retest
 Environment=TELNET_PORT=8087

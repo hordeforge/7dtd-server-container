@@ -2,8 +2,10 @@
 # Stage built mods from sibling repos into mods-available/ and (re)create the
 # enabled set as real copies in mods/. Real copies (not symlinks) so the
 # bind-mounted mods/ dir is self-contained inside the container. The enabled
-# set is perf (EfficientServer) + APM bridge; add others with a copy, e.g.:
-#   cp -a mods-available/BotMod mods/BotMod
+# set below is EfficientServer (perf) + the APM bridge + BotMod (combat bots,
+# remove for clean perf runs); add others with a copy, e.g.:
+#   cp -a mods-available/<Name> mods/<Name>
+# See MODS.md for what each shipped mod does.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WS="$(cd "$ROOT/.." && pwd)"
