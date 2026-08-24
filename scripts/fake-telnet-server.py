@@ -9,9 +9,17 @@ Usage: fake-telnet-server.py PORT OUTPUT_PATH
 
 PORT 0 binds an ephemeral port and prints the chosen port on stdout (flushed)
 once listening; the test reads it instead of racing on a fixed port.
+
+Framing is quiescence-based: input is collected until QUIET seconds pass with
+nothing new or the peer closes, so the exchange stays byte-exact no matter how
+TCP segments the client's write and no matter how many lines the payload spans.
+The client never half-closes while waiting for the reply, so peer-close and
+quiescence are both just end-of-input signals here.
 """
 import socket
 import sys
+
+QUIET = 0.4  # seconds of silence that end input collection
 
 port, out = int(sys.argv[1]), sys.argv[2]
 srv = socket.socket()
@@ -22,20 +30,22 @@ if port == 0:
     print(srv.getsockname()[1], flush=True)
 while True:
     conn, _ = srv.accept()
-    conn.settimeout(8)
+    buf = bytearray()
     try:
-        data = conn.recv(4096)
-        if not data:
-            continue  # readiness probe; wait for the real client
-        while data.count(b"\n") < 2:
+        conn.settimeout(QUIET)
+        while True:
             chunk = conn.recv(4096)
             if not chunk:
                 break
-            data += chunk
-        conn.sendall(b"telnet ok\n")
-        break
-    finally:
+            buf += chunk
+    except OSError:
+        pass  # recv timeout = quiescence; reset/error ends collection too
+    if not buf:
         conn.close()
+        continue  # readiness probe; wait for the real client
+    conn.sendall(b"telnet ok\n")
+    conn.close()
+    break
 srv.close()
 with open(out, "wb") as f:
-    f.write(data)
+    f.write(buf)

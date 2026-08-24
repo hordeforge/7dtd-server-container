@@ -3,6 +3,7 @@ ROOT := $(CURDIR)
 .PHONY: test coverage
 test:
 	bash scripts/test_lib_env.sh
+	python3 scripts/test_coverage_badge.py
 
 coverage:
 	rm -rf coverage

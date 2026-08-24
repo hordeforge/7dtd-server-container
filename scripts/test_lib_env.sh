@@ -80,6 +80,29 @@ printf 'FIRSTLINE=yes\nNOEOL=last' > "$tmp/noeol.env"
   [[ "${EMPTY:-}" == "fromenv" ]] || { echo "FAIL: environment must win (EMPTY)" >&2; exit 1; }
   echo "loader precedence OK"
 )
+# Literal-value corners: a duplicate key keeps the first occurrence (the env
+# already has it), a quoted empty string yields set-but-empty, '#' inside a
+# value is data (no inline-comment stripping exists), and a CRLF-authored line
+# keeps its trailing CR, which the shared value policy must reject downstream
+# instead of silently rendering into an XML attribute.
+printf 'DUP=first\nDUP=second\nEMPTYQ=""\nHASH=a#b\nCRVAL=abc\r\n' > "$tmp/corner.env"
+(
+  cd "$tmp"
+  set -euo pipefail
+  unset DUP EMPTYQ HASH CRVAL
+  source "$ROOT/scripts/lib-env.sh"
+  load_env_file corner.env
+  [[ "${DUP:-}" == "first" ]] || { echo "FAIL: duplicate key must keep the first value" >&2; exit 1; }
+  [[ -z "${EMPTYQ:-}" && -n "${EMPTYQ+x}" ]] || { echo "FAIL: quoted empty value must be set but empty" >&2; exit 1; }
+  [[ "${HASH:-}" == 'a#b' ]] || { echo "FAIL: '#' inside a value must stay literal" >&2; exit 1; }
+  [[ "${CRVAL:-}" == $'abc\r' ]] || { echo "FAIL: CR must survive loading verbatim" >&2; exit 1; }
+  # Nested subshell: the checker exits on rejection, which must mark only
+  # this case failed, not the whole block.
+  if ( TELNET_PASSWORD="$CRVAL" TELNET_PORT=8087 init_telnet_env ) 2>/dev/null; then
+    echo "FAIL: CRLF-authored value must be rejected, not rendered into config" >&2; exit 1
+  fi
+  echo "loader literal corners OK"
+)
 source "$ROOT/scripts/lib-env.sh"
 WEBADMIN_PASSWORD='correct-horse-battery' check_webadmin_password
 # shellcheck disable=SC2016  # single-quoted literals: each bad value must reach the checker unexpanded
@@ -93,6 +116,13 @@ if ( WEBADMIN_PASSWORD="$(printf 'a\tb')" check_webadmin_password ) 2>/dev/null;
 fi
 if ( WEBADMIN_PASSWORD=short check_webadmin_password ) 2>/dev/null; then
   echo "FAIL: short WEBADMIN_PASSWORD accepted" >&2; exit 1
+fi
+# Length boundary: 7 is the largest rejected value, exactly 8 must pass.
+if ( WEBADMIN_PASSWORD='1234567' check_webadmin_password ) 2>/dev/null; then
+  echo "FAIL: 7-character WEBADMIN_PASSWORD accepted" >&2; exit 1
+fi
+if ! ( WEBADMIN_PASSWORD='12345678' check_webadmin_password ) 2>/dev/null; then
+  echo "FAIL: 8-character WEBADMIN_PASSWORD rejected" >&2; exit 1
 fi
 hex="$(printf '%s' admin | md5sum)"; hex="${hex%% *}"
 b64="$(printf '%b' "$(printf '%s' "$hex" | sed 's/\(..\)/\\x\1/g')" | base64)"
@@ -159,19 +189,38 @@ done
 echo "telnet_session port guard OK"
 
 # Wire-level integration: ephemeral port from the fake server (no fixed-port
-# collisions); the server prints its port once listening.
-python3 "$ROOT/scripts/fake-telnet-server.py" 0 "$tmp/received.bin" >"$tmp/port.txt" &
-server_pid=$!
-for _ in $(seq 1 100); do
-  [[ -s "$tmp/port.txt" ]] && break
-  kill -0 "$server_pid" 2>/dev/null || { echo "FATAL: fake telnet server died before listening" >&2; exit 1; }
-  sleep 0.05
-done
-[[ -s "$tmp/port.txt" ]] || { echo "FATAL: fake telnet server never reported a port" >&2; exit 1; }
-port="$(cat "$tmp/port.txt")"
+# collisions); the server prints its port once listening. Sets FAKE_PORT and
+# registers the pid for the EXIT cleanup hook; not run in a command
+# substitution so those assignments survive.
+start_fake_server() { # received_bytes_path
+  local port_file="$tmp/port.txt"
+  : > "$port_file"
+  python3 "$ROOT/scripts/fake-telnet-server.py" 0 "$1" >"$port_file" &
+  server_pid=$!
+  for _ in $(seq 1 100); do
+    [[ -s "$port_file" ]] && break
+    kill -0 "$server_pid" 2>/dev/null || { echo "FATAL: fake telnet server died before listening" >&2; exit 1; }
+    sleep 0.05
+  done
+  [[ -s "$port_file" ]] || { echo "FATAL: fake telnet server never reported a port" >&2; exit 1; }
+  FAKE_PORT="$( < "$port_file" )"
+}
 source "$ROOT/scripts/lib-env.sh"
-out="$(telnet_session "$port" retest 'apm status' 10)"
+
+# Single-command payload (the run.sh stop path).
+start_fake_server "$tmp/received.bin"
+out="$(telnet_session "$FAKE_PORT" retest 'apm status' 10)"
 [[ "$out" == *"telnet ok"* ]] || { echo "FAIL: reply not relayed" >&2; exit 1; }
 printf 'retest\napm status\n' > "$tmp/expected.bin"
 cmp -s "$tmp/received.bin" "$tmp/expected.bin" || { echo "FAIL: wrong bytes on the wire (got $(od -c "$tmp/received.bin" | head -3))" >&2; exit 1; }
 echo "telnet_session OK"
+
+# Multi-command payload with an embedded \n (the perf.sh measure path): pins
+# the printf %b expansion so each command reaches telnet as its own line.
+start_fake_server "$tmp/received2.bin"
+out="$(telnet_session "$FAKE_PORT" retest 'apm status\nquit' 10)"
+[[ "$out" == *"telnet ok"* ]] || { echo "FAIL: reply not relayed (multi-command payload)" >&2; exit 1; }
+printf 'retest\napm status\nquit\n' > "$tmp/expected2.bin"
+cmp -s "$tmp/received2.bin" "$tmp/expected2.bin" || {
+  echo "FAIL: wrong bytes on the wire (multi-command; got $(od -c "$tmp/received2.bin" | head -3))" >&2; exit 1; }
+echo "telnet_session multi-command OK"
