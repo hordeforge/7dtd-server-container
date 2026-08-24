@@ -137,6 +137,16 @@ def no_temp_files(*dirs: Path) -> bool:
 with tempfile.TemporaryDirectory() as tmp:
     root, game, userdata = make_sandbox(Path(tmp) / "fresh", None)
 
+    # Temp files stranded by a SIGKILLed previous boot (OOM kill, podman
+    # kill -9, host power loss) bypass every EXIT trap; the next boot must
+    # sweep them up front so a half-rendered credential-bearing file cannot
+    # sit beside the real one forever.
+    saves = userdata / "Saves"
+    saves.mkdir(parents=True)
+    (game / ".serverconfig.xml.tmp").write_text("@TELNET_PASSWORD@", encoding="utf-8")
+    (saves / ".serveradmin.xml.tmp").write_text("<xml", encoding="utf-8")
+    (saves / ".webadmin-password.tmp").write_text("half-written", encoding="utf-8")
+
     # Fresh boot: everything renders, mints, and cleans up after itself.
     proc = run_entrypoint(root, {})
     out = proc.stdout.decode(errors="replace")
@@ -163,6 +173,12 @@ with tempfile.TemporaryDirectory() as tmp:
             got_pass is not None and got_pass.group(1) == digest(minted),
         )
         check("no temp files leaked", no_temp_files(game, userdata / "Saves"))
+        check(
+            "temp files stranded by a killed previous boot were swept",
+            not (game / ".serverconfig.xml.tmp").exists()
+            and not (saves / ".serveradmin.xml.tmp").exists()
+            and not (saves / ".webadmin-password.tmp").exists(),
+        )
 
     # Existing seed + operator password: skip visibly, keep the old record.
     old_record = (userdata / "Saves" / ".webadmin-password").read_bytes()

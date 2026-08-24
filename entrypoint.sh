@@ -89,6 +89,11 @@ render_config() {
   # unrendered placeholder), so a failed boot leaves no stale half-rendered
   # credential-bearing file beside the real one; disarmed once renamed.
   local out="$GAME_DIR/.serverconfig.xml.tmp"
+  # Sweep the same name stranded by a SIGKILLed previous boot (OOM kill,
+  # podman kill -9, host power loss): the EXIT trap below covers only this
+  # run's graceful failures, so without this sweep a half-rendered
+  # credential-bearing file would sit beside serverconfig.xml forever.
+  rm -f "$out"
   trap 'rm -f "$GAME_DIR/.serverconfig.xml.tmp"' EXIT
   if ! sed -e "s|@TELNET_PASSWORD@|${TELNET_PASSWORD}|g" \
        -e "s|@TELNET_PORT@|${TELNET_PORT}|g" \
@@ -107,6 +112,11 @@ seed_admin_file() {
   # The game creates Saves/ on its own first run, but this seed happens
   # before that; without it a fresh host crashes here writing serveradmin.xml.
   mkdir -p "$USERDATA_DIR/Saves"
+  # Sweep the temp names stranded by a SIGKILLed previous boot (same
+  # rationale as render_config's sweep: the EXIT trap armed below only
+  # covers this run's graceful failures).
+  rm -f "$USERDATA_DIR/Saves/.serveradmin.xml.tmp" \
+    "$USERDATA_DIR/Saves/.webadmin-password.tmp"
   if [[ -f "$USERDATA_DIR/Saves/serveradmin.xml" ]]; then
     # A password provided after the one-time seed cannot apply to the existing
     # file; say so instead of letting the operator value vanish silently.
