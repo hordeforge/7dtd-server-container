@@ -1,5 +1,3 @@
-ROOT := $(CURDIR)
-
 # Recipes use `set -euo pipefail`, which dash rejects; every recipe here
 # assumes bash semantics.
 SHELL := /bin/bash

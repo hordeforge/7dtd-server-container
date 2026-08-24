@@ -45,8 +45,7 @@ fi
 
 mkdir -p "$GAME_DIR" "$USERDATA_DIR" "$ROOT/mods" "$ROOT/config"
 
-# Shared container env + mounts. $1 optionally overrides the STEAMCMD_ONLY
-# value passed into the container (used by install-only, see below).
+# Shared container env + mounts.
 make_common() {
   COMMON=(
     --network host
@@ -54,7 +53,7 @@ make_common() {
     -e TELNET_PORT="$TELNET_PORT"
     -e WEBADMIN_PASSWORD="${WEBADMIN_PASSWORD:-}"
     -e STEAMCMD_UPDATE="$STEAMCMD_UPDATE"
-    -e STEAMCMD_ONLY="${1:-$STEAMCMD_ONLY}"
+    -e STEAMCMD_ONLY="$STEAMCMD_ONLY"
     # :Z relabels the sources to container_file_t (SELinux enforcing RHEL host).
     # mods is rw: the /api/perf toggle writes the EfficientServer config there
     # (the game itself never touches /mods; the entrypoint copies it to the game
@@ -87,7 +86,8 @@ install_only() {
   # Force the pre-warm mode: install-only must download/validate and exit,
   # never boot the game server, even if the environment or .env set
   # STEAMCMD_ONLY=0.
-  make_common 1
+  STEAMCMD_ONLY=1
+  make_common
   # --init: same reaper as start(); steamcmd forks a bootstrap that must not
   # linger if it outlives its parent mid-download.
   podman run --rm --name "$NAME-install" --init "${COMMON[@]}" "$IMAGE"

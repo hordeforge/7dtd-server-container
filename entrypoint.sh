@@ -14,13 +14,10 @@ log() { echo "[entrypoint] $*"; }
 
 fatal() { echo "[entrypoint] FATAL: $*" >&2; exit 1; }
 
-if STEAMCMD="$(command -v steamcmd 2>/dev/null)"; then
-  :
-elif [[ -x /root/.local/share/Steam/steamcmd/steamcmd.sh ]]; then
-  STEAMCMD=/root/.local/share/Steam/steamcmd/steamcmd.sh
-else
-  fatal "steamcmd not found"
-fi
+# The base image exists to put steamcmd on PATH; this entrypoint otherwise
+# only runs inside that image (it sources the lib and templates copied in by
+# the Containerfile), so a PATH lookup is the one supported resolution.
+STEAMCMD="$(command -v steamcmd)" || fatal "steamcmd not found"
 STEAM_APPID=294420
 UPDATE="${STEAMCMD_UPDATE:-1}"      # 1 = steamcmd validate every start, 0 = skip
 INSTALL_ONLY="${STEAMCMD_ONLY:-0}"  # 1 = install/update then exit (pre-warm)
