@@ -6,7 +6,8 @@ Methodology: pin the rendering contract at its boundaries.
              (the documented binary-float distortion case), the missing-
              attribute default, the usage-error exit code, and clean
              nonzero failures (with a named-input message) for malformed
-             XML, non-numeric line-rate values, and unwritable outputs
+             XML, non-numeric and non-finite (NaN/infinite) line-rate
+             values, and unwritable outputs
   colour()   every threshold inclusive; one step below drops to the next band
   badge SVG  well-formed XML whose text nodes carry label + percentage and
             whose value rect carries the band colour
@@ -88,6 +89,11 @@ check("malformed XML exits 1", failing("<coverage><unclosed>") == 1)
 check("non-numeric line-rate exits 1", failing('<coverage line-rate="abc"/>') == 1)
 # An empty attribute is the realistic truncation shape a broken report takes.
 check("empty line-rate exits 1", failing('<coverage line-rate=""/>') == 1)
+# Quiet NaN survives Decimal arithmetic and quantize without raising; without
+# the finite guard only the final int() would blow up, as an uncaught
+# ValueError traceback. Both non-finite forms must take the clean path.
+check("NaN line-rate exits 1", failing('<coverage line-rate="NaN"/>') == 1)
+check("infinite line-rate exits 1", failing('<coverage line-rate="Infinity"/>') == 1)
 
 # Unwritable output directory: OSError must surface as exit 1, not a crash.
 with tempfile.TemporaryDirectory() as tmp:
