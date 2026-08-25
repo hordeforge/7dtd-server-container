@@ -26,12 +26,8 @@ fi
 NAME="${SEVENDTD_CONTAINER_NAME:-7dtd-server}"
 IMAGE="${SEVENDTD_IMAGE:-localhost/7dtd-server:latest}"
 
-# Owner-only file carrying TELNET_PASSWORD/WEBADMIN_PASSWORD into the
-# container (written by make_common, removed at exit). Empty when no
-# container was started, e.g. on stop/status.
-SECRET_ENV_FILE=""
 # Release every env file this run owns, keyed on the PID embedded in the
-# name rather than on $SECRET_ENV_FILE: acquisition spans the mktemp
+# name rather than on the freshly created path: acquisition spans the mktemp
 # subprocess and the assignment, and a signal arriving in between must still
 # find a working release path (the CI suite races exactly that window).
 cleanup_secret_env_file() {
@@ -105,14 +101,17 @@ make_common() {
   # through the env-file format: no backslash/quote/$ metacharacters and no
   # leading or trailing whitespace (which podman's parser would trim).
   sweep_stale_secret_env_files
-  SECRET_ENV_FILE="$(mktemp "${TMPDIR:-/tmp}/7dtd-container-env.$$.XXXXXX")"
+  # Owner-only env file carrying TELNET_PASSWORD/WEBADMIN_PASSWORD into the
+  # container (removed by the EXIT trap); local to this call, its only reads.
+  local secret_env_file
+  secret_env_file="$(mktemp "${TMPDIR:-/tmp}/7dtd-container-env.$$.XXXXXX")"
   {
     printf 'TELNET_PASSWORD=%s\n' "$TELNET_PASSWORD"
     printf 'WEBADMIN_PASSWORD=%s\n' "${WEBADMIN_PASSWORD:-}"
-  } >"$SECRET_ENV_FILE"
+  } >"$secret_env_file"
   COMMON=(
     --network host
-    --env-file "$SECRET_ENV_FILE"
+    --env-file "$secret_env_file"
     -e TELNET_PORT="$TELNET_PORT"
     -e STEAMCMD_UPDATE="$STEAMCMD_UPDATE"
     -e STEAMCMD_ONLY="$STEAMCMD_ONLY"
@@ -125,10 +124,6 @@ make_common() {
     -v "$ROOT/mods:/mods:Z"
     -v "$ROOT/config:/config:ro,Z"
   )
-}
-
-build() {
-  podman build -t "$IMAGE" "$ROOT"
 }
 
 start() {
@@ -232,24 +227,17 @@ stop() {
   fi
 }
 
-restart() {
-  # start() opens with the graceful stop, so restarting needs nothing else.
-  start
-}
-
-logs() { podman logs -f "$NAME"; }
-# Anchor the name filter: podman treats it as a regex, and unanchored it would
-# also list the $NAME-install pre-warm container.
-status() { podman ps -a --filter "name=^${NAME}$"; }
-
 case "${1:-status}" in
-  build)        build ;;
-  start|run)    start ;;
+  build)        podman build -t "$IMAGE" "$ROOT" ;;
+  # start() opens with the graceful stop, so restarting needs nothing else.
+  start|run|restart)
+                start ;;
   install-only) install_only ;;
   stop)         stop ;;
-  restart)      restart ;;
-  logs)         logs ;;
-  status)       status ;;
+  logs)         podman logs -f "$NAME" ;;
+  # Anchor the name filter: podman treats it as a regex, and unanchored it
+  # would also list the $NAME-install pre-warm container.
+  status)       podman ps -a --filter "name=^${NAME}$" ;;
   *)
     echo "usage: $0 {build|start|install-only|stop|restart|logs|status}" >&2
     exit 1
