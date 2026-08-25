@@ -3,8 +3,8 @@
 # host networking). All runtime state lives in ./data on the host; the
 # container itself is disposable.
 #
-# Usage: run.sh {build|start|run|restart|install-only|stop|logs|status}
-# (`run` is an alias of `start`.)
+# Usage: run.sh {build|start|run|restart|install-only|stop|logs|status|backup}
+# (`run` is an alias of `start`; `backup` archives the world saves.)
 # Env overrides: TELNET_PASSWORD, TELNET_PORT, WEBADMIN_PASSWORD,
 # STEAMCMD_UPDATE, STEAMCMD_ONLY, SEVENDTD_CONTAINER_NAME, SEVENDTD_IMAGE.
 # A git-ignored .env in this directory fills unset variables; variables
@@ -15,6 +15,8 @@ cd "$ROOT"
 
 GAME_DIR="$ROOT/data/game"
 USERDATA_DIR="$ROOT/data/userdata"
+BACKUP_DIR="$ROOT/backups"
+KEEP_BACKUPS=7
 
 # Load the git-ignored .env via scripts/lib-env.sh (precedence as documented
 # in the header). Values are data, never executed, and an explicit override
@@ -139,6 +141,20 @@ start() {
   # whole uptime; without it, children the server forks but never waits on
   # accumulate as zombies until the container restarts.
   podman run -d --name "$NAME" --restart unless-stopped --init "${COMMON[@]}" "$IMAGE"
+  # Smoke-check the boot: `podman run -d` returns before the entrypoint does
+  # anything, so an exec failure or a bad config would otherwise read as the
+  # green "started" line. Give the container a few seconds to prove it stays
+  # up; if it is gone, surface its own last log lines instead of success.
+  local waited=0
+  until podman ps --format '{{.Names}}' | grep -Fxq "$NAME"; do
+    if (( waited >= 4 )); then
+      echo "FATAL: $NAME is not running right after start; last log lines:" >&2
+      podman logs --tail 20 "$NAME" >&2 || true
+      exit 1
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
   echo "started $NAME (game 26900, telnet $TELNET_PORT, dashboard 8080)"
 }
 
@@ -228,6 +244,66 @@ stop() {
   fi
 }
 
+backup() {
+  # Archive the world saves (data/userdata/Saves) into backups/. The saves
+  # are the only state that cannot be regenerated (the game depot re-downloads,
+  # configs re-render from the templates), so they are what backup owns.
+  if [[ ! -d "$USERDATA_DIR/Saves" ]]; then
+    echo "FATAL: nothing to back up ($USERDATA_DIR/Saves is missing; has the server ever started?)" >&2
+    exit 1
+  fi
+  if podman ps --format '{{.Names}}' | grep -Fxq "$NAME"; then
+    # Best-effort live save: a fresh saveworld makes the archive useful even
+    # taken mid-session. A failed request must not block the archive (an
+    # inconsistent-but-present backup beats none), so every failure here only
+    # warns -- same shape as stop()'s fallback, minus the forced stop.
+    echo "requesting world save via telnet ..."
+    local reply=""
+    if telnet_probe "$TELNET_PORT" 3 >/dev/null 2>&1; then
+      if reply="$(telnet_session "$TELNET_PORT" "$TELNET_PASSWORD" 'saveworld' 15 2>&1)"; then
+        # The save completes server-side after the reply; give the region
+        # writes a moment to settle before tar reads them.
+        sleep 5
+      else
+        echo "WARN: telnet saveworld failed; archiving without a fresh save" >&2
+        printf '%s\n' "${reply:-<no output>}" | tail -n 3 >&2
+      fi
+    else
+      echo "WARN: telnet not reachable on $TELNET_PORT; archiving without a fresh save" >&2
+    fi
+  fi
+  mkdir -p "$BACKUP_DIR"
+  # The archive carries serveradmin.xml and the .webadmin-password record from
+  # Saves/, so it gets the entrypoint's credential-file treatment: owner-only.
+  umask 077
+  local stamp archive tar_rc=0
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  archive="$BACKUP_DIR/7dtd-saves-$stamp.tar.gz"
+  # GNU tar exits 1 for warnings alone (a file changed as it was read, which
+  # happens when the game writes during a live backup): keep that archive and
+  # say why. Only >= 2 means tar could not produce something usable.
+  tar -czf "$archive" -C "$USERDATA_DIR" Saves || tar_rc=$?
+  if (( tar_rc >= 2 )); then
+    rm -f "$archive"
+    echo "FATAL: backup failed (tar exit $tar_rc); removed the partial $archive" >&2
+    exit 1
+  fi
+  if (( tar_rc == 1 )); then
+    echo "WARN: files changed while archiving (server running?); the archive may mix save states" >&2
+  fi
+  # Timestamps sort lexicographically, so glob order is age order: prune the
+  # oldest beyond KEEP_BACKUPS so a scheduled backup cannot fill the disk.
+  local archives=() excess i
+  shopt -s nullglob
+  archives=("$BACKUP_DIR"/7dtd-saves-*.tar.gz)
+  shopt -u nullglob
+  excess=$(( ${#archives[@]} - KEEP_BACKUPS ))
+  for (( i = 0; i < excess; i++ )); do
+    rm -f -- "${archives[$i]}"
+  done
+  echo "backup written: $archive (keeping the newest $KEEP_BACKUPS in $BACKUP_DIR)"
+}
+
 case "${1:-status}" in
   build)        podman build -t "$IMAGE" "$ROOT" ;;
   # start() opens with the graceful stop, so restarting needs nothing else.
@@ -235,12 +311,13 @@ case "${1:-status}" in
                 start ;;
   install-only) install_only ;;
   stop)         stop ;;
+  backup)       backup ;;
   logs)         podman logs -f "$NAME" ;;
   # Anchor the name filter: podman treats it as a regex, and unanchored it
   # would also list the $NAME-install pre-warm container.
   status)       podman ps -a --filter "name=^${NAME}$" ;;
   *)
-    echo "usage: $0 {build|start|run|restart|install-only|stop|logs|status}" >&2
+    echo "usage: $0 {build|start|run|restart|install-only|stop|logs|status|backup}" >&2
     exit 1
     ;;
 esac

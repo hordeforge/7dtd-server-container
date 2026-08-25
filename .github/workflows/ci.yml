@@ -8,9 +8,20 @@ on: [push, pull_request]
 permissions:
   contents: read
 
+# One run per ref. Without this, two rapid pushes to main race in the badge
+# job (both clone the badges branch at the same SHA; the slower push fails
+# non-fast-forward and turns main red despite passing checks), and every
+# intermediate PR push keeps burning runner minutes behind its successors.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     runs-on: ubuntu-latest
+    # Bounds a hung step (the default is 6 hours): pip install + make
+    # lint + make test finish well inside this on a healthy runner.
+    timeout-minutes: 15
     steps:
       # Pinned to the release commit, not the mutable v7 tag: a moved tag
       # would otherwise run unreviewed code here with the workflow token.

@@ -38,6 +38,20 @@ stub plus the real fake telnet endpoint:
   idle       nothing running: a bare no-op that never creates a secret
              env file (stop must not call make_common)
 
+start() must not report success for a boot that died instantly (`run -d`
+returns before the entrypoint can fail), so the post-start smoke check is
+pinned too: with the stub reporting nothing running, start exits nonzero
+after dumping the log tail instead of printing the green line.
+
+backup() archives data/userdata/Saves into backups/ and keeps the newest
+few archives; its contract runs against a sandboxed copy of the tree:
+
+  stopped    plain tar.gz of the planted saves, owner-only mode, pruning
+             down to KEEP_BACKUPS newest archives
+  running    telnet answers: password + `saveworld` reach the wire first
+  live-warn  container running + telnet dead: warns and still archives
+  fresh      no saves yet: a loud refusal, not an empty archive
+
 Each failed check prints a FAIL line; the process exits nonzero if any failed.
 """
 
@@ -45,10 +59,12 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import signal
 import socket
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 from pathlib import Path
@@ -136,9 +152,33 @@ def stub_env(tmpdir: Path, **extra: str) -> dict[str, str]:
         "STUB_SNAPSHOT": str(tmpdir / "envfile.snapshot"),
         "STUB_MODE": str(tmpdir / "envfile.mode"),
         "TELNET_PASSWORD": TELNET_PASSWORD,
-        "TELNET_PORT": "8087",
+        # A closed port, not the real 8087: scenarios that do not stage a
+        # telnet endpoint must fail their probe instantly instead of poking
+        # whatever happens to listen on the default port on this host.
+        "TELNET_PORT": closed_ephemeral_port(),
         **extra,
     }
+
+
+def closed_ephemeral_port() -> str:
+    """Bind an ephemeral port, close it, return the number: connects refuse."""
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = str(sock.getsockname()[1])
+    sock.close()
+    return port
+
+
+def make_sandbox(tmpdir: Path) -> Path:
+    """Copy run.sh and its lib into a sandbox tree so its ROOT (derived from
+    the script location) points there: backup writes archives and reads
+    data/userdata under the sandbox, never in the real checkout."""
+    scripts = tmpdir / "scripts"
+    scripts.mkdir()
+    shutil.copy2(RUN_SH, scripts / "run.sh")
+    shutil.copy2(SCRIPTS / "lib-env.sh", scripts / "lib-env.sh")
+    (scripts / "run.sh").chmod(0o755)
+    return tmpdir
 
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -150,8 +190,13 @@ with tempfile.TemporaryDirectory() as tmp:
     mode_file = tmpdir / "envfile.mode"
 
     # Explicit values win over any local .env (load_env_file precedence), so
-    # the run sees known secrets regardless of host state.
-    env = stub_env(tmpdir, WEBADMIN_PASSWORD=WEBADMIN_PASSWORD)
+    # the run sees known secrets regardless of host state. STUB_PS_OUTPUT
+    # reports the container as running so the post-start smoke check passes.
+    env = stub_env(
+        tmpdir,
+        WEBADMIN_PASSWORD=WEBADMIN_PASSWORD,
+        STUB_PS_OUTPUT=f"{NAME}\n",
+    )
 
     try:
         proc = subprocess.run(
@@ -316,7 +361,7 @@ with tempfile.TemporaryDirectory() as tmp:
     live = tmpdir / f"7dtd-container-env.{os.getpid()}.live"
     live.write_bytes(b"TELNET_PASSWORD=live\n")
 
-    env = stub_env(tmpdir, TMPDIR=str(tmpdir))
+    env = stub_env(tmpdir, TMPDIR=str(tmpdir), STUB_PS_OUTPUT=f"{NAME}\n")
     sweep_proc = subprocess.Popen(
         [str(RUN_SH), "start"],
         env=env,
@@ -435,6 +480,169 @@ with tempfile.TemporaryDirectory() as tmp:
     verbs = [rec[0] for rec in stub_invocations(log) if rec]
     check("idle stop only probes state then stops", verbs == [b"ps", b"stop"])
     check("idle stop never writes the secret env file", b"--env-file" not in log.read_bytes())
+
+# Post-start smoke check: with the stub reporting nothing running, start must
+# fail loudly after dumping the log tail instead of printing the success line
+# (`podman run -d` returns before the entrypoint can fail).
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    install_podman_stub(tmpdir, PODMAN_STUB)
+    env = stub_env(tmpdir, WEBADMIN_PASSWORD=WEBADMIN_PASSWORD)  # nothing running
+    proc = subprocess.run(
+        [str(RUN_SH), "start"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    out = proc.stdout + proc.stderr
+    check("start with an instantly-dead container exits nonzero", proc.returncode != 0)
+    check(
+        "the failed start names its cause",
+        b"FATAL" in out and b"not running right after start" in out,
+    )
+    verbs = [rec[0] for rec in stub_invocations(tmpdir / "podman-argv.log") if rec]
+    check("the failed start dumps the container log tail", verbs[-1:] == [b"logs"])
+    sig_envfiles = envfile_paths(stub_invocations(tmpdir / "podman-argv.log"))
+    check(
+        "the failed start still removed the secret env file",
+        bool(sig_envfiles) and all(not Path(p).exists() for p in sig_envfiles),
+    )
+
+
+# backup(): archive + prune against a sandboxed tree, nothing running.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    make_sandbox(tmpdir)
+    install_podman_stub(tmpdir, PODMAN_STUB)
+    saves = tmpdir / "data" / "userdata" / "Saves"
+    (saves / "region").mkdir(parents=True)
+    (saves / "region" / "r.0.0.region").write_bytes(b"chunkdata")
+    backups = tmpdir / "backups"
+    backups.mkdir()
+    for i in range(9):
+        (backups / f"7dtd-saves-2020010{i}-000000.tar.gz").write_bytes(b"old")
+    env = stub_env(tmpdir)
+    proc = subprocess.run(
+        [str(tmpdir / "scripts" / "run.sh"), "backup"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    check("backup with nothing running exits 0", proc.returncode == 0)
+    if proc.returncode != 0:
+        print(proc.stderr.decode(errors="replace"), file=sys.stderr)
+    remaining = sorted(backups.glob("7dtd-saves-*.tar.gz"))
+    check("backup prunes to KEEP_BACKUPS newest archives", len(remaining) == 7)
+    fresh = [p for p in remaining if p.name > "7dtd-saves-20200109-000000.tar.gz"]
+    check("backup wrote exactly one fresh archive", len(fresh) == 1)
+    if fresh:
+        check(
+            "the fresh archive is owner-only (0600)",
+            oct(fresh[0].stat().st_mode & 0o777) == "0o600",
+        )
+        with tarfile.open(fresh[0]) as tf:
+            names = tf.getnames()
+        check(
+            "the fresh archive contains the planted save",
+            "Saves/region/r.0.0.region" in names,
+        )
+    oldest = [
+        backups / "7dtd-saves-20200100-000000.tar.gz",
+        backups / "7dtd-saves-20200101-000000.tar.gz",
+    ]
+    check(
+        "the two oldest archives were pruned first",
+        all(not p.exists() for p in oldest),
+    )
+    check(
+        "backup never writes a secret env file",
+        b"--env-file" not in (tmpdir / "podman-argv.log").read_bytes(),
+    )
+
+
+# backup() while the server runs: saveworld goes over telnet before tar.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    make_sandbox(tmpdir)
+    install_podman_stub(tmpdir, PODMAN_STUB)
+    saves = tmpdir / "data" / "userdata" / "Saves"
+    saves.mkdir(parents=True)
+    (saves / "region.zip").write_bytes(b"save")
+    wire = tmpdir / "wire.bin"
+    server, port = start_fake_telnet(wire)
+    try:
+        env = stub_env(tmpdir, STUB_PS_OUTPUT=f"{NAME}\n", TELNET_PORT=port)
+        proc = subprocess.run(
+            [str(tmpdir / "scripts" / "run.sh"), "backup"],
+            env=env,
+            capture_output=True,
+            check=False,
+            timeout=120,
+        )
+    finally:
+        server.kill()
+        server.wait()
+    check("live backup exits 0", proc.returncode == 0)
+    if proc.returncode != 0:
+        print(proc.stderr.decode(errors="replace"), file=sys.stderr)
+    check(
+        "live backup sent password + saveworld over telnet",
+        wire.read_bytes() == f"{TELNET_PASSWORD}\nsaveworld\n".encode(),
+    )
+    fresh_archives = list((tmpdir / "backups").glob("7dtd-saves-*.tar.gz"))
+    check("live backup produced an archive", bool(fresh_archives))
+    verbs = [rec[0] for rec in stub_invocations(tmpdir / "podman-argv.log") if rec]
+    check("backup only probes state (never stops the server)", verbs == [b"ps"])
+
+
+# backup() while the server runs but the console is down: warn and still
+# archive (an inconsistent-but-present backup beats none).
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    make_sandbox(tmpdir)
+    install_podman_stub(tmpdir, PODMAN_STUB)
+    (tmpdir / "data" / "userdata" / "Saves").mkdir(parents=True)
+    dead_port = closed_ephemeral_port()
+    env = stub_env(tmpdir, STUB_PS_OUTPUT=f"{NAME}\n", TELNET_PORT=dead_port)
+    proc = subprocess.run(
+        [str(tmpdir / "scripts" / "run.sh"), "backup"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    out = proc.stdout + proc.stderr
+    check("backup with dead telnet exits 0", proc.returncode == 0)
+    check(
+        "backup with dead telnet warns about the skipped save",
+        b"archiving without a fresh save" in out,
+    )
+    check(
+        "backup with dead telnet still archived",
+        bool(list((tmpdir / "backups").glob("7dtd-saves-*.tar.gz"))),
+    )
+
+
+# backup() on a tree where the server never started: loud refusal.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    make_sandbox(tmpdir)
+    install_podman_stub(tmpdir, PODMAN_STUB)
+    env = stub_env(tmpdir)
+    proc = subprocess.run(
+        [str(tmpdir / "scripts" / "run.sh"), "backup"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    out = proc.stdout + proc.stderr
+    check(
+        "backup without any saves refuses loudly",
+        proc.returncode != 0 and b"nothing to back up" in out,
+    )
 
 if failed_checks:
     sys.exit(1)

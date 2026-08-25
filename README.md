@@ -25,7 +25,7 @@ and disposable.
 | `scripts/stage_mods.sh` | Copy built mods from sibling `dist/` into `mods-available/`, recreate the enabled copies |
 | `scripts/deploy.sh` | Stage mods + rsync this project to the server host (`--restart` also restarts the container) |
 | `scripts/update_mods.sh` | Server-side: restage enabled mods + restart container (no image rebuild) |
-| `scripts/run.sh` | Container lifecycle on the server host (build/start/logs/stop/...) |
+| `scripts/run.sh` | Container lifecycle on the server host (build/start/logs/stop/backup/status) |
 | `scripts/perf.sh` | EfficientServer toggle (`on`/`off`/`status`) + telnet `apm status` snapshot (`measure`) |
 | `scripts/lib-env.sh` | Shared `.env` loader, telnet value validation, telnet session helper (sourced by the ops scripts) |
 | `start.sh` / `stop.sh` | Top-level daily shortcuts: start / graceful stop (wrap `run.sh`) |
@@ -157,7 +157,14 @@ Add players to the admin list via telnet after joining, e.g.
   container. Delete and recreate the container freely.
 - Runtime state beyond saves lives on the host too: the rendered
   `serverconfig.xml` (`data/game/serverconfig.xml`) and the game install
-  under `data/game/`. Backups are therefore a plain copy of `data/`.
+  under `data/game/`.
+- Back up the saves with `./scripts/run.sh backup`: it asks the running
+  server to `saveworld` via telnet first (best effort; a skipped save only
+  warns), archives `data/userdata/Saves/` to `backups/7dtd-saves-<timestamp>
+  .tar.gz` (owner-only, it carries `serveradmin.xml` and the webadmin record),
+  and keeps the newest 7 archives. `deploy.sh` never touches `backups/`.
+  Rollback of code or mods is not automated: redeploy an older sibling build;
+  saves are unaffected by deploys.
 
 ## Durable service (optional)
 

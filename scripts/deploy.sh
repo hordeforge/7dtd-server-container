@@ -26,14 +26,17 @@ esac
 
 # Bound the network waits: ConnectTimeout stops a dead host from hanging the
 # TCP connect, --timeout aborts a stalled transfer after 60s of no data.
-# data/ is server-owned state; the rest are workstation-local caches that must
-# not accumulate on the server host (.env travels on purpose so the
-# server-side scripts render and validate the same values). The .scratch*
-# pattern also covers scratch files dropped beside the directory (e.g.
-# .scratch_<name>.sh copies kept for reference).
+# data/ is server-owned state; backups/ holds the save archives run.sh backup
+# writes on the server host (deleting them here would be a --delete away);
+# the rest are workstation-local caches that must not accumulate on the
+# server host (.env travels on purpose so the server-side scripts render and
+# validate the same values). The .scratch* pattern also covers scratch files
+# dropped beside the directory (e.g. .scratch_<name>.sh copies kept for
+# reference).
 rsync -a --delete --timeout=60 -e "ssh -o ConnectTimeout=10" \
   --exclude .git \
   --exclude data \
+  --exclude backups \
   --exclude .mypy_cache \
   --exclude .ruff_cache \
   --exclude __pycache__ \

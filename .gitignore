@@ -1,5 +1,8 @@
 # Runtime data on the server host (game files, saves, logs). Never commit.
 data/
+# Save archives written by scripts/run.sh backup (regenerable host state,
+# carries credentials from Saves/).
+backups/
 # Staged mod builds, regenerable via scripts/stage_mods.sh from sibling dist/.
 mods-available/
 mods/
