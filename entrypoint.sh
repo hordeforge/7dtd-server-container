@@ -47,22 +47,35 @@ assert_rendered() { # file placeholder...
 }
 
 install_or_update() {
-  local attempt rc max_attempts=3
+  local attempt rc max_attempts=3 attempt_timeout=3600
   for (( attempt = 1; attempt <= max_attempts; attempt++ )); do
     rc=0
     log "steamcmd: install/validate app $STEAM_APPID into $GAME_DIR (attempt $attempt/$max_attempts)"
-    "$STEAMCMD" +force_install_dir "$GAME_DIR" \
+    # Bound every attempt: a stalled Steam connection otherwise hangs the boot
+    # forever, and under --restart unless-stopped a hung entrypoint reads as a
+    # healthy container from the outside. -k 30 escalates to KILL when TERM is
+    # ignored; the budget stays generous because a fresh depot is a multi-GB
+    # download and retries resume from steamcmd's own cache. A timed-out
+    # attempt surfaces as 124 (TERM) or 137 (KILL) and is named as such below
+    # instead of reading as a generic steamcmd error.
+    timeout -k 30 "$attempt_timeout" "$STEAMCMD" +force_install_dir "$GAME_DIR" \
       +login anonymous +app_update "$STEAM_APPID" validate +quit || rc=$?
     (( rc == 0 )) && break
     # Transient Steam network errors are common; app_update validate is
     # idempotent, so retrying is safe. Bounded so a persistent failure exits.
     if (( attempt < max_attempts )); then
-      log "steamcmd exited $rc; retrying in $((attempt * 10))s"
+      case "$rc" in
+        124|137) log "steamcmd attempt hit the ${attempt_timeout}s timeout; retrying in $((attempt * 10))s" ;;
+        *)       log "steamcmd exited $rc; retrying in $((attempt * 10))s" ;;
+      esac
       sleep $((attempt * 10))
     fi
   done
   if (( rc != 0 )); then
-    fatal "steamcmd failed after $max_attempts attempts (app $STEAM_APPID, last exit $rc)"
+    case "$rc" in
+      124|137) fatal "steamcmd timed out after $max_attempts attempts of ${attempt_timeout}s each (app $STEAM_APPID)" ;;
+      *)       fatal "steamcmd failed after $max_attempts attempts (app $STEAM_APPID, last exit $rc)" ;;
+    esac
   fi
   if [[ ! -x "$GAME_DIR/7DaysToDieServer.x86_64" ]]; then
     fatal "steamcmd finished but 7DaysToDieServer.x86_64 is missing in $GAME_DIR"

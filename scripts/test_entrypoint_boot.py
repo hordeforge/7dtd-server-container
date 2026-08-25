@@ -63,6 +63,20 @@ printf '#!/bin/sh\\nexit 0\\n' > "$1/7DaysToDieServer.x86_64"
 chmod +x "$1/7DaysToDieServer.x86_64"
 """
 
+# Stalled-download stand-in: creates the expected binary (so the failure is
+# attributable to the stall alone), records the attempt, then hangs past any
+# sane per-attempt bound.
+SLOW_STEAMCMD_STUB = """#!/bin/sh
+shift  # drop +force_install_dir
+mkdir -p "$1"
+printf '#!/bin/sh\\nexit 0\\n' > "$1/7DaysToDieServer.x86_64"
+chmod +x "$1/7DaysToDieServer.x86_64"
+echo attempt >> "$STEAMCMD_ATTEMPT_MARKER"
+# Detached sleep: timeout(1) kills this shell while the child lingers, and a
+# sleep still holding the test harness's output pipes would stall read().
+sleep 30 >/dev/null 2>&1 </dev/null
+"""
+
 
 def make_sandbox(tmpdir: Path, drift: str | None) -> tuple[Path, Path, Path]:
     """Build sandbox. drift induces the exact template/script drift the
@@ -229,6 +243,50 @@ with tempfile.TemporaryDirectory() as tmp:
     check("seed temp files removed on failure", no_temp_files(saves))
     check("no serveradmin.xml produced on failure", not (saves / "serveradmin.xml").exists())
     check("no credential record produced on failure", not (saves / ".webadmin-password").exists())
+
+    # Stalled steamcmd: every attempt must be time-bounded so a hung Steam
+    # connection cannot park the boot forever (under --restart unless-stopped
+    # a hung entrypoint reads as healthy from the outside). The sandbox shrinks
+    # the attempt budget and the retry backoff to keep the scenario fast; the
+    # stub hangs past either. Expect: attempt 1 killed at its bound, a real
+    # retry (the marker proves it), then the fatal naming the timeout.
+    with tempfile.TemporaryDirectory() as slow_tmp:
+        tmpdir = Path(slow_tmp)
+        root, game, userdata = make_sandbox(tmpdir / "slow-cmd", None)
+        ep = root / "entrypoint.sh"
+        patched = ep.read_text(encoding="utf-8")
+        for old, new in (
+            ("max_attempts=3", "max_attempts=2"),
+            ("attempt_timeout=3600", "attempt_timeout=1"),
+            ("sleep $((attempt * 10))", "sleep 0"),
+        ):
+            assert old in patched, f"patch anchor missing: {old}"
+            patched = patched.replace(old, new, 1)
+        ep.write_text(patched, encoding="utf-8")
+        stub = root / "bin" / "steamcmd"
+        stub.write_text(SLOW_STEAMCMD_STUB)
+        stub.chmod(stub.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+        marker = root / "steamcmd-attempts.log"
+        proc = run_entrypoint(
+            root,
+            {"STEAMCMD_UPDATE": "1", "STEAMCMD_ATTEMPT_MARKER": str(marker)},
+        )
+        # log() lines ride stdout; the fatal rides stderr.
+        out = proc.stdout.decode(errors="replace")
+        err = proc.stderr.decode(errors="replace")
+        check("stalled steamcmd fatal-exits instead of hanging", proc.returncode != 0)
+        attempts = marker.read_text(encoding="utf-8").count("attempt\n") if marker.exists() else 0
+        check("a timed-out attempt was retried before giving up", attempts == 2)
+        check(
+            "fatal names the per-attempt timeout budget",
+            "timed out after 2 attempts of 1s each" in err,
+        )
+        check("per-attempt timeout is visible in the log", "hit the 1s timeout" in out)
+        check(
+            "boot never reached config render after steamcmd gave up",
+            not (game / "serverconfig.xml").exists(),
+        )
 
 if failed_checks:
     sys.exit(1)

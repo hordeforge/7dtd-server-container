@@ -23,6 +23,9 @@ Scenarios:
               300s, and the destination reaches ssh via stdin only
   degraded    --restart with neither timeout nor gtimeout: exit 0, WARN
               names the lost bound, ssh still carries the restart
+  failing     --restart whose ssh exits nonzero: deploy exits nonzero and
+              the FATAL names phase, host, and the deployed-tree/stale-mods
+              state plus the recovery command
 
 Each failed check prints FAIL; the process exits nonzero if any failed.
 """
@@ -74,6 +77,7 @@ with open(os.environ["DEPLOY_TEST_SSH_LOG"], "ab") as f:
     f.write(b"\\0".join(a.encode() for a in sys.argv[1:]) + b"\\0\\0")
 with open(os.environ["DEPLOY_TEST_SSH_STDIN"], "ab") as f:
     f.write(sys.stdin.buffer.read())
+sys.exit(int(os.environ.get("DEPLOY_TEST_SSH_RC", "0")))
 """
 
 TIMEOUT_STUB = """#!/usr/bin/env python3
@@ -249,6 +253,35 @@ with tempfile.TemporaryDirectory() as tmp:
     check(
         "degraded restart still pipes the destination",
         got_stdin == f"{DEST_DIR}\n".encode(),
+    )
+
+# Failing remote restart: rsync already pushed the tree, so a bare nonzero
+# exit would leave the operator guessing which phase broke and whether the
+# server host is now inconsistent. The failure must name the host and phase
+# and say how to finish (update_mods.sh there, or re-run --restart).
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    project, env = make_sandbox(tmpdir, timeout_name="timeout")
+    env["DEPLOY_TEST_SSH_RC"] = "255"
+    proc = run_deploy(project, env, "--restart")
+    out = proc.stdout + proc.stderr
+    check("failing remote restart exits nonzero", proc.returncode != 0)
+    check(
+        "the failed restart names the phase and host",
+        b"remote restart" in out and HOST.encode() in out,
+    )
+    check(
+        "the failed restart reports deployed-tree/stale-mods state",
+        b"deployed" in out and b"old mods" in out,
+    )
+    check(
+        "the failed restart names the recovery command",
+        b"update_mods.sh" in out,
+    )
+    check(
+        "rsync still ran before the failing restart",
+        len(invocations(Path(env["DEPLOY_TEST_RSYNC_LOG"]))) == 1
+        and len(invocations(Path(env["DEPLOY_TEST_SSH_LOG"]))) == 1,
     )
 
 if failed_checks:

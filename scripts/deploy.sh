@@ -67,12 +67,22 @@ if [[ "$RESTART" == "1" ]]; then
   done
   # shellcheck disable=SC2016  # non-expansion is the point: dest_dir belongs to the remote shell
   REMOTE_CMD='read -r dest_dir && cd "$dest_dir" && ./scripts/update_mods.sh'
+  restart_rc=0
   if [[ -n "$TIMEOUT_BIN" ]]; then
     printf '%s\n' "$DEST_DIR" \
-      | "$TIMEOUT_BIN" 300 ssh -o ConnectTimeout=10 "${SSH_USER}@${HOST}" "$REMOTE_CMD"
+      | "$TIMEOUT_BIN" 300 ssh -o ConnectTimeout=10 "${SSH_USER}@${HOST}" "$REMOTE_CMD" || restart_rc=$?
   else
     echo "WARN: timeout(1) not found; running the remote restart without a local time bound" >&2
     printf '%s\n' "$DEST_DIR" \
-      | ssh -o ConnectTimeout=10 "${SSH_USER}@${HOST}" "$REMOTE_CMD"
+      | ssh -o ConnectTimeout=10 "${SSH_USER}@${HOST}" "$REMOTE_CMD" || restart_rc=$?
+  fi
+  # A failed restart must not read as a plain ssh hiccup: rsync already pushed
+  # the tree, so the server host now holds code its running container has not
+  # picked up. Name the phase and the way out instead of dying with bare ssh
+  # output (the rc is preserved in the message; the exit itself stays 1 like
+  # every other fatal path here).
+  if (( restart_rc != 0 )); then
+    echo "FATAL: remote restart on ${SSH_USER}@${HOST} failed (exit $restart_rc); the tree is deployed but the container still runs the old mods -- run ./scripts/update_mods.sh on ${HOST} or re-run '$0 --restart'" >&2
+    exit 1
   fi
 fi
