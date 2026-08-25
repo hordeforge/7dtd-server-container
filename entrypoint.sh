@@ -152,7 +152,6 @@ seed_admin_file() {
   local minted=0
   if [[ -z "${WEBADMIN_PASSWORD:-}" ]]; then
     WEBADMIN_PASSWORD="$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-    export WEBADMIN_PASSWORD
     minted=1
   fi
   check_webadmin_password
