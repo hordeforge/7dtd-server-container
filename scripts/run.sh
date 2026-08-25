@@ -3,7 +3,8 @@
 # host networking). All runtime state lives in ./data on the host; the
 # container itself is disposable.
 #
-# Usage: run.sh {build|start|install-only|stop|restart|logs|status}
+# Usage: run.sh {build|start|run|restart|install-only|stop|logs|status}
+# (`run` is an alias of `start`.)
 # Env overrides: TELNET_PASSWORD, TELNET_PORT, WEBADMIN_PASSWORD,
 # STEAMCMD_UPDATE, STEAMCMD_ONLY, SEVENDTD_CONTAINER_NAME, SEVENDTD_IMAGE.
 # A git-ignored .env in this directory fills unset variables; variables
@@ -239,7 +240,7 @@ case "${1:-status}" in
   # would also list the $NAME-install pre-warm container.
   status)       podman ps -a --filter "name=^${NAME}$" ;;
   *)
-    echo "usage: $0 {build|start|install-only|stop|restart|logs|status}" >&2
+    echo "usage: $0 {build|start|run|restart|install-only|stop|logs|status}" >&2
     exit 1
     ;;
 esac
