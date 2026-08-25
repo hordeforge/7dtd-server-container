@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Stage built mods from sibling repos into mods-available/ and (re)create the
-# enabled set as real copies in mods/. Real copies (not symlinks) so the
-# bind-mounted mods/ dir is self-contained inside the container. The enabled
+# Runs on the workstation (where the sibling repos live): stages their built
+# mods into mods-available/ and (re)creates the enabled set as real copies in
+# mods/, then deploy.sh rsyncs the tree to the server host. Real copies (not
+# symlinks) so the bind-mounted mods/ dir is self-contained inside the
+# container. The enabled
 # set below is EfficientServer (perf) + the APM bridge + BotMod (combat bots,
 # remove for clean perf runs). This script owns the enabled set: everything in
 # mods/ outside NAMES is wiped on every run, so a mod enabled by hand survives

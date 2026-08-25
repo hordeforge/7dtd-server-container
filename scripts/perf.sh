@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Toggle the EfficientServer (perf) mod on/off and restart the container so the
 # change takes effect (the mod reads its config at game boot).
+# Runs on the server host: it edits the staged mods/EfficientServer config in
+# place and restarts through scripts/run.sh (the container's host).
 # Observe the effects with:
 #   ./scripts/perf.sh measure   # bridge `apm status` snapshot via telnet
 #   APM web panel: http://<server>:8080  (web login admin/<WEBADMIN_PASSWORD> or Steam)
