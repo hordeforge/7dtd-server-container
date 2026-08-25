@@ -13,6 +13,9 @@ scripts/__pycache__/
 .mypy_cache/
 .ruff_cache/
 
-# Local scratch space (never commit).
+# Local scratch space (never commit); the .scratch* glob matches the
+# deploy.sh rsync exclude so scratch files dropped beside the directory
+# (.scratch_<name>.sh) stay untracked here too.
 .scratch/
+.scratch*
 *.lock
