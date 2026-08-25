@@ -28,7 +28,9 @@ esac
 # TCP connect, --timeout aborts a stalled transfer after 60s of no data.
 # data/ is server-owned state; the rest are workstation-local caches that must
 # not accumulate on the server host (.env travels on purpose so the
-# server-side scripts render and validate the same values).
+# server-side scripts render and validate the same values). The .scratch*
+# pattern also covers scratch files dropped beside the directory (e.g.
+# .scratch_<name>.sh copies kept for reference).
 rsync -a --delete --timeout=60 -e "ssh -o ConnectTimeout=10" \
   --exclude .git \
   --exclude data \
@@ -37,7 +39,7 @@ rsync -a --delete --timeout=60 -e "ssh -o ConnectTimeout=10" \
   --exclude __pycache__ \
   --exclude coverage \
   --exclude coverage.cobertura.xml \
-  --exclude .scratch \
+  --exclude .scratch* \
   "$ROOT/" "${SSH_USER}@${HOST}:${DEST_DIR}/"
 
 echo "deployed $ROOT -> ${SSH_USER}@${HOST}:${DEST_DIR}/"
