@@ -57,6 +57,7 @@ test:
 	python3 scripts/test_coverage_badge.py
 	python3 scripts/test_check_config_xml.py
 	python3 scripts/test_config_templates.py
+	python3 scripts/test_deploy_sh.py
 	python3 scripts/test_entrypoint_boot.py
 	python3 scripts/test_systemd_unit.py
 	python3 scripts/test_run_sh.py
