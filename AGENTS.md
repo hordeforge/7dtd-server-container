@@ -5,8 +5,8 @@ rootless podman container on the LAN server host (192.168.0.100). Owns the
 container image, server config template, mod staging, and ops scripts. It does
 NOT own mod code, measurement, or game RE; those live in the sibling repos.
 
-Workspace root guide: [`../AGENTS.md`](../AGENTS.md) and
-[`../MODDING_BEST_PRACTICES.md`](../MODDING_BEST_PRACTICES.md).
+Workspace root guide: [`hordeforge/.github` AGENTS.md](https://github.com/hordeforge/.github/blob/main/AGENTS.md) and
+[`hordeforge/.github` MODDING_BEST_PRACTICES.md](https://github.com/hordeforge/.github/blob/main/MODDING_BEST_PRACTICES.md).
 
 ## Owns
 
