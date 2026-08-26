@@ -1,6 +1,7 @@
 # Static analysis for the Python helpers in scripts/. Enforced by `make lint`
-# (local) and the ci workflow (blocking); versions are pinned in CI so both
-# gates run identical rules.
+# (local) and the ci workflow (blocking); the analyzer versions are pinned in
+# requirements-lint.txt and installed by the same Makefile recipe both times,
+# so the two gates run identical rules.
 [tool.ruff]
 line-length = 100
 target-version = "py310"
