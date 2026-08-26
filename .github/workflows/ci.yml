@@ -79,6 +79,12 @@ jobs:
           git -C "$src" remote add origin https://github.com/SimonKagstrom/kcov
           git -C "$src" fetch -q --depth 1 origin a39874f938ce13f7a65f253120d1ec946b349ffe
           git -C "$src" checkout -q --detach FETCH_HEAD
+          # kcov's CMakeLists derives its version from `git describe --tags`,
+          # and a --depth 1 fetch by SHA carries no tags: describe fails, the
+          # version string comes back empty, and the string(REGEX REPLACE) on
+          # it aborts configure. Name the fetched commit locally so describe
+          # answers v43; the pin stays the SHA fetched above.
+          git -C "$src" tag v43 FETCH_HEAD
           cmake -S "$src" -B "$build" -DCMAKE_BUILD_TYPE=Release
           cmake --build "$build" --parallel 2
           sudo cmake --install "$build"
