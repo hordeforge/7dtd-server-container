@@ -8,6 +8,43 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+usage() {
+  cat <<'EOF'
+usage: update_mods.sh
+
+Restage enabled mods from mods-available/ (if present) and restart the
+container so the entrypoint re-syncs the game's Mods/ dir. No image
+rebuild: mods are bind-mounted from ./mods. Takes no arguments; the usual
+trigger is remote, `./scripts/deploy.sh --restart`.
+EOF
+}
+
+# Help answers before any restage or restart side effect.
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+esac
+
+# Same no-second-word rule as stage_mods.sh (and run.sh): a stray flag must
+# fail loudly instead of being dropped while the restage runs anyway.
+if (( $# > 1 )); then
+  echo "FATAL: unexpected argument '$2' ($0 takes no arguments)" >&2
+  usage >&2
+  exit 2
+fi
+
+case "${1:-}" in
+  "") ;;
+  *)
+    # Name the offender before the usage dump (same shape as run.sh).
+    echo "FATAL: unexpected argument '$1' ($0 takes no arguments)" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
 if [[ -d mods-available ]]; then
   # Sweep staging leftovers from a previously killed run: hidden, so the
   # mods/*/ loop and the entrypoint's cp of /mods/. would otherwise carry

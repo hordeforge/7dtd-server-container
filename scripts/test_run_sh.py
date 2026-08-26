@@ -644,6 +644,102 @@ with tempfile.TemporaryDirectory() as tmp:
         proc.returncode != 0 and b"nothing to back up" in out,
     )
 
+# CLI surface: --help answers without any setup side effect, and a bad
+# invocation must be distinguishable from a failed operation by scripts
+# consuming this CLI, so usage errors exit 2 (not 1 like real failures).
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    make_sandbox(tmpdir)
+    run_sh = tmpdir / "scripts" / "run.sh"
+    env = stub_env(tmpdir)
+
+    proc = subprocess.run(
+        [str(run_sh), "--help"], env=env, capture_output=True, check=False, timeout=30
+    )
+    check("--help exits 0", proc.returncode == 0)
+    check("--help prints usage on stdout", b"usage: run.sh" in proc.stdout)
+    check("--help writes nothing to stderr", proc.stderr == b"")
+
+    proc = subprocess.run(
+        [str(run_sh), "-h"], env=env, capture_output=True, check=False, timeout=30
+    )
+    check("-h behaves like --help", proc.returncode == 0 and b"usage: run.sh" in proc.stdout)
+
+    # Help must answer even when the environment itself is broken.
+    proc = subprocess.run(
+        [str(run_sh), "--help"],
+        env={**env, "TELNET_PORT": "not-a-port"},
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    check("--help ignores an invalid TELNET_PORT", proc.returncode == 0)
+
+    proc = subprocess.run(
+        [str(run_sh), "frobnicate"], env=env, capture_output=True, check=False, timeout=30
+    )
+    check("unknown command exits 2", proc.returncode == 2)
+    check(
+        "unknown command prints usage on stderr only",
+        b"usage:" in proc.stderr and proc.stdout == b"",
+    )
+    # Name the offender: an error that never says which word was wrong sends
+    # the operator re-reading the invocation.
+    check("unknown command is named in the error", b"frobnicate" in proc.stderr)
+
+    # A typo'd command must be a usage error even when the environment itself
+    # is broken (same rule as --help): validation of the word happens before
+    # any .env load or value validation, so no setup side effect runs either.
+    broken_env = {**env, "TELNET_PORT": "not-a-port"}
+    data_dir = tmpdir / "data"
+    proc = subprocess.run(
+        [str(run_sh), "frobnicate"], env=broken_env, capture_output=True, check=False, timeout=30
+    )
+    check(
+        "unknown command exits 2 even with a broken environment",
+        proc.returncode == 2 and b"unknown command 'frobnicate'" in proc.stderr,
+    )
+    check(
+        "the rejected command created no runtime dirs",
+        not data_dir.exists(),
+    )
+
+    proc = subprocess.run(
+        [str(run_sh), "stop", "--keep", "3"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    check("extra argument exits 2 naming it", proc.returncode == 2 and b"--keep" in proc.stderr)
+
+    # The daily wrappers forward everything except help: asking either for
+    # --help must answer 0 on stdout here (never a FATAL from run.sh), while
+    # any other stray argument still fails loudly there.
+    for wrapper, verb in (("start.sh", "start"), ("stop.sh", "stop")):
+        shutil.copy2(ROOT / wrapper, tmpdir / wrapper)
+        (tmpdir / wrapper).chmod(0o755)
+        proc = subprocess.run(
+            [str(tmpdir / wrapper), "--help"], env=env, capture_output=True, check=False, timeout=30
+        )
+        check(f"{wrapper} --help exits 0", proc.returncode == 0)
+        check(
+            f"{wrapper} --help names its run.sh {verb} shortcut",
+            b"run.sh" in proc.stdout and verb.encode() in proc.stdout,
+        )
+        check(f"{wrapper} --help writes nothing to stderr", proc.stderr == b"")
+        proc = subprocess.run(
+            [str(tmpdir / wrapper), "frobnicate"],
+            env=env,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+        check(
+            f"{wrapper} frobnicate fails loudly in run.sh",
+            proc.returncode == 2 and b"frobnicate" in proc.stderr,
+        )
+
 if failed_checks:
     sys.exit(1)
 print("run.sh secret-transport contract OK")

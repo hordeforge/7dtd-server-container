@@ -5,13 +5,77 @@
 #
 # Usage: run.sh {build|start|run|restart|install-only|stop|logs|status|backup}
 # (`run` is an alias of `start`; `backup` archives the world saves.)
+# `--help` prints the command list without touching the environment or data/.
 # Env overrides: TELNET_PASSWORD, TELNET_PORT, WEBADMIN_PASSWORD,
 # STEAMCMD_UPDATE, STEAMCMD_ONLY, SEVENDTD_CONTAINER_NAME, SEVENDTD_IMAGE.
 # A git-ignored .env in this directory fills unset variables; variables
 # already present in the environment win over it, defaults come last.
+# Exit codes: 0 success, 2 usage error (unknown command or --help misuse),
+# other nonzero failures as reported by the failing step.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+
+usage() {
+  cat <<'EOF'
+usage: run.sh {build|start|run|restart|install-only|stop|logs|status|backup}
+
+Manage the 7dtd-server podman container; all runtime state lives in ./data
+(the container itself is disposable).
+  build          build the container image
+  start, run     recreate and start the container (graceful stop first);
+                 run is an alias of start
+  restart        alias of start
+  install-only   download/validate the game via steamcmd, then exit;
+                 refuses while the server is running
+  stop           graceful stop: telnet save + shutdown, then force stop
+  logs           follow container logs
+  status         show container state (default with no command)
+  backup         archive world saves into backups/ (keeps the newest 7)
+
+Env overrides: TELNET_PASSWORD, TELNET_PORT, WEBADMIN_PASSWORD,
+STEAMCMD_UPDATE, STEAMCMD_ONLY, SEVENDTD_CONTAINER_NAME, SEVENDTD_IMAGE.
+A git-ignored .env in this directory fills unset variables; variables
+already present in the environment win over it, defaults come last.
+EOF
+}
+
+case "${1:-}" in
+  # Help answers before any setup side effect (no .env load, no value
+  # validation, no data dir creation): asking for help must never fail on
+  # an unrelated broken env value.
+  -h|--help)
+    usage
+    exit 0
+    ;;
+esac
+
+# Exactly one command word: a silently ignored second word would make e.g.
+# `run.sh backup --keep 3` read as a supported option while backup runs with
+# its defaults. Checked here, before value validation, so a typo surfaces as
+# a usage error even when the environment itself is broken.
+if (( $# > 1 )); then
+  echo "FATAL: unexpected argument '$2' ($0 takes exactly one command)" >&2
+  usage >&2
+  exit 2
+fi
+
+# Validate the command word here too, before any setup side effect (.env
+# load, value validation, data dir creation): a typo must surface as a
+# usage error even when the environment itself is broken, same rule as
+# --help above.
+COMMAND="${1:-status}"
+case "$COMMAND" in
+  build|start|run|restart|install-only|stop|logs|status|backup) ;;
+  *)
+    # 2, not 1: a bad invocation must be distinguishable from a failed
+    # operation by scripts consuming this CLI (same code the CI helper uses).
+    # Name the offender before the usage dump, like every other script here.
+    echo "FATAL: unknown command '$1'" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
 
 GAME_DIR="$ROOT/data/game"
 USERDATA_DIR="$ROOT/data/userdata"
@@ -304,7 +368,7 @@ backup() {
   echo "backup written: $archive (keeping the newest $KEEP_BACKUPS in $BACKUP_DIR)"
 }
 
-case "${1:-status}" in
+case "$COMMAND" in
   build)        podman build -t "$IMAGE" "$ROOT" ;;
   # start() opens with the graceful stop, so restarting needs nothing else.
   start|run|restart)
@@ -316,8 +380,4 @@ case "${1:-status}" in
   # Anchor the name filter: podman treats it as a regex, and unanchored it
   # would also list the $NAME-install pre-warm container.
   status)       podman ps -a --filter "name=^${NAME}$" ;;
-  *)
-    echo "usage: $0 {build|start|run|restart|install-only|stop|logs|status|backup}" >&2
-    exit 1
-    ;;
 esac

@@ -11,6 +11,57 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+usage() {
+  cat <<'EOF'
+usage: perf.sh {on|off|status|measure}
+
+Toggle the EfficientServer (perf) mod and observe its effects.
+  on | off    set the top-level Enabled flag in the staged mod config and
+              restart the container (the mod reads it at game boot)
+  status      print the current toggle state (default with no command)
+  measure     capture an `apm status` snapshot from the telnet console
+
+Observe the effects with:
+  ./scripts/perf.sh measure   # bridge `apm status` snapshot via telnet
+  APM web panel: http://<server>:8080
+EOF
+}
+
+case "${1:-}" in
+  # Help answers before any .env load or value validation: asking for help
+  # must never fail on an unrelated broken env value.
+  -h|--help)
+    usage
+    exit 0
+    ;;
+esac
+
+# Exactly one command word: a silently ignored second word would make e.g.
+# `perf.sh status --json` read as a supported option while status runs with
+# its plain output (same guard run.sh applies to its commands).
+if (( $# > 1 )); then
+  echo "FATAL: unexpected argument '$2' ($0 takes exactly one command)" >&2
+  usage >&2
+  exit 2
+fi
+
+# Validate the command word before the .env load and value validation: a
+# typo must surface as a usage error even when the environment itself is
+# broken, same rule as --help above (and run.sh's command check).
+COMMAND="${1:-status}"
+case "$COMMAND" in
+  on|off|status|measure) ;;
+  *)
+    # Name the offender before the usage dump: an error that never says
+    # which word was wrong sends the operator re-reading the invocation.
+    # 2, not 1: a bad invocation must be distinguishable from a failed
+    # operation (same code the CI helper and run.sh use).
+    echo "FATAL: unknown command '$1'" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
 CFG="mods/EfficientServer/Config/efficientserver.json"
 # Top-level "Enabled" line only (2-space indent); group-level Enabled flags
 # (AiLod/DynamicMesh/Gc/Governor/...) keep their shipped values. One shared
@@ -51,7 +102,7 @@ set_state() {
   echo "EfficientServer -> $1 (was $was)"
 }
 
-case "${1:-status}" in
+case "$COMMAND" in
   on|off)
     flag=true
     [[ "$1" == off ]] && flag=false
@@ -78,9 +129,5 @@ case "${1:-status}" in
     # host may not ship: keep only printable ASCII plus tab/newline (CR goes,
     # so telnet's \r\n ends up as plain lines; IAC/high bytes go with it).
     printf '%s\n' "$reply" | LC_ALL=C tr -cd '\11\12\40-\176' | tail -30
-    ;;
-  *)
-    echo "usage: $0 {on|off|status|measure}" >&2
-    exit 1
     ;;
 esac

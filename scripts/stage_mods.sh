@@ -24,6 +24,45 @@ SRCS=(
   "$WS/7dtd-fps-bots/dist/BotMod"
 )
 
+usage() {
+  cat <<'EOF'
+usage: stage_mods.sh
+
+Stage the sibling repos' built mods into mods-available/ and (re)create the
+enabled set (EfficientServer, 7dtd-server-apm-bridge, BotMod) as real
+copies in mods/. Takes no arguments; everything in mods/ outside the
+enabled set is wiped on every run. To enable another mod persistently, add
+its name to NAMES in this script.
+EOF
+}
+
+# Help answers before any staging side effect, like every script here.
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+esac
+
+# Exactly one word at most: a silently ignored second word would let e.g.
+# a mistyped flag read as a successful staging run while the enabled set
+# was rebuilt anyway (same guard run.sh applies to its commands).
+if (( $# > 1 )); then
+  echo "FATAL: unexpected argument '$2' ($0 takes no arguments)" >&2
+  usage >&2
+  exit 2
+fi
+
+case "${1:-}" in
+  "") ;;
+  *)
+    # Name the offender before the usage dump (same shape as run.sh).
+    echo "FATAL: unexpected argument '$1' ($0 takes no arguments)" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
 mkdir -p "$ROOT/mods-available" "$ROOT/mods"
 # Sweep staging leftovers from a previously killed run (both dirs): hidden,
 # so the wipes and globs below would keep them, and mods/ is bind-mounted,

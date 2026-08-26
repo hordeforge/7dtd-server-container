@@ -190,6 +190,40 @@ with tempfile.TemporaryDirectory() as tmp:
         "connection refused" in err.lower(),
     )
 
+    # CLI surface: help answers before any env load or config access, and a
+    # bad invocation is a usage error (exit 2), distinct from the fatal
+    # operation failures above.
+    root = make_sandbox(Path(tmp) / "cli-help", CONFIG_ON)
+    proc = run_perf(["--help"], root)
+    check(
+        "--help exits 0 on stdout",
+        proc.returncode == 0 and b"usage: perf.sh" in proc.stdout and not proc.stderr,
+    )
+    proc = run_perf(["frobnicate"], root)
+    check(
+        "unknown command exits 2 with usage on stderr",
+        proc.returncode == 2 and b"usage:" in proc.stderr and not proc.stdout,
+    )
+    # Name the offender, and reject the word before any .env load or value
+    # validation so a typo stays a usage error on a broken environment too.
+    check("unknown command is named in the error", b"frobnicate" in proc.stderr)
+    broken = {"TELNET_PORT": "not-a-port"}
+    proc = run_perf(["frobnicate"], root, extra_env=broken)
+    check(
+        "unknown command exits 2 even with a broken environment",
+        proc.returncode == 2 and b"unknown command 'frobnicate'" in proc.stderr,
+    )
+
+    # Exactly one command word: a silently ignored second word would read as
+    # a supported option while status ran with its plain output.
+    proc = run_perf(["status", "--json"], root)
+    err = proc.stderr.decode(errors="replace")
+    check(
+        "extra argument exits 2 naming it",
+        proc.returncode == 2 and "--json" in err and "usage:" in err,
+    )
+    check("the refused invocation restarted nothing", not (root / "restarts.log").exists())
+
 if failed_checks:
     sys.exit(1)
 print("perf.sh toggle contract OK")

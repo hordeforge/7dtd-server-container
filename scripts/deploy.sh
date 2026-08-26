@@ -7,18 +7,50 @@
 #   ./scripts/deploy.sh            # push project + mods
 #   ./scripts/deploy.sh --restart  # push, then restart the container so the
 #                                  # entrypoint re-syncs Mods/ (no image rebuild)
+# Exit codes: 0 success, 2 usage error, 1 for a failed deploy/restart step.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HOST="${SEVENDTD_SERVER_HOST:-192.168.0.100}"
 SSH_USER="${SEVENDTD_SERVER_USER:-maci}"
 DEST_DIR="${SEVENDTD_SERVER_DIR:-/home/${SSH_USER}/7dtd-server}"
+
+usage() {
+  cat <<EOF
+usage: deploy.sh [--restart]
+
+Stage mods, then rsync this project to ${SSH_USER}@${HOST}:${DEST_DIR}/.
+  --restart   push, then restart the container on the server host so the
+              entrypoint re-syncs Mods/ (no image rebuild)
+
+Env overrides: SEVENDTD_SERVER_HOST (default ${HOST}),
+SEVENDTD_SERVER_USER (default ${SSH_USER}),
+SEVENDTD_SERVER_DIR (default ${DEST_DIR}).
+EOF
+}
+
+# At most one flag: a silently ignored second word would make e.g.
+# `deploy.sh --restart dry-run` read as a supported option while the full
+# deploy runs anyway (same guard run.sh applies to its commands). Checked
+# before staging, so a bad invocation touches nothing.
+if (( $# > 1 )); then
+  echo "FATAL: unexpected argument '$2' ($0 takes at most one argument)" >&2
+  usage >&2
+  exit 2
+fi
+
 RESTART=0
 case "${1:-}" in
   "") ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
   --restart) RESTART=1 ;;
   *)
-    echo "usage: $0 [--restart]" >&2
-    exit 1
+    # Name the offender before the usage dump (same shape as run.sh).
+    echo "FATAL: unexpected argument '$1'" >&2
+    usage >&2
+    exit 2
     ;;
 esac
 

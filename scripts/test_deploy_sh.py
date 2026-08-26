@@ -92,8 +92,9 @@ os.execvp(argv[1], argv[1:])
 
 # External binaries deploy.sh and stage_mods.sh need beyond shell builtins;
 # symlinked from the host into the sandbox bin dir so PATH can exclude every
-# system directory (and with it any real timeout/gtimeout).
-NEEDED_BINS = ("bash", "dirname", "mkdir", "rm", "cp", "mv", "ls", "python3")
+# system directory (and with it any real timeout/gtimeout). cat is needed by
+# the usage() heredocs the usage-error scenarios exercise.
+NEEDED_BINS = ("bash", "cat", "dirname", "mkdir", "rm", "cp", "mv", "ls", "python3")
 
 HOST = "sentinel-host.lan"
 SSH_USER = "sentinel-user"
@@ -282,6 +283,30 @@ with tempfile.TemporaryDirectory() as tmp:
         "rsync still ran before the failing restart",
         len(invocations(Path(env["DEPLOY_TEST_RSYNC_LOG"]))) == 1
         and len(invocations(Path(env["DEPLOY_TEST_SSH_LOG"]))) == 1,
+    )
+
+# Usage errors are refused before staging touches anything: a silently
+# ignored second word would let e.g. `deploy.sh --restart dry-run` read as
+# a supported option while the full deploy ran anyway.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    project, env = make_sandbox(tmpdir, timeout_name=None)
+    proc = run_deploy(project, env, "--restart", "frobnicate")
+    out = proc.stdout + proc.stderr
+    check("extra argument exits 2 naming it", proc.returncode == 2 and b"frobnicate" in out)
+    check(
+        "the refused deploy staged and rsynced nothing",
+        invocations(Path(env["DEPLOY_TEST_RSYNC_LOG"])) == [],
+    )
+    proc = run_deploy(project, env, "frobnicate")
+    out = proc.stdout + proc.stderr
+    check(
+        "unknown argument exits 2 naming it with usage",
+        proc.returncode == 2 and b"frobnicate" in out and b"usage:" in out,
+    )
+    check(
+        "the rejected unknown argument also staged nothing",
+        invocations(Path(env["DEPLOY_TEST_RSYNC_LOG"])) == [],
     )
 
 if failed_checks:

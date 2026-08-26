@@ -82,9 +82,11 @@ def make_stage_sandbox(tmpdir: Path, present: list[str]) -> Path:
     return root
 
 
-def run_script(script: Path, cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[bytes]:
+def run_script(
+    script: Path, *args: str, cwd: Path, env: dict[str, str]
+) -> subprocess.CompletedProcess[bytes]:
     return subprocess.run(
-        [str(script)],
+        [str(script), *args],
         cwd=cwd,
         env={"PATH": "/usr/bin:/bin", **env},
         capture_output=True,
@@ -203,6 +205,64 @@ with tempfile.TemporaryDirectory() as tmp:
     check(
         "update restarted the container exactly once",
         stub_log.read_text(encoding="utf-8") == "restart\n",
+    )
+
+    # Same usage contract as stage_mods.sh: help wins over extra words,
+    # anything else exits 2 naming the word, and none of it may restage
+    # or restart.
+    proc = run_script(
+        scripts / "update_mods.sh",
+        "--help",
+        "frobnicate",
+        cwd=root,
+        env={"UPD_STUB_LOG": str(stub_log)},
+    )
+    out = proc.stdout + proc.stderr
+    check("update --help answers 0 even with an extra word", proc.returncode == 0)
+    check("the --help answer carries the usage text", b"usage: update_mods.sh" in proc.stdout)
+    proc = run_script(
+        scripts / "update_mods.sh",
+        "--dry-run",
+        cwd=root,
+        env={"UPD_STUB_LOG": str(stub_log)},
+    )
+    err = proc.stderr.decode(errors="replace")
+    check("update unknown flag exits 2 naming it", proc.returncode == 2 and "--dry-run" in err)
+    check(
+        "rejected update invocations restarted nothing more",
+        stub_log.read_text(encoding="utf-8") == "restart\n",
+    )
+
+# Usage errors are refused before any staging side effect, and the offending
+# word is named: a silently ignored argument would read as success while the
+# enabled set was rebuilt anyway. Help still wins over extra words, exactly
+# like scripts/run.sh.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    root = make_stage_sandbox(tmpdir / "usage-errors", NAMES)
+    script = root / "scripts" / "stage_mods.sh"
+    mods = root / "mods"
+
+    proc = run_script(script, "--help", "frobnicate", cwd=root, env={})
+    out = proc.stdout + proc.stderr
+    check("--help answers 0 even with an extra word", proc.returncode == 0)
+    check("the --help answer carries the usage text", b"usage: stage_mods.sh" in proc.stdout)
+
+    proc = run_script(script, "--dry-run", cwd=root, env={})
+    err = proc.stderr.decode(errors="replace")
+    check(
+        "unknown flag exits 2 naming it with usage",
+        proc.returncode == 2 and "--dry-run" in err and "usage:" in err,
+    )
+
+    # The empty command word plus a stray word must hit the second-word
+    # guard instead of falling through the case into a full staging run.
+    proc = run_script(script, "", "frobnicate", cwd=root, env={})
+    err = proc.stderr.decode(errors="replace")
+    check("second word exits 2 naming it", proc.returncode == 2 and "frobnicate" in err)
+    check(
+        "no rejected invocation staged anything",
+        not mods.exists() or list(mods.iterdir()) == [],
     )
 
 if failed_checks:
