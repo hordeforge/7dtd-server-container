@@ -227,7 +227,7 @@ install_only() {
   # swaps files out from under the live game. Pre-warm is a
   # before-first-start step, so refuse instead of racing the depot (start()
   # is the only sanctioned way to replace a running instance).
-  if podman ps --format '{{.Names}}' | grep -Fx "$NAME"; then
+  if podman ps --format '{{.Names}}' | grep -Fxq "$NAME"; then
     echo "FATAL: $NAME is running; stop it first (install-only must not rewrite data/game under a live server)" >&2
     exit 1
   fi
@@ -254,7 +254,7 @@ stop() {
   # command, wait for the container to exit, then force-stop as a fallback.
   # A readiness pre-check avoids a stale /dev/tcp session racing a container
   # that was just (re)started and answering telnet on the same host port.
-  if podman ps --format '{{.Names}}' | grep -Fx "$NAME"; then
+  if podman ps --format '{{.Names}}' | grep -Fxq "$NAME"; then
     echo "requesting save + shutdown via telnet ..."
     # Declared before the branches that fill it: the forced-stop path below
     # dumps the reply whether or not the probe/session branches ran, and set
@@ -296,7 +296,7 @@ stop() {
   # (the normal no-op) or real trouble; a real failure must not read as
   # success, because the world save may never have happened.
   if ! podman stop -t 30 "$NAME" >/dev/null 2>&1; then
-    if podman ps -a --format '{{.Names}}' 2>/dev/null | grep -Fx "$NAME"; then
+    if podman ps -a --format '{{.Names}}' 2>/dev/null | grep -Fxq "$NAME"; then
       echo "FATAL: podman stop failed but $NAME still exists; check podman logs/events" >&2
       exit 1
     fi

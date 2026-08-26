@@ -4,15 +4,31 @@
 
 ![CI](https://github.com/hordeforge/7dtd-server-container/actions/workflows/ci.yml/badge.svg)
 ![coverage](https://raw.githubusercontent.com/hordeforge/7dtd-server-container/badges/coverage.svg)
-![license](https://img.shields.io/github/license/hordeforge/7dtd-server-container)
 ![release](https://img.shields.io/github/v/release/hordeforge/7dtd-server-container)
-![languages](https://img.shields.io/github/languages/count/hordeforge/7dtd-server-container)
-![top language](https://img.shields.io/github/languages/top/hordeforge/7dtd-server-container)
+![license](https://img.shields.io/github/license/hordeforge/7dtd-server-container)
 
 A 7 Days to Die dedicated server (V3.1.0 line) in a rootless podman container on the LAN host `server.lan` (192.168.0.100). Stock Navezgane map, stock default difficulty and settings, with the workspace perf, APM and FPS-bot mods loaded: **Crucible** (`7dtd-server-optimizer`), **Geiger** (`7dtd-server-apm`) and **BotMod** (`7dtd-fps-bots`). EAC is off (required for C# mods).
 
 Everything runtime lives on the host under `data/`; the container is stateless
 and disposable.
+
+## Status
+
+Running in production on the LAN host. Working: image build, steamcmd
+install/validate with bounded retries, config render and admin seed, mod
+staging and per-boot sync, graceful stop that saves the world first, save
+backups with retention, and the quadlet service. `make lint` and `make test`
+gate every push.
+
+Partial: coverage is measured for `scripts/lib-env.sh` only, so the badge
+covers the shared library rather than the whole tree. Rollback of code or mods
+is manual (redeploy an older sibling build).
+
+Deliberately not built: no firewall or ACL in front of the listeners, no
+signature check on the staged mods, no credential rotation procedure, and no
+`SECURITY.md`. Each is a ranked gap with its reasoning in
+[`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md); read that before exposing this
+host beyond a trusted LAN.
 
 ## Layout
 
@@ -29,12 +45,13 @@ and disposable.
 | `scripts/perf.sh` | EfficientServer toggle (`on`/`off`/`status`) + telnet `apm status` snapshot (`measure`) |
 | `scripts/lib-env.sh` | Shared `.env` loader, telnet value validation, telnet session helper (sourced by the ops scripts) |
 | `start.sh` / `stop.sh` | Top-level daily shortcuts: start / graceful stop (wrap `run.sh`) |
-| `Makefile` | `make test`, `make lint` (bash -n + shellcheck + reference check over every shell script; ruff rules/format, mypy strict, yamllint over Python and CI YAML; Containerfile structure check) |
-| `pyproject.toml`, `.yamllint.yaml` | Static analysis config: ruff (rules + 100-col format), mypy strict, yamllint; enforced by `make lint` locally and in CI with pinned versions |
+| `Makefile` | `make test`, `make lint` (bash -n + shellcheck + reference check over every shell script; ruff rules/format, mypy strict, yamllint over Python and CI YAML; Containerfile structure check). Needs [`uv`](https://docs.astral.sh/uv/) on PATH: both targets build `.venv` from `requirements-lint.txt` themselves |
+| `pyproject.toml`, `.yamllint.yaml`, `requirements-lint.txt` | Static analysis config (ruff rules + 100-col format, mypy strict, yamllint) and the hash-pinned analyzer closure; enforced by `make lint` locally and in CI from the same recipe |
 | `.github/workflows/ci.yml` | CI: lint, tests, Containerfile and config-template validation; publishes the coverage badge on main |
 | `scripts/test_lib_env.sh`, `scripts/test_coverage_badge.py`, `scripts/test_check_config_xml.py`, `scripts/test_config_templates.py`, `scripts/test_deploy_sh.py`, `scripts/test_entrypoint_boot.py`, `scripts/test_systemd_unit.py`, `scripts/test_run_sh.py`, `scripts/test_perf_sh.py`, `scripts/test_stage_mods.py` | Tests behind `make test`; `fake-telnet-server.py` is their fake telnet endpoint fixture |
 | `scripts/check-config-xml.py`, `scripts/coverage_badge.py` | CI helpers: config XML well-formedness check, coverage badge renderer |
 | `systemd/7dtd-server.container` | Quadlet for a durable rootless user service |
+| `docs/THREAT_MODEL.md` | Attack surface of this harness: entry points, trust boundaries, existing controls, ranked gaps |
 | `mods/` (runtime) | Enabled mods, bind-mounted into the container |
 | `mods-available/` (runtime) | All staged mod builds |
 | `data/` (runtime) | `game/` (steamcmd install), `userdata/` (saves, logs, serveradmin.xml) |

@@ -1,7 +1,8 @@
-# Pinned analyzer toolchain installed by ci.yml with --require-hashes: every
-# direct and transitive artifact is bound to its PyPI sha256, so a tampered
-# or mismatched wheel fails the install instead of running. Versions mirror
-# the local dev machine (ruff/mypy/yamllint); transitives are the newest
+# Pinned analyzer toolchain installed into .venv by the Makefile with
+# `uv pip install --require-hashes`: every direct and transitive artifact is
+# bound to its PyPI sha256, so a tampered or mismatched wheel fails the
+# install instead of running. Dev and CI run that same recipe, so both gates
+# resolve identical versions (ruff/mypy/yamllint); transitives are the newest
 # stable releases satisfying what mypy and yamllint declare at runtime.
 # Extras (dmypy, mypyc, dev, ...) are not installed. When bumping any
 # version here, regenerate its hashes from pypi.org/pypi/<pkg>/<ver>/json.

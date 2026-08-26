@@ -105,7 +105,7 @@ set_state() {
 case "$COMMAND" in
   on|off)
     flag=true
-    [[ "$1" == off ]] && flag=false
+    [[ "$COMMAND" == off ]] && flag=false
     set_state "$flag"
     ./scripts/run.sh restart
     ;;

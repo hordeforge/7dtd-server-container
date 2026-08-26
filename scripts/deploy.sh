@@ -71,6 +71,7 @@ rsync -a --delete --timeout=60 -e "ssh -o ConnectTimeout=10" \
   --exclude backups \
   --exclude .mypy_cache \
   --exclude .ruff_cache \
+  --exclude .venv \
   --exclude __pycache__ \
   --exclude coverage \
   --exclude coverage.cobertura.xml \

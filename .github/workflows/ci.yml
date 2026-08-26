@@ -27,16 +27,12 @@ jobs:
       # would otherwise run unreviewed code here with the workflow token.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
-      - name: Install pinned Python analyzers
-        # Same versions as the local dev machine so `make lint` enforces
-        # identical rules here and locally. requirements-lint.txt carries the
-        # full closure (transitives included) with PyPI sha256 hashes;
-        # --require-hashes turns any mismatch into a hard failure.
-        # (shellcheck and bash come with the runner image and are not pinned;
-        # expect minor version drift there.)
-        run: >
-          python3 -m pip install --disable-pip-version-check
-          --require-hashes -r requirements-lint.txt
+      # uv is the only Python toolchain here; `make lint` and `make test` build
+      # the analyzer venv themselves from the hash-pinned requirements-lint.txt,
+      # so this step installs the binary and nothing else. Same SHA-pin rule as
+      # checkout above. (shellcheck and bash come with the runner image and are
+      # not pinned; expect minor version drift there.)
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
 
       - name: Lint shell + Python + workflow YAML + Containerfile (make lint)
         # make lint owns every check (bash -n, shellcheck, reference
@@ -63,28 +59,35 @@ jobs:
     permissions:
       contents: write
     steps:
-      # Same SHA pin as the check job above; see the comment there.
+      # Same SHA pins as the check job above; see the comments there.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
       # No prebuilt kcov works here: apt has no noble package and the v42
       # tarball links against Ubuntu 22.04's binutils (libopcodes-2.38).
       # Build kcov from source at the release commit of the v43 tag; same
       # rule as checkout above, a moved tag would otherwise run unreviewed
-      # code in a job that holds contents: write.
+      # code in a job that holds contents: write. Sources and build tree go
+      # under RUNNER_TEMP (disk-backed and cleaned up per job), never /tmp.
       - name: Build kcov v43 from source
         run: |
           set -euo pipefail
           sudo apt-get update && sudo apt-get install -y --no-install-recommends \
             cmake libelf-dev libdw-dev libbz2-dev zlib1g-dev libcurl4-openssl-dev binutils-dev
-          git init -q /tmp/kcov-src
-          git -C /tmp/kcov-src remote add origin https://github.com/SimonKagstrom/kcov
-          git -C /tmp/kcov-src fetch -q --depth 1 origin a39874f938ce13f7a65f253120d1ec946b349ffe
-          git -C /tmp/kcov-src checkout -q --detach FETCH_HEAD
-          cmake -S /tmp/kcov-src -B /tmp/kcov-build -DCMAKE_BUILD_TYPE=Release
-          cmake --build /tmp/kcov-build --parallel 2
-          sudo cmake --install /tmp/kcov-build
+          src="$RUNNER_TEMP/kcov-src"
+          build="$RUNNER_TEMP/kcov-build"
+          git init -q "$src"
+          git -C "$src" remote add origin https://github.com/SimonKagstrom/kcov
+          git -C "$src" fetch -q --depth 1 origin a39874f938ce13f7a65f253120d1ec946b349ffe
+          git -C "$src" checkout -q --detach FETCH_HEAD
+          cmake -S "$src" -B "$build" -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$build" --parallel 2
+          sudo cmake --install "$build"
           kcov --version
       - run: make coverage
-      - run: python3 scripts/coverage_badge.py coverage.cobertura.xml "$RUNNER_TEMP/coverage.svg"
+      - name: Render the coverage badge
+        run: >
+          uv run --no-project python scripts/coverage_badge.py
+          coverage.cobertura.xml "$RUNNER_TEMP/coverage.svg"
       - name: Publish the badge to the badges branch
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
