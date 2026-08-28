@@ -1,6 +1,6 @@
 # AGENTS.md - 7dtd-server
 
-Deployment harness for a 7 Days to Die dedicated server (V3.1.0 line) in a
+Deployment harness for a 7 Days to Die dedicated server (V3.2.0 line) in a
 rootless podman container on the LAN server host (192.168.0.100). Owns the
 container image, server config template, mod staging, and ops scripts. It does
 NOT own mod code, measurement, or game RE; those live in the sibling repos.
@@ -43,7 +43,7 @@ Workspace root guide: [`hordeforge/.github` AGENTS.md](https://github.com/hordef
 6. **Secrets via env only** (`.env`, git-ignored): telnet password, webuser.
    The committed defaults are test-only (same as the workspace lab).
 7. **No AI attribution, no em dashes** in shipped text.
-8. Version pin: mods are built for V3.1.0. If a newer depot build ships and
+8. Version pin: mods are built for V3.2.0. If a newer depot build ships and
    mods fail to load, rebuild mods in the sibling repos, restage, redeploy.
 9. **`uv` is the only Python toolchain.** `make lint` and `make test` build
    `.venv` from the hash-pinned `requirements-lint.txt`; CI installs the `uv`

@@ -7,7 +7,7 @@
 ![release](https://img.shields.io/github/v/release/hordeforge/7dtd-server-container)
 ![license](https://img.shields.io/github/license/hordeforge/7dtd-server-container)
 
-A 7 Days to Die dedicated server (V3.1.0 line) in a rootless podman container on the LAN host `server.lan` (192.168.0.100). Stock Navezgane map, stock default difficulty and settings, with the workspace perf, APM and FPS-bot mods loaded: **Crucible** (`7dtd-server-optimizer`), **Geiger** (`7dtd-server-apm`) and **BotMod** (`7dtd-fps-bots`). EAC is off (required for C# mods).
+A 7 Days to Die dedicated server (V3.2.0 line) in a rootless podman container on the LAN host `server.lan` (192.168.0.100). Stock Navezgane map, stock default difficulty and settings, with the workspace perf, APM and FPS-bot mods loaded: **Crucible** (`7dtd-server-optimizer`), **Geiger** (`7dtd-server-apm`) and **BotMod** (`7dtd-fps-bots`). EAC is off (required for C# mods).
 
 Everything runtime lives on the host under `data/`; the container is stateless
 and disposable.
@@ -36,7 +36,7 @@ host beyond a trusted LAN.
 |---|---|
 | `Containerfile` | Image: official `steamcmd/steamcmd` base + game runtime libs + entrypoint |
 | `entrypoint.sh` | steamcmd install/validate, config render, admin seed, mod sync, run |
-| `config/serverconfig.tmpl.xml` | Stock V3.1.0 template, Navezgane, EAC off, dashboard on |
+| `config/serverconfig.tmpl.xml` | Stock V3.2.0 template, Navezgane, EAC off, dashboard on |
 | `config/serveradmin_seed.xml` | Dashboard admin (level 0) + webuser seed (password from `WEBADMIN_PASSWORD`, random at first seed) |
 | `scripts/stage_mods.sh` | Copy built mods from sibling `dist/` into `mods-available/`, recreate the enabled copies |
 | `scripts/deploy.sh` | Stage mods + rsync this project to the server host (`--restart` also restarts the container) |
