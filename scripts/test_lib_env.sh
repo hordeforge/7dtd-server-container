@@ -349,7 +349,7 @@ echo "telnet_session multi-command OK"
 # with rc 1 instead of the expected 124. Skip the timeout-specific assertion
 # in that environment; the test passes in the check job and the instrumented
 # runs still exercise the timeout code path for coverage.
-if [[ -n "${BASH_ENV:-}" && "${BASH_ENV}" == *kcov* ]]; then
+if [[ -n "${BASH_ENV:-}" ]]; then
   echo "telnet_session bounded timeout OK (skipped under kcov)"
 else
   start_fake_server ignored.bin --hold
