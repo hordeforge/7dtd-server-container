@@ -28,6 +28,9 @@ Workspace root guide: [`hordeforge/.github` AGENTS.md](https://github.com/hordef
 - Mod source and builds (sibling repos: `7dtd-server-optimizer`, `7dtd-server-apm`,
   `7dtd-fps-bots`, etc). Staging only copies their `dist/` output.
 - Game RE, measurement, load generation (see workspace root AGENTS.md).
+- Playtest orchestration. `7dtd-playtest` may `--target live` attach to this
+  host for fidelity scoring; it must never deploy, stage mods, or restart
+  the container. Production stays alone here.
 
 ## Rules
 
