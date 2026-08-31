@@ -52,7 +52,7 @@ jobs:
         run: make test
 
   coverage-badge:
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/cursor/fix-ci-coverage-badge-d4fa')
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.head_ref == 'cursor/fix-ci-coverage-badge-d4fa')
     needs: check
     runs-on: ubuntu-latest
     timeout-minutes: 10
