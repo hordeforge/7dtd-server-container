@@ -19,8 +19,8 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    # Bounds a hung step (the default is 6 hours): pip install + make
-    # lint + make test finish well inside this on a healthy runner.
+    # Bounds a hung step (the default is 6 hours): the uv install plus
+    # make lint and make test finish well inside this on a healthy runner.
     timeout-minutes: 15
     steps:
       # Pinned to the release commit, not the mutable v7 tag: a moved tag
