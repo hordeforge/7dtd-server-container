@@ -3,7 +3,7 @@
 # host networking). All runtime state lives in ./data on the host; the
 # container itself is disposable.
 #
-# Usage: run.sh {build|start|run|restart|install-only|stop|logs|status|backup}
+# Usage: run.sh {build|start|run|restart|install-only|stop|logs|status|backup|version}
 # (`run` is an alias of `start`; `backup` archives the world saves.)
 # `--help` prints the command list without touching the environment or data/.
 # Env overrides: TELNET_PASSWORD, TELNET_PORT, WEBADMIN_PASSWORD,
@@ -18,7 +18,7 @@ cd "$ROOT"
 
 usage() {
   cat <<'EOF'
-usage: run.sh {build|start|run|restart|install-only|stop|logs|status|backup}
+usage: run.sh {build|start|run|restart|install-only|stop|logs|status|backup|version}
 
 Manage the 7dtd-server podman container; all runtime state lives in ./data
 (the container itself is disposable).
@@ -66,7 +66,7 @@ fi
 # --help above.
 COMMAND="${1:-status}"
 case "$COMMAND" in
-  build|start|run|restart|install-only|stop|logs|status|backup) ;;
+  build|start|run|restart|install-only|stop|logs|status|backup|version) ;;
   *)
     # 2, not 1: a bad invocation must be distinguishable from a failed
     # operation by scripts consuming this CLI (same code the CI helper uses).
@@ -370,6 +370,9 @@ backup() {
 
 case "$COMMAND" in
   build)        podman build -t "$IMAGE" "$ROOT" ;;
+  # The one canonical version home (REPOSITORY_STANDARDS.md section 8); the
+  # release workflow refuses a tag that disagrees with it.
+  version)      cat "$ROOT/VERSION" ;;
   # start() opens with the graceful stop, so restarting needs nothing else.
   start|run|restart)
                 start ;;

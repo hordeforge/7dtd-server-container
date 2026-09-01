@@ -22,6 +22,7 @@ Workspace root guide: [`hordeforge/.github` AGENTS.md](https://github.com/hordef
 | Static analysis config (ruff + ruff format, mypy strict, yamllint) | `pyproject.toml`, `.yamllint.yaml` (enforced via `make lint` locally and in CI, versions pinned in `requirements-lint.txt`) |
 | Threat model (entry points, boundaries, controls, ranked gaps) | `docs/THREAT_MODEL.md` |
 | Rootless systemd service unit | `systemd/7dtd-server.container` |
+| Version (canonical home) + changelog + tag gate | `VERSION` (`run.sh version`), `CHANGELOG.md`, `.github/workflows/release.yml` |
 
 ## Does not own
 
