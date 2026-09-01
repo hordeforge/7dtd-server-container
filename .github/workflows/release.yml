@@ -1,0 +1,51 @@
+---
+name: release
+
+# Tag-driven releases (hordeforge/.github REPOSITORY_STANDARDS.md, §8): a
+# vX.Y.Z tag must agree with the version this repository actually ships, so a
+# mistyped or forgotten bump is rejected instead of becoming a release nobody
+# can reproduce.
+#
+# The container image is deliberately NOT built or pushed here. It is built on
+# the LAN server host from this tree by `scripts/run.sh build`, against that
+# host's own podman and storage; publishing one from a hosted runner would
+# claim an artifact nobody deploys. Gating the tag is the half that can be
+# proven automatically.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  verify-tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Pinned to the release commit, not the mutable v7 tag: a moved tag
+      # would otherwise run unreviewed code here with the workflow token.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Check the tag matches VERSION
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          MANIFEST="VERSION"
+          case "$TAG" in
+            v*) ;;
+            *) echo "ERROR: tag '$TAG' does not start with 'v'" >&2; exit 1 ;;
+          esac
+          SHIPPED="$(tr -d '[:space:]' < "$MANIFEST")"
+          if [ -z "$SHIPPED" ]; then
+            echo "ERROR: $MANIFEST is empty" >&2
+            exit 1
+          fi
+          if [ "$SHIPPED" != "${TAG#v}" ]; then
+            echo "ERROR: tag $TAG but $MANIFEST ships $SHIPPED;" >&2
+            echo "       make them match before tagging" >&2
+            exit 1
+          fi
+          echo "ok: tag $TAG matches $MANIFEST ($SHIPPED)"
