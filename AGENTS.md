@@ -28,9 +28,11 @@ Workspace root guide: [`hordeforge/.github` AGENTS.md](https://github.com/hordef
 - Mod source and builds (sibling repos: `7dtd-server-optimizer`, `7dtd-server-apm`,
   `7dtd-fps-bots`, etc). Staging only copies their `dist/` output.
 - Game RE, measurement, load generation (see workspace root AGENTS.md).
-- Playtest orchestration. `7dtd-playtest` may `--target live` attach to this
-  host for fidelity scoring; it must never deploy, stage mods, or restart
-  the container. Production stays alone here.
+- Playtest orchestration. `7dtd-playtest` may attach to this host for fidelity
+  scoring with `--no-server --readonly`; that flag combination forbids wiping,
+  mod staging, config rewriting and restarting on its side, and this repo
+  grants nothing beyond a telnet login. Production stays alone here. See
+  [ADR 0001](https://github.com/hordeforge/.github/blob/main/docs/adr/0001-test-tiers-and-declarative-suites.md).
 
 ## Rules
 
@@ -52,7 +54,12 @@ Workspace root guide: [`hordeforge/.github` AGENTS.md](https://github.com/hordef
    `.venv` from the hash-pinned `requirements-lint.txt`; CI installs the `uv`
    binary and runs the same targets. Never `pip`, and never a bare `python3`
    in a gate.
-10. **Threat-model references name files and functions, not line numbers.**
+10. **This container keeps its own config renderer.** The lab's shared
+    renderer (`7dtd-sandbox/scripts/sbconfig.py`) covers instance
+    serverconfigs; the `@TOKEN@` template plus `assert_rendered` here is a
+    container boot check with different failure semantics and its own tests.
+    Do not merge them.
+11. **Threat-model references name files and functions, not line numbers.**
     Line pins in `docs/THREAT_MODEL.md` rotted within five commits; only
     `config/serverconfig.tmpl.xml` (stock TFP content) keeps line numbers.
 
