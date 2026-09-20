@@ -10,6 +10,15 @@ before 1.1.1 are reconstructed from their GitHub release notes.
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-09-20
+
+### Changed
+
+- Lint tooling upkeep only: ruff 0.16.4 to 0.16.6 and ast-serialize 0.8.0 to
+  0.9.0 in the hash-pinned `requirements-lint.txt`, both via dependabot. No
+  image, entrypoint, config, or script behavior changes. Patch bump: the
+  release has no user-facing surface.
+
 ## [1.1.1] - 2026-09-01
 
 ### Added
@@ -47,7 +56,8 @@ Rootless systemd quadlet unit, perf tooling, and the threat model.
 
 Container image, entrypoint, config templates, mod staging and ops scripts.
 
-[Unreleased]: https://github.com/hordeforge/7dtd-server-container/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/hordeforge/7dtd-server-container/compare/v1.1.2...HEAD
+[1.1.2]: https://github.com/hordeforge/7dtd-server-container/releases/tag/v1.1.2
 [1.1.1]: https://github.com/hordeforge/7dtd-server-container/releases/tag/v1.1.1
 [1.1.0]: https://github.com/hordeforge/7dtd-server-container/releases/tag/v1.1.0
 [0.1.1]: https://github.com/hordeforge/7dtd-server-container/releases/tag/v0.1.1
