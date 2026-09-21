@@ -10,6 +10,10 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+# The lib itself is side-effect free (it only defines functions), so it is
+# sourced before the argv guards below can call into it; no .env is loaded
+# until after validation.
+source "$ROOT/scripts/lib-env.sh"
 
 usage() {
   cat <<'EOF'
@@ -39,28 +43,13 @@ esac
 # Exactly one command word: a silently ignored second word would make e.g.
 # `perf.sh status --json` read as a supported option while status runs with
 # its plain output (same guard run.sh applies to its commands).
-if (( $# > 1 )); then
-  echo "FATAL: unexpected argument '$2' ($0 takes exactly one command)" >&2
-  usage >&2
-  exit 2
-fi
-
-# Validate the command word before the .env load and value validation: a
-# typo must surface as a usage error even when the environment itself is
-# broken, same rule as --help above (and run.sh's command check).
+# Exactly one command word, validated before the .env load and value
+# validation: a typo or stray flag must surface as a usage error even when
+# the environment itself is broken (guards live in scripts/lib-env.sh,
+# shared with the other ops scripts).
 COMMAND="${1:-status}"
-case "$COMMAND" in
-  on|off|status|measure) ;;
-  *)
-    # Name the offender before the usage dump: an error that never says
-    # which word was wrong sends the operator re-reading the invocation.
-    # 2, not 1: a bad invocation must be distinguishable from a failed
-    # operation (same code the CI helper and run.sh use).
-    echo "FATAL: unknown command '$1'" >&2
-    usage >&2
-    exit 2
-    ;;
-esac
+require_argc 1 usage "${2:-}"
+require_command "$COMMAND" 'on|off|status|measure' usage
 
 CFG="mods/EfficientServer/Config/efficientserver.json"
 # Top-level "Enabled" line only (2-space indent); group-level Enabled flags
@@ -71,7 +60,6 @@ ENABLED_LINE_RE='^  "Enabled"[[:space:]]*:[[:space:]]*'
 # Same precedence as run.sh: environment beats .env, .env beats the shared
 # defaults. Values are literal (see scripts/lib-env.sh); nothing in .env is
 # executed.
-source "$ROOT/scripts/lib-env.sh"
 if [[ -f "$ROOT/.env" ]]; then
   load_env_file "$ROOT/.env"
 fi

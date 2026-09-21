@@ -15,6 +15,10 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+# The lib itself is side-effect free (it only defines functions), so it is
+# sourced before the argv guards below can call into it; no .env is loaded
+# and no data dir is created until after validation.
+source "$ROOT/scripts/lib-env.sh"
 
 usage() {
   cat <<'EOF'
@@ -50,42 +54,23 @@ case "${1:-}" in
     ;;
 esac
 
-# Exactly one command word: a silently ignored second word would make e.g.
-# `run.sh backup --keep 3` read as a supported option while backup runs with
-# its defaults. Checked here, before value validation, so a typo surfaces as
-# a usage error even when the environment itself is broken.
-if (( $# > 1 )); then
-  echo "FATAL: unexpected argument '$2' ($0 takes exactly one command)" >&2
-  usage >&2
-  exit 2
-fi
-
-# Validate the command word here too, before any setup side effect (.env
-# load, value validation, data dir creation): a typo must surface as a
-# usage error even when the environment itself is broken, same rule as
-# --help above.
+# Exactly one command word, validated before any setup side effect (.env
+# load, value validation, data dir creation): a typo or stray flag must
+# surface as a usage error even when the environment itself is broken
+# (guards live in scripts/lib-env.sh, shared with the other ops scripts).
 COMMAND="${1:-status}"
-case "$COMMAND" in
-  build|start|run|restart|install-only|stop|logs|status|backup|version) ;;
-  *)
-    # 2, not 1: a bad invocation must be distinguishable from a failed
-    # operation by scripts consuming this CLI (same code the CI helper uses).
-    # Name the offender before the usage dump, like every other script here.
-    echo "FATAL: unknown command '$1'" >&2
-    usage >&2
-    exit 2
-    ;;
-esac
+require_argc 1 usage "${2:-}"
+require_command "$COMMAND" \
+  'build|start|run|restart|install-only|stop|logs|status|backup|version' usage
 
 GAME_DIR="$ROOT/data/game"
 USERDATA_DIR="$ROOT/data/userdata"
 BACKUP_DIR="$ROOT/backups"
 KEEP_BACKUPS=7
 
-# Load the git-ignored .env via scripts/lib-env.sh (precedence as documented
-# in the header). Values are data, never executed, and an explicit override
-# such as `TELNET_PORT=9099 ./scripts/run.sh stop` always takes effect.
-source "$ROOT/scripts/lib-env.sh"
+# Load the git-ignored .env (precedence as documented in the lib header).
+# Values are data, never executed, and an explicit override such as
+# `TELNET_PORT=9099 ./scripts/run.sh stop` always takes effect.
 if [[ -f "$ROOT/.env" ]]; then
   load_env_file "$ROOT/.env"
 fi
@@ -257,20 +242,19 @@ stop() {
   if podman ps --format '{{.Names}}' | grep -Fxq "$NAME"; then
     echo "requesting save + shutdown via telnet ..."
     # Declared before the branches that fill it: the forced-stop path below
-    # dumps the reply whether or not the probe/session branches ran, and set
-    # -u would abort on an undeclared variable there.
+    # dumps the reply whether or not the request ran, and set -u would abort
+    # on an undeclared variable there.
     local reply=""
-    if telnet_probe "$TELNET_PORT" 3 >/dev/null 2>&1; then
-      # A failed shutdown request (rejected password, dropped connection) must
-      # name its cause here: swallowing it would surface only as the 90s wait
-      # timeout below, and the resulting forced stop skips the world save --
-      # the exact loss this function exists to prevent.
-      if reply="$(telnet_session "$TELNET_PORT" "$TELNET_PASSWORD" 'shutdown' 10 2>&1)"; then
-        :
-      else
-        echo "WARN: telnet shutdown request failed; forcing stop without a world save" >&2
-        printf '%s\n' "${reply:-<no output>}" | tail -n 3 >&2
-      fi
+    # A failed shutdown request (rejected password, dropped connection) must
+    # name its cause here: swallowing it would surface only as the 90s wait
+    # timeout below, and the resulting forced stop skips the world save --
+    # the exact loss this function exists to prevent. (request_telnet lives
+    # in scripts/lib-env.sh, shared with backup()'s saveworld request.)
+    if request_telnet reply 'shutdown' 10; then
+      :
+    elif (( $? == 2 )); then
+      echo "WARN: telnet shutdown request failed; forcing stop without a world save" >&2
+      printf '%s\n' "${reply:-<no output>}" | tail -n 3 >&2
     else
       echo "telnet not reachable on $TELNET_PORT; falling back to forced stop"
     fi
@@ -321,17 +305,16 @@ backup() {
     # taken mid-session. A failed request must not block the archive (an
     # inconsistent-but-present backup beats none), so every failure here only
     # warns -- same shape as stop()'s fallback, minus the forced stop.
+    # (request_telnet lives in scripts/lib-env.sh, shared with stop().)
     echo "requesting world save via telnet ..."
     local reply=""
-    if telnet_probe "$TELNET_PORT" 3 >/dev/null 2>&1; then
-      if reply="$(telnet_session "$TELNET_PORT" "$TELNET_PASSWORD" 'saveworld' 15 2>&1)"; then
-        # The save completes server-side after the reply; give the region
-        # writes a moment to settle before tar reads them.
-        sleep 5
-      else
-        echo "WARN: telnet saveworld failed; archiving without a fresh save" >&2
-        printf '%s\n' "${reply:-<no output>}" | tail -n 3 >&2
-      fi
+    if request_telnet reply 'saveworld' 15; then
+      # The save completes server-side after the reply; give the region
+      # writes a moment to settle before tar reads them.
+      sleep 5
+    elif (( $? == 2 )); then
+      echo "WARN: telnet saveworld failed; archiving without a fresh save" >&2
+      printf '%s\n' "${reply:-<no output>}" | tail -n 3 >&2
     else
       echo "WARN: telnet not reachable on $TELNET_PORT; archiving without a fresh save" >&2
     fi

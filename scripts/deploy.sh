@@ -10,6 +10,7 @@
 # Exit codes: 0 success, 2 usage error, 1 for a failed deploy/restart step.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/scripts/lib-env.sh"
 HOST="${SEVENDTD_SERVER_HOST:-192.168.0.100}"
 SSH_USER="${SEVENDTD_SERVER_USER:-maci}"
 DEST_DIR="${SEVENDTD_SERVER_DIR:-/home/${SSH_USER}/7dtd-server}"
@@ -30,13 +31,10 @@ EOF
 
 # At most one flag: a silently ignored second word would make e.g.
 # `deploy.sh --restart dry-run` read as a supported option while the full
-# deploy runs anyway (same guard run.sh applies to its commands). Checked
-# before staging, so a bad invocation touches nothing.
-if (( $# > 1 )); then
-  echo "FATAL: unexpected argument '$2' ($0 takes at most one argument)" >&2
-  usage >&2
-  exit 2
-fi
+# deploy runs anyway. Checked before staging, so a bad invocation touches
+# nothing (guard lives in scripts/lib-env.sh, shared with the other ops
+# scripts).
+require_argc 1 usage "${2:-}"
 
 RESTART=0
 case "${1:-}" in

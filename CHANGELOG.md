@@ -10,6 +10,23 @@ before 1.1.1 are reconstructed from their GitHub release notes.
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-09-21
+
+### Changed
+
+- **Shared argv guards.** The copy-pasted argument/usage boilerplate in
+  `run.sh`, `perf.sh`, `update_mods.sh`, `deploy.sh`, and `stage_mods.sh` is
+  unified into `require_argc` / `require_command` in `scripts/lib-env.sh`.
+  Same exit codes (2) and same error wording; nothing to do.
+- **Shared telnet request helper.** The duplicated telnet save-request block
+  in `run.sh stop()` and `backup()` is unified into `request_telnet` in
+  `scripts/lib-env.sh`. Same wire behavior and failure warnings.
+
+### Removed
+
+- The stale `mods-available/7dtd-apm-bridge` staging directory (superseded
+  by `7dtd-server-apm-bridge`). It was never tracked; local-only removal.
+
 ## [1.1.2] - 2026-09-20
 
 ### Changed

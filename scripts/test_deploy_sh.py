@@ -94,7 +94,7 @@ os.execvp(argv[1], argv[1:])
 # symlinked from the host into the sandbox bin dir so PATH can exclude every
 # system directory (and with it any real timeout/gtimeout). cat is needed by
 # the usage() heredocs the usage-error scenarios exercise.
-NEEDED_BINS = ("bash", "cat", "dirname", "mkdir", "rm", "cp", "mv", "ls", "python3")
+NEEDED_BINS = ("bash", "cat", "dirname", "mkdir", "rm", "cp", "mv", "ls", "python3", "pwd")
 
 HOST = "sentinel-host.lan"
 SSH_USER = "sentinel-user"
@@ -118,6 +118,7 @@ def make_sandbox(tmpdir: Path, timeout_name: str | None) -> tuple[Path, dict[str
     (project / "scripts").mkdir(parents=True)
     shutil.copy2(DEPLOY_SH, project / "scripts" / "deploy.sh")
     shutil.copy2(SCRIPTS / "stage_mods.sh", project / "scripts" / "stage_mods.sh")
+    shutil.copy2(SCRIPTS / "lib-env.sh", project / "scripts" / "lib-env.sh")
 
     bindir = tmpdir / "bin"
     bindir.mkdir()

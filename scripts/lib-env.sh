@@ -9,6 +9,40 @@
 # Malformed lines are skipped, but each skip warns on stderr: a typo'd key
 # (e.g. TELNET_PASSWD=) must not silently fall back to the default value with
 # no trace of why the operator's line had no effect.
+#
+# Argv guards (require_argc / require_command): one owner of the usage-error
+# contract shared by the ops scripts. Both exit 2 (a usage error must be
+# distinguishable from a failed operation) and print the offender, then the
+# caller's usage, on stderr. Both run before any setup side effect, so a typo
+# surfaces as a usage error even when the environment itself is broken.
+require_argc() { # max_args extra_argv usage_fn
+  local max="$1" usage_fn="$2" extra="$3"
+  if [[ -n "$extra" ]]; then
+    echo "FATAL: unexpected argument '$extra' ($0 takes at most $max argument(s))" >&2
+    "$usage_fn" >&2
+    exit 2
+  fi
+}
+
+# Validate the command word: a typo must surface as a usage error naming the
+# offender, before any setup side effect, even when the environment itself is
+# broken. 2, not 1: a bad invocation must be distinguishable from a failed
+# operation by scripts consuming this CLI. The valid set is pipe-separated;
+# word-by-word comparison (unquoted case patterns do not expand '|' as
+# alternation).
+require_command() { # command pipe_separated_valid usage_fn
+  local cmd="$1" valid="$2" usage_fn="$3" word
+  local IFS='|'
+  for word in $valid; do
+    if [[ "$cmd" == "$word" ]]; then
+      return 0
+    fi
+  done
+  echo "FATAL: unknown command '$cmd'" >&2
+  "$usage_fn" >&2
+  exit 2
+}
+
 load_env_file() {
   local line key value q
   # An unreadable file would otherwise abort the caller with a bare redirect
@@ -188,6 +222,25 @@ telnet_probe() { # port timeout_seconds
   [[ "$port" =~ ^[0-9]+$ ]] || return 1
   # shellcheck disable=SC2016  # non-expansion is the point: port passed as "$1" to bash -c
   timeout "$2" bash -c 'exec 3<>/dev/tcp/127.0.0.1/$1' telnet_probe "$port"
+}
+
+# One best-effort telnet request shared by stop() and backup(): probe, then
+# authenticate and send the command. The reply always fills the caller's
+# named variable (reply_var), so a failed session can still be surfaced by
+# the caller (e.g. stop()'s forced-stop path). Exit codes: 0 session ran,
+# 1 port unreachable, 2 session failed (rejected password, dropped
+# connection).
+request_telnet() { # reply_var command timeout_secs
+  local reply_var="$1" command="$2" timeout_secs="$3" out="" rc=1
+  if telnet_probe "$TELNET_PORT" 3 >/dev/null 2>&1; then
+    if out="$(telnet_session "$TELNET_PORT" "$TELNET_PASSWORD" "$command" "$timeout_secs" 2>&1)"; then
+      rc=0
+    else
+      rc=2
+    fi
+  fi
+  printf -v "$reply_var" '%s' "$out"
+  return "$rc"
 }
 
 # Render a webadmin password as the base64 MD5 digest the dashboard expects in

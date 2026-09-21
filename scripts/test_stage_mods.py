@@ -73,6 +73,7 @@ def make_stage_sandbox(tmpdir: Path, present: list[str]) -> Path:
     if WS_LINE not in src:
         print(f"FAIL: stage_mods.sh workspace line drifted: {WS_LINE!r} not found", file=sys.stderr)
         sys.exit(1)
+    shutil.copy2(SCRIPTS / "lib-env.sh", scripts / "lib-env.sh")
     staged_script = scripts / "stage_mods.sh"
     staged_script.write_text(src.replace(WS_LINE, f'WS="{ws}"'), encoding="utf-8")
     staged_script.chmod(0o755)
@@ -164,6 +165,7 @@ with tempfile.TemporaryDirectory() as tmp:
     root = tmpdir / "srv"
     scripts = root / "scripts"
     scripts.mkdir(parents=True)
+    shutil.copy2(SCRIPTS / "lib-env.sh", scripts / "lib-env.sh")
     shutil.copy2(SCRIPTS / "update_mods.sh", scripts / "update_mods.sh")
 
     stub_log = root / "restarts.log"

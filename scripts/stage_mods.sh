@@ -12,6 +12,7 @@
 # shipped mod does.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/scripts/lib-env.sh"
 WS="$(cd "$ROOT/.." && pwd)"
 
 # Parallel indexed arrays, not an associative array: indexed arrays need only
@@ -44,24 +45,10 @@ case "${1:-}" in
     ;;
 esac
 
-# Exactly one word at most: a silently ignored second word would let e.g.
-# a mistyped flag read as a successful staging run while the enabled set
-# was rebuilt anyway (same guard run.sh applies to its commands).
-if (( $# > 1 )); then
-  echo "FATAL: unexpected argument '$2' ($0 takes no arguments)" >&2
-  usage >&2
-  exit 2
-fi
-
-case "${1:-}" in
-  "") ;;
-  *)
-    # Name the offender before the usage dump (same shape as run.sh).
-    echo "FATAL: unexpected argument '$1' ($0 takes no arguments)" >&2
-    usage >&2
-    exit 2
-    ;;
-esac
+# Takes no arguments: any stray word or flag fails loudly instead of being
+# dropped while the enabled set was rebuilt anyway (guards live in
+# scripts/lib-env.sh, shared with the other ops scripts).
+require_argc 0 usage "${2:-${1:-}}"
 
 mkdir -p "$ROOT/mods-available" "$ROOT/mods"
 # Sweep staging leftovers from a previously killed run (both dirs): hidden,
