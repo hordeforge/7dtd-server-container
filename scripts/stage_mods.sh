@@ -93,40 +93,17 @@ for i in "${!NAMES[@]}"; do
   fi
 done
 
-# Remove what the enabled set no longer names, and nothing else, so a mod
-# enabled by hand survives only until the next staging run. Entries in NAMES
-# are left for the sync_tree calls below, which rewrite one only when its
-# content differs from mods-available/; wiping the whole tree first would
-# leave nothing to compare against and copy every mod on every run.
-# The sweep keeps hidden files, but the up-front sweep above already removed
-# any stale staging entries.
-for d in "$ROOT/mods"/*/; do
-  [[ -d "$d" ]] || continue
-  name="${d%/}"
-  name="${name##*/}"
-  enabled=0
-  for wanted in "${NAMES[@]}"; do
-    if [[ "$name" == "$wanted" ]]; then
-      enabled=1
-      break
-    fi
-  done
-  if (( enabled == 0 )); then
-    rm -rf "$d"
-  fi
-done
 # The new set is staged here and swapped in below, so a failed copy leaves the
-# previously enabled mods in place.
+# previously enabled mods in place. Nothing touches $ROOT/mods before the swap:
+# wiping the stale entries or rewriting a named mod in place would destroy a
+# working enabled set on a run that then reports the failure, and the swap's
+# `rm -rf` already drops whatever the new set does not name, so a mod enabled
+# by hand still survives only until the next successful staging run.
 rm -rf "$enabled_staging"
 mkdir -p "$enabled_staging"
 enabled=0
 for name in "${NAMES[@]}"; do
-  if [[ -d "$ROOT/mods-available/$name" ]]; then
-    if ! sync_tree "$ROOT/mods-available/$name" "$ROOT/mods/$name"; then
-      echo "FATAL: failed to enable $name (copy into mods/ failed)" >&2
-      exit 1
-    fi
-  else
+  if [[ ! -d "$ROOT/mods-available/$name" ]]; then
     echo "WARN: enabled mod $name not staged (missing in mods-available/); server will start without it" >&2
     continue
   fi

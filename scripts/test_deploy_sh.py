@@ -336,22 +336,22 @@ with tempfile.TemporaryDirectory() as tmp:
     # The FATAL is the only message here that may carry the failure: the
     # pre-restart "deployed ..." line goes to stdout and already names the host,
     # so a combined-stream match would pass on the success line alone.
-    err = proc.stderr
-    fatal = next((line for line in err.splitlines() if line.startswith(b"FATAL:")), b"")
+    raw_err = proc.stderr
+    fatal = next((line for line in raw_err.splitlines() if line.startswith(b"FATAL:")), b"")
     check("failing remote restart exits 1", proc.returncode == 1)
     check(
-        f"the failed restart names the phase and host (stderr: {err!r})",
+        f"the failed restart names the phase and host (stderr: {raw_err!r})",
         fatal.startswith(b"FATAL: remote restart on ")
         and f"{SSH_USER}@{HOST}".encode() in fatal
         and b"failed (exit 255)" in fatal,
     )
     check(
         "the failed restart reports deployed-tree/stale-mods state",
-        b"the tree is deployed" in err and b"old mods" in err,
+        b"the tree is deployed" in raw_err and b"old mods" in raw_err,
     )
     check(
         "the failed restart names the recovery command",
-        b"./scripts/update_mods.sh" in err and b"deploy.sh --restart" in err,
+        b"./scripts/update_mods.sh" in raw_err and b"deploy.sh --restart" in raw_err,
     )
     check(
         "rsync still ran before the failing restart, with the pinned argv",

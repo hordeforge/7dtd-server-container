@@ -28,7 +28,7 @@ VENV := .venv
 PYBIN := $(VENV)/bin
 
 .DEFAULT_GOAL := test
-.PHONY: lint test coverage
+.PHONY: lint test coverage venv
 
 $(PYBIN)/ruff: requirements-lint.txt
 	# --clear, not reuse: when the pinned closure changes the venv is rebuilt
@@ -39,6 +39,11 @@ $(PYBIN)/ruff: requirements-lint.txt
 	# uv hardlinks from its cache, so the installed files can carry an older
 	# mtime than requirements-lint.txt and re-trigger this rule every run.
 	touch $(PYBIN)/ruff
+
+# The analyzer venv and nothing else. A caller that needs the pinned
+# interpreter without running a whole gate depends on this, so no step ever
+# downloads a second, unversioned Python to do work the venv already covers.
+venv: $(PYBIN)/ruff
 
 lint: $(PYBIN)/ruff
 	set -euo pipefail; \
