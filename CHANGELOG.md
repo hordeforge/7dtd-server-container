@@ -114,16 +114,26 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   a host runs on the committed public telnet password was printed as `(set,
   redacted)`. The two secret keys are now named outright.
 - **A discoverable local loop.** `make` prints the task list, `make test-one
-  SUITE=<name>` runs a single suite instead of all twelve, and `make check`
+  SUITE=<name>` runs a single suite instead of every one, and `make check`
   runs lint and test in CI's order. A missing `uv` or `shellcheck` now fails
   with the install hint instead of a `command not found` buried in gate
   output. The contributor path is documented in the README "Development"
   section and [`CONTRIBUTING.md`](CONTRIBUTING.md).
-- **The release gate checks the changelog, not just `VERSION`.** A `vX.Y.Z` tag
-  whose version matched the file could still be pushed with its notes left
-  under `Unreleased`, so the release shipped without a changelog section.
-  `.github/workflows/release.yml` now also requires a dated
-  `## [X.Y.Z] - <date>` heading for the tag.
+- **The release gate cannot ship a breaking change as a minor release.** The
+  gate compared a `vX.Y.Z` tag to `VERSION` and to a dated changelog heading,
+  and nothing else: this batch's own note that it is a breaking 2.0.0 was
+  prose the workflow could not see, so `v1.1.4` carrying the printable-ASCII
+  secret domain would have passed and told no operator that an upgrade starts
+  refusing a value it accepted. The rules moved into
+  `scripts/check_release_gate.sh`, which additionally refuses a tag that is
+  not newer than a version the changelog already releases, and a section
+  grouped under `### Breaking changes` that is not a major bump.
+  `.github/workflows/release.yml` calls that script, and
+  `scripts/test_release_gate.py` runs it against synthetic trees and against
+  this changelog's own Unreleased batch promoted to 1.1.4 (refused) and 2.0.0
+  (accepted), so the rules cannot exist only in CI. The SemVer policy they
+  enforce is written down in the README's "Releases" section; until now it was
+  only inferable from the tag history.
 - **`scripts/test_fuzz_xml.py`, a seeded fuzz harness for the XML config
   parsers**, run by `make test`. It assembles structure-aware XML cases
   (elements, attributes, CDATA, comments, PIs, DTD and entity fragments,

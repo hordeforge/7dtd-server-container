@@ -113,6 +113,36 @@ needs listing in two places. A bash suite is named in `make test` beside
 Commit and PR conventions live in [`CONTRIBUTING.md`](CONTRIBUTING.md) and
 [`AGENTS.md`](AGENTS.md).
 
+## Releases
+
+`VERSION` is the one place the version is stated: `run.sh version` prints it,
+the `org.opencontainers.image.version` image label copies it (and
+`scripts/test_containerfile.py` fails the gate when the two drift), and
+`.github/workflows/release.yml` refuses a `vX.Y.Z` tag that disagrees. The
+image is built on the server host, never published from CI, so that tag check
+is the whole automated release contract.
+
+Versions are SemVer, against the operator's side of the contract: a documented
+config value, a `run.sh` command or flag, the on-disk state under `data/`.
+
+| Bump | For | Example |
+|---|---|---|
+| patch | nothing an operator can observe: lint pins, a failed-run message, an internal refactor | 1.1.2 was analyzer version bumps alone |
+| minor | something added, nothing removed or changed: a new command, a new config key with a working default | `run.sh config`, `run.sh restore` |
+| major | a documented value stops working as written: a narrower accepted domain, a renamed or removed key with no alias, a config schema or save layout change | the 2.0.0 printable-ASCII secret domain |
+
+The policy is what the history does; the gate now enforces the two parts a
+mistake is easy to make. `scripts/check_release_gate.sh` (run by the release
+workflow, pinned by `scripts/test_release_gate.py`) refuses a tag that is not
+`vX.Y.Z`, disagrees with `VERSION`, has no dated `## [X.Y.Z] - <date>`
+changelog section, is not newer than every version that changelog already
+releases, or carries a `### Breaking changes` section without a major bump.
+
+A breaking change is written down for the operator, not for the maintainer:
+what the value accepted before, what it accepts now, and what to change if you
+already run the old one. The Unreleased section is where it lives until the
+release is dated.
+
 ## Quick start
 
 ```bash
@@ -263,7 +293,8 @@ export WEBADMIN_PASSWORD=change-me          # dashboard webuser password; if uns
                                             # random one is minted at first seed and
                                             # written to data/userdata/Saves/.webadmin-password
 export STEAMCMD_UPDATE=0                    # skip steamcmd validate on next start
-export BACKUP_KEEP=14                        # save archives kept in backups/ (default 7)
+export BACKUP_KEEP=14                        # save archives kept in backups/ (default 7,
+                                            # 1..999999999 read in base 10)
 ```
 
 `./scripts/run.sh config` prints the effective configuration of this host,

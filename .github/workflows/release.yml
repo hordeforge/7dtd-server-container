@@ -5,7 +5,9 @@ name: release
 # vX.Y.Z tag must agree with the version this repository actually ships, so a
 # mistyped or forgotten bump is rejected instead of becoming a release nobody
 # can reproduce. The tag must also have a dated CHANGELOG section, so a release
-# cannot ship with its notes still under Unreleased.
+# cannot ship with its notes still under Unreleased, must be newer than every
+# version that changelog already releases, and a section that declares breaking
+# changes must ship as a major release.
 #
 # The container image is deliberately NOT built or pushed here. It is built on
 # the LAN server host from this tree by `scripts/run.sh build`, against that
@@ -48,27 +50,15 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "{uv.lock,.python-version}"
 
-      - name: Check the tag matches VERSION
+      # The rules live in scripts/check_release_gate.sh, not here: the same
+      # script is what scripts/test_release_gate.py pins, so a rule cannot
+      # exist in CI that no test covers. It checks the tag against VERSION,
+      # requires a dated changelog section, refuses a tag older than a version
+      # the changelog already releases, and refuses a section that groups its
+      # entries under "### Breaking changes" unless the tag is a major bump.
+      - name: Release gate
         shell: bash
-        run: |
-          set -euo pipefail
-          TAG="${GITHUB_REF_NAME}"
-          MANIFEST="VERSION"
-          case "$TAG" in
-            v*) ;;
-            *) echo "ERROR: tag '$TAG' does not start with 'v'" >&2; exit 1 ;;
-          esac
-          SHIPPED="$(tr -d '[:space:]' < "$MANIFEST")"
-          if [ -z "$SHIPPED" ]; then
-            echo "ERROR: $MANIFEST is empty" >&2
-            exit 1
-          fi
-          if [ "$SHIPPED" != "${TAG#v}" ]; then
-            echo "ERROR: tag $TAG but $MANIFEST ships $SHIPPED;" >&2
-            echo "       make them match before tagging" >&2
-            exit 1
-          fi
-          echo "ok: tag $TAG matches $MANIFEST ($SHIPPED)"
+        run: scripts/check_release_gate.sh "${GITHUB_REF_NAME}" "${GITHUB_WORKSPACE}"
 
       # What this release was resolved against. The analyzer closure is the
       # only third-party code in the tree, and it never reaches the image, so
@@ -83,25 +73,9 @@ jobs:
           set -euo pipefail
           make sbom
           {
-            echo "## Dependency inventory ($TAG)"
+            echo "## Dependency inventory (${GITHUB_REF_NAME})"
             echo
             echo '```json'
             cat dist/sbom.cdx.json
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-
-      # A matching VERSION says the tag is the version this tree ships; it
-      # says nothing about whether anyone can tell what changed. Require the
-      # release section too, so a tag cannot ship with an empty or still-
-      # Unreleased changelog.
-      - name: Check the changelog has a section for the tag
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
-          if ! grep -Eq "^## \[$VERSION\] - " CHANGELOG.md; then
-            echo "ERROR: CHANGELOG.md has no '## [$VERSION] - <date>' section;" >&2
-            echo "       move the Unreleased entries under it and date it before tagging" >&2
-            exit 1
-          fi
-          echo "ok: CHANGELOG.md has a section for $VERSION"
