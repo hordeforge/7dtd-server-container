@@ -78,5 +78,20 @@ check(
     "shellcheck not found on PATH" in MAKEFILE,
 )
 
+# The venv is the interpreter the whole gate runs on, so which Python it gets
+# is a build property, not a contributor's local state. A .python-version bump
+# has to reach the venv, and the venv has to be built for that version rather
+# than for whatever python3 happens to be first on PATH.
+pyver = (ROOT / ".python-version").read_text(encoding="utf-8").strip()
+venv_dry = dry_run("-B", "venv")
+check(
+    "the venv is rebuilt when the pinned interpreter version changes",
+    re.search(r"^\$\(PYBIN\)/ruff: .*\.python-version\s*$", MAKEFILE, re.MULTILINE) is not None,
+)
+check(
+    f"the venv is built for the pinned interpreter ({pyver})",
+    f"--python {pyver}" in venv_dry,
+)
+
 exit_status()
 print("makefile rules OK")

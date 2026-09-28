@@ -26,6 +26,11 @@ TESTS := $(sort $(wildcard scripts/test_*.py))
 # the test suites, so one interpreter version covers the whole gate.
 VENV := .venv
 PYBIN := $(VENV)/bin
+# The interpreter every gate command runs on, read from the one file that owns
+# it (.python-version, the same file the CI cache key and setup-uv use). Passed
+# to uv venv explicitly so a clean machine with a different python3 on PATH
+# cannot get a gate that silently runs on another interpreter than the pin.
+PYVER := $(strip $(shell cat .python-version))
 
 .DEFAULT_GOAL := help
 .PHONY: help lint test test-one check coverage venv
@@ -40,7 +45,7 @@ help:
 	@echo 'make check                  lint then test: everything .github/workflows/ci.yml runs'
 	@echo 'make coverage               line coverage for scripts/lib-env.sh (needs kcov on PATH)'
 
-$(PYBIN)/ruff: requirements-lint.txt
+$(PYBIN)/ruff: requirements-lint.txt .python-version
 	# Named failure beats "uv: command not found" from make: uv is the only
 	# Python toolchain this repo resolves anything through, and a contributor
 	# arriving without it has nothing else to fall back on.
@@ -51,7 +56,10 @@ $(PYBIN)/ruff: requirements-lint.txt
 	# --clear, not reuse: when the pinned closure changes the venv is rebuilt
 	# from scratch, so a package dropped from requirements-lint.txt cannot
 	# linger and keep satisfying an import the gate should have failed on.
-	uv venv --quiet --clear $(VENV)
+	# --python is the .python-version pin, and it is a prerequisite above, so a
+	# version bump there rebuilds the venv instead of leaving a stale one that
+	# make considers up to date.
+	uv venv --quiet --clear --python $(PYVER) $(VENV)
 	uv pip install --quiet --python $(VENV) --require-hashes -r requirements-lint.txt
 	# uv hardlinks from its cache, so the installed files can carry an older
 	# mtime than requirements-lint.txt and re-trigger this rule every run.

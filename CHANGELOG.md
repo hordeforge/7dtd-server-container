@@ -155,6 +155,23 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   unsupervised after a single warning instead of failing. Pinned by
   `scripts/test_lib_env.sh` for both the gtimeout-only and the
   neither-binary host.
+- **The analyzer venv could keep running a stale interpreter.** `make lint`
+  and `make test` build `.venv` from `requirements-lint.txt` alone, and left
+  the interpreter to whatever `python3` uv found first, so a `.python-version`
+  bump neither rebuilt the venv nor changed the Python the gate ran on. The
+  rule now takes `.python-version` as a prerequisite and passes its value to
+  `uv venv --python`, the same file the CI cache key already keys on.
+- **The image build could answer the `tzdata` prompt itself.** The `apt-get`
+  step in the `Containerfile` installs `tzdata`, which asks a debconf
+  timezone question, with no `DEBIAN_FRONTEND` set. The step now declares
+  `DEBIAN_FRONTEND=noninteractive`, so the build neither blocks on a prompt
+  nor records whatever answer the build environment happened to give.
+- **The CI toolchain floated.** `setup-uv` was pinned to an action commit,
+  which fixes the action code but not the `uv` binary it installs: with no
+  `version` input each run resolved whatever uv was current, so a change in
+  what it resolved with showed up as a gate difference with nothing to trace.
+  Both jobs now pin `version: "0.12.14"`.
+
 - **A config file with an unusable encoding declaration crashed the XML
   parsers.** `encoding='x-mac-roman'` (an editor that wrote a Mac Roman
   declaration) or `encoding='utf-7'` fails outside `ParseError`: an unknown

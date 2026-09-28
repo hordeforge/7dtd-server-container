@@ -30,8 +30,12 @@ jobs:
       # uv is the only Python toolchain here; `make lint` and `make test` build
       # the analyzer venv themselves from the hash-pinned requirements-lint.txt,
       # so this step installs the binary and nothing else. Same SHA-pin rule as
-      # checkout above. (shellcheck and bash come with the runner image and are
-      # not pinned; expect minor version drift there.)
+      # checkout above, and the binary is pinned too: the action's own tag says
+      # which action code runs, not which uv it drops, so leaving `version` out
+      # resolved a new uv on every run and a change in what it resolved with
+      # would have shown up as a gate difference nobody could trace. (shellcheck
+      # and bash come with the runner image and are not pinned; expect minor
+      # version drift there.)
       # enable-cache keys the uv download cache on requirements-lint.txt, the
       # only manifests this repo resolves from (no uv.lock by design). A
       # dependency or interpreter bump rotates the key; the venv itself is
@@ -39,6 +43,7 @@ jobs:
       # what the gate runs.
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
         with:
+          version: "0.12.14"
           enable-cache: true
           cache-dependency-glob: "{requirements-lint.txt,.python-version}"
 
@@ -71,6 +76,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
         with:
+          version: "0.12.14"  # same binary the check job pins
           enable-cache: true
           cache-dependency-glob: "{requirements-lint.txt,.python-version}"
       # No prebuilt kcov works here: apt has no noble package and the v42

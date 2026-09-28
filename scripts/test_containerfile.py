@@ -92,6 +92,14 @@ check(
     and (":" in base_args[0] or "@" in base_args[0]),
 )
 
+# tzdata asks a debconf question; a noninteractive front end is what keeps the
+# apt step from blocking on a prompt, or from answering itself differently on
+# two machines and producing two images from one tree.
+check(
+    "the apt step runs non-interactively",
+    re.search(r"^ARG\s+DEBIAN_FRONTEND=noninteractive\s*$", text, re.MULTILINE) is not None,
+)
+
 entrypoints = re.findall(r"^ENTRYPOINT\s+(.*)$", text, re.MULTILINE)
 check(
     "ENTRYPOINT is exec form (PID 1 is the script, not a shell)",
