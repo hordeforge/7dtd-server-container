@@ -106,6 +106,15 @@ check(
     len(entrypoints) == 1 and entrypoints[0].startswith("["),
 )
 
+# The apt install runs debconf (tzdata asks for a zone) with no terminal to
+# answer on. A build ARG keeps that answer out of the runtime image; an ENV
+# would leave every later apt run in the container silently non-interactive.
+check(
+    "the apt layer is non-interactive, via a build ARG that does not persist",
+    re.findall(r"^ARG\s+DEBIAN_FRONTEND=(\S+)$", text, re.MULTILINE) == ["noninteractive"]
+    and re.findall(r"^ENV\s+DEBIAN_FRONTEND", text, re.MULTILINE) == [],
+)
+
 copies = re.findall(r"^COPY\s+(\S+)\s+", text, re.MULTILINE)
 check(
     "COPY carries exactly the two files entrypoint.sh needs at boot",

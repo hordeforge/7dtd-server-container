@@ -27,9 +27,12 @@ USER root
 # The depot ships its own Unity/Mono/steamclient libraries. On top of the
 # steamcmd image only the common system libs the Unity player links against
 # are needed (curl/ssl for Steam API, SDL2 for the player binary).
-# noninteractive because tzdata asks a debconf timezone question: a build with
-# no terminal to answer it either blocks or records whatever answer the
-# environment happened to give, so the same tree builds two different images.
+# noninteractive because tzdata's postinst asks a debconf timezone question:
+# a build with no terminal to answer it either blocks or records whatever
+# answer the build environment happened to export, so the same tree builds
+# two different images. Scoped ARG, not ENV: the variable must not survive
+# into the runtime image, where it would also mask a later interactive apt
+# run nobody expects to be silent.
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \

@@ -99,6 +99,11 @@ check(
     "Network=host (game 26900 / telnet / dashboard ports are LAN-reachable)",
     network_lines == ["host"],
 )
+# The image is built on this host and never published, so quadlet's default
+# Pull=missing would only hide that until a prune leaves the unit pulling from
+# a registry that does not exist here.
+pull_lines = re.findall(r"^Pull=(.*)$", text, re.MULTILINE)
+check("Pull=never (the image is built locally, never published)", pull_lines == ["never"])
 
 # Liveness: same probe as run.sh start, so a container that is up but no
 # longer serving shows up as unhealthy. The command must reach the port
@@ -153,6 +158,10 @@ check(
 check(
     "the backup service is a oneshot (no daemon to supervise)",
     re.findall(r"^Type=(.*)$", backup_service, re.MULTILINE) == ["oneshot"],
+)
+check(
+    "the backup service needs no privilege escalation",
+    re.findall(r"^NoNewPrivileges=(.*)$", backup_service, re.MULTILINE) == ["yes"],
 )
 check(
     "a missed backup runs at the next boot (Persistent=true)",

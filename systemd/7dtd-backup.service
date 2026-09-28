@@ -20,6 +20,10 @@ Type=oneshot
 # backups/ is on the same host as the saves; copy it off-host if losing this
 # host matters (see the README's "Recovering state").
 ExecStart=%h/7dtd-server/scripts/run.sh backup
+# The job is a shell script that reads data/, writes backups/ and talks to the
+# telnet port; nothing in it needs a privilege escalation, so block one (same
+# reason the container unit passes no-new-privileges to podman).
+NoNewPrivileges=yes
 # A telnet saveworld request plus a 5s settle and the tar; the world is not
 # large, and systemd killing the job mid-archive would leave the partial file
 # for the next prune to remove.

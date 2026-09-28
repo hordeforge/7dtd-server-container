@@ -14,6 +14,14 @@ Wants=network-online.target
 
 [Container]
 Image=localhost/7dtd-server:latest
+# The image is built on this host (`podman build -t localhost/7dtd-server
+# ... .`) and is never published to a registry, so there is nothing to pull
+# from. Quadlet otherwise defaults to Pull=missing, which only stays quiet
+# while the image is present locally: after a `podman rmi` or a prune the
+# unit would try to pull localhost/7dtd-server from a registry that does not
+# exist on this host and fail at boot. never makes the missing image an
+# honest "build it first" error instead of a pull attempt.
+Pull=never
 ContainerName=7dtd-server
 Network=host
 # catatonit takes PID 1 and reaps orphans/zombies for the game's whole

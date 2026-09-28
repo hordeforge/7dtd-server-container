@@ -143,6 +143,24 @@ password character domain, below), so it is a **major** release: 1.1.3 to
 
 ### Fixed
 
+- **The quadlet unit tried to pull an image nobody publishes.** The image is
+  built on the server host and is never pushed to a registry, but the unit
+  carried no `Pull=`, so quadlet's `missing` default stayed quiet only while
+  the image was in the local store: after a `podman rmi` or a prune the
+  service would try to pull `localhost/7dtd-server` from a registry that does
+  not exist on that host and fail at boot with a network error. The unit now
+  pins `Pull=never`, so a missing image is an honest "build it first" error.
+- **The daily backup service ran with the default privilege set.** It is a
+  shell script that reads `data/`, writes `backups/` and talks to the telnet
+  port, and needs no escalation, so `systemd/7dtd-backup.service` now sets
+  `NoNewPrivileges=yes`, matching the `no-new-privileges` the container unit
+  already passes to podman.
+- **The image build left debconf to chance.** Installing `tzdata` asks for a
+  time zone, and a build has no terminal to answer on, so the answer came out
+  of whatever the build environment happened to export. The `Containerfile`
+  now sets `DEBIAN_FRONTEND=noninteractive` as a build `ARG` (not an `ENV`, so
+  it does not survive into the runtime image) for that one layer.
+
 - **The telnet helpers assumed GNU coreutils on every host that runs the ops
   scripts.** `telnet_session` and `telnet_probe` called `timeout(1)` directly,
   so on a macOS workstation, where that binary is coreutils-only and ships as
