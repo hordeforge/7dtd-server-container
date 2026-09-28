@@ -2,8 +2,9 @@
 """Fake telnet endpoint for the telnet_session CI test.
 
 Tolerates probe connections, records every byte of the first connection that
-sends data, replies once, then closes (the EOF ends the helper instead of its
-timeout) and writes the recorded bytes to the output path.
+sends data, writes them to the output path, then replies once and closes (the
+EOF ends the helper instead of its timeout). The write comes first so a client
+that has seen the reply can always read a complete output file.
 
 Usage: fake-telnet-server.py PORT OUTPUT_PATH [--hold]
 
@@ -78,17 +79,23 @@ def collect(conn: socket.socket) -> bytes:
     return bytes(buf)
 
 
-def record_first_session(srv: socket.socket) -> bytes:
-    """Skip probe connections (they send nothing) and return the real bytes."""
+def record_first_session(srv: socket.socket) -> tuple[socket.socket, bytes]:
+    """Skip probe connections (they send nothing), keep the real one open.
+
+    The connection is returned still open so the caller can persist the bytes
+    before replying: the client treats the reply as the end of its session, so
+    anything the reply implies must already be on disk when it arrives.
+    """
     while True:
         conn, _ = srv.accept()
         try:
             recorded = collect(conn)
-            if recorded:
-                conn.sendall(b"telnet ok\n")
-                return recorded
-        finally:
+        except BaseException:
             conn.close()
+            raise
+        if recorded:
+            return conn, recorded
+        conn.close()
 
 
 def main() -> int:
@@ -105,17 +112,20 @@ def main() -> int:
             time.sleep(HOLD_SECS)
             conn.close()
             return 0
-        recorded = record_first_session(srv)
+        conn, recorded = record_first_session(srv)
     finally:
         srv.close()
     try:
         with out.open("wb") as f:
             f.write(recorded)
+        conn.sendall(b"telnet ok\n")
     except OSError as exc:
         # The recorded bytes exist nowhere else: name the path rather than
         # dropping them behind a traceback the test never surfaces.
         print(f"fake-telnet-server.py: cannot write {out}: {exc}", file=sys.stderr)
         return 1
+    finally:
+        conn.close()
     return 0
 
 
