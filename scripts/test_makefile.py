@@ -120,5 +120,27 @@ check(
     f"--python {pyver}" in venv_dry,
 )
 
+# The analyzers read the language version from pyproject.toml while the
+# interpreter the gate runs on is pinned in .python-version, so the two can
+# disagree silently: mypy would then type check against semantics the code
+# never sees, and a bump of the pin would leave both analyzers behind. mypy
+# models the interpreter that actually runs, so it carries the pin verbatim.
+# ruff names the floor the helpers must stay valid for, which may sit below the
+# pin (see the note in pyproject.toml) but never above it.
+pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+mypy_version = re.search(r'^python_version = "([\d.]+)"$', pyproject, re.MULTILINE)
+ruff_target = re.search(r'^target-version = "py(\d)(\d+)"$', pyproject, re.MULTILINE)
+check("mypy declares a python_version", mypy_version is not None)
+check("ruff declares a target-version", ruff_target is not None)
+if mypy_version and ruff_target:
+    check(
+        f"mypy type checks against the pinned interpreter ({pyver})",
+        mypy_version.group(1) == pyver,
+    )
+    check(
+        f"ruff does not target a language newer than the pin ({pyver})",
+        (int(ruff_target.group(1)), int(ruff_target.group(2))) <= tuple(map(int, pyver.split("."))),
+    )
+
 exit_status()
 print("makefile rules OK")

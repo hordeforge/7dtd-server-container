@@ -22,7 +22,8 @@ from __future__ import annotations
 
 import re
 import sys
-from pathlib import Path
+from fnmatch import fnmatch
+from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parent.parent
 CONTAINERFILE = ROOT / "Containerfile"
@@ -123,6 +124,49 @@ check(
 check(
     "entrypoint.sh is executable in the tree", bool((ROOT / "entrypoint.sh").stat().st_mode & 0o111)
 )
+
+
+def ignored_by(path: str, rules: list[str]) -> bool:
+    """Whether a build-context-relative path is dropped by these ignore rules.
+
+    The subset of the pattern language this repo's .dockerignore uses: a
+    comment line, `!` negation, and a glob with no `/` matched against the
+    basename at any depth (a pattern with a `/` is matched against the whole
+    relative path). The last matching rule wins, which is what makes the
+    negations after the blanket `*` work.
+    """
+    parts = PurePosixPath(path).parts
+    excluded = False
+    for raw in rules:
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        negate = line.startswith("!")
+        pattern = line[1:] if negate else line
+        pattern = pattern.rstrip("/")
+        target = PurePosixPath(path).name if "/" not in pattern else path
+        if fnmatch(target, pattern) or any(fnmatch(part, pattern) for part in parts[:-1]):
+            excluded = not negate
+    return excluded
+
+
+# The image is never built in CI, so a rule that quietly drops a COPY source
+# out of the build context would not fail a gate: the error surfaces on the
+# server host at `podman build` time, and only as a missing file. .containerignore
+# takes precedence when it exists, so that is the one read when there is one.
+containerignore = ROOT / ".containerignore"
+dockerignore = ROOT / ".dockerignore"
+ignore_file = containerignore if containerignore.is_file() else dockerignore
+check("the build context has a .dockerignore", ignore_file.is_file())
+if ignore_file.is_file():
+    rules = ignore_file.read_text(encoding="utf-8").splitlines()
+    dropped = sorted(p for p in REQUIRED_COPIES if ignored_by(p, rules))
+    check(
+        f"every COPY source survives {ignore_file.name}",
+        not dropped,
+    )
+    if dropped:
+        print(f"      dropped from the build context: {', '.join(dropped)}", file=sys.stderr)
 
 if failed_checks:
     sys.exit(1)

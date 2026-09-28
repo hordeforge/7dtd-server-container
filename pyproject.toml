@@ -4,7 +4,16 @@
 # so the two gates run identical rules.
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+# The floor the helpers must stay valid for, which is not the interpreter pin
+# (.python-version): ruff's pyupgrade rules only offer a construct once the
+# declared target makes it legal, so a stale low target silently freezes the
+# code on older idioms. It is one minor below the pin because the pinned
+# formatter (ruff 0.16.6) misformats a parenthesized `except` tuple as the
+# Python 2 `except A, B:` form at py314, which no interpreter accepts; raise
+# this when the pinned ruff formats py314 correctly. mypy below is pinned to
+# the interpreter itself, because that is the version it must model. Both are
+# checked against .python-version by scripts/test_makefile.py.
+target-version = "py313"
 
 [tool.ruff.lint]
 select = [
@@ -60,7 +69,7 @@ select = [
 
 [tool.mypy]
 strict = true
-python_version = "3.10"
+python_version = "3.14"
 files = ["scripts"]
 # Not part of `strict`: flags code that can never run (dead branches after
 # exhaustive returns, impossible conditions).
