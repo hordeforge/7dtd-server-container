@@ -20,6 +20,15 @@ on:
 permissions:
   contents: read
 
+# One verification per tag. A force-pushed or re-created tag is a new run, and
+# a superseded run finishing after the current one would report a verdict for a
+# commit that is no longer the tag: the log's newest conclusion is then the one
+# for the old SHA. Cancelling the older run keeps the last word on the tag the
+# repository actually points at.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify-tag:
     runs-on: ubuntu-latest

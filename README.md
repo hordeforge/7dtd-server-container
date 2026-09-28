@@ -492,6 +492,13 @@ override them (or `WEBADMIN_PASSWORD`) via `Environment=` lines in the unit,
 mirror the telnet values in `.env` on the server host so the graceful-stop
 login still matches.
 
+`ExecStop` runs `run.sh stop`, which waits for the same ops lock every other
+mutating command takes before it saves, so the unit's stop budget covers that
+wait as well as the stop itself. The unit also lifts systemd's start rate
+limit: a server that dies on a bad depot or a corrupt save is restarted, and
+after five failures in ten seconds the default limit would leave the unit
+failed instead, with no boot to read the failure out of.
+
 ## Troubleshooting
 
 - **Game downloads on first start only.** `podman logs 7dtd-server` shows

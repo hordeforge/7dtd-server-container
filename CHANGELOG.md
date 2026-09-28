@@ -332,6 +332,45 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   error before the line that names the fix.** The digit-width test ran after
   the range comparison, so `(( 10#... ))` on a 20-digit value reported "value
   too great for base" ahead of the `FATAL`. The width test runs first now.
+- **A systemd stop that queued behind another command could be killed
+  mid-save.** `ExecStop` runs `run.sh stop`, which waits on the ops lock
+  (up to `LOCK_WAIT_SECS`, 120s) before it saves anything, but the unit's
+  `TimeoutStopSec` was 180s: exactly the 133s worst-case graceful stop and
+  nothing for the wait. A stop behind the nightly backup, an operator's
+  restore or a restart ran out of budget during the save, and systemd killed
+  the one path that exists to protect the world. The budget is 300s now, and
+  `scripts/test_systemd_unit.py` reads `LOCK_WAIT_SECS` out of `run.sh` and
+  adds the stop path, so the two cannot drift apart again.
+- **A crash-looping server stayed down.** `Restart=always` promises a dead
+  server comes back, and systemd's default start rate limit (5 starts in 10s)
+  cancels that for the exact case it matters in: a game that dies on a bad
+  depot, a refused mount or a corrupt save is restarted, dies again, and after
+  the fifth start the unit is left failed until someone intervenes. The
+  documented recovery reads the `FATAL:` of the last boot out of
+  `podman logs --timestamps`, and after the limit there is no last boot. The
+  unit sets `StartLimitIntervalSec=0`; a permanently broken host boots in a
+  loop that is visible in the logs, which is cheaper than a server that stays
+  down after a transient fault.
+- **The nightly backup had 180s left to archive after waiting for the lock.**
+  `run.sh backup` queues on the same lock, so a timer firing behind an
+  operator's restore paid the 120s wait out of a 300s budget that also has to
+  cover the saveworld request, the settle and the tar. `TimeoutStartSec` is
+  600s on the backup service; the read-only verify service, which takes no
+  lock, keeps 300s.
+- **`make coverage` published the fuzz suite's number as the whole.** The two
+  `kcov` invocations each passed `--clean`, so the second wiped the counts the
+  first had just recorded and the badge measured `test_fuzz_env.sh` alone. The
+  report was then picked with `find ... | head -1`, which is the right answer
+  to a question that does not arise once the runs merge and a wrong one if they
+  do not. The second run no longer cleans, and the target fails with the report
+  paths named when more than one report exists, instead of publishing a number
+  that measures half the suites and reads like all of it.
+- **The tag verification could report a verdict for a superseded tag.** A
+  force-pushed or re-created tag started a second run, and the older one
+  finishing later left the newest conclusion in the log belonging to a commit
+  the tag no longer points at. `.github/workflows/release.yml` takes the same
+  per-ref concurrency group `ci.yml` uses, so the last word belongs to the
+  current tag.
 - **A host with no MD5 tool rendered an empty dashboard password digest.**
   `webadmin_password_digest` ran `md5_hex` in a command substitution and
   discarded its status, so the "no MD5 digest tool" guard never reached the

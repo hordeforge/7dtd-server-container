@@ -25,7 +25,11 @@ ExecStart=%h/7dtd-server/scripts/run.sh backup
 # telnet port; nothing in it needs a privilege escalation, so block one (same
 # reason the container unit passes no-new-privileges to podman).
 NoNewPrivileges=yes
-# A telnet saveworld request plus a 5s settle and the tar; the world is not
-# large, and systemd killing the job mid-archive would leave the partial file
-# for the next prune to remove.
-TimeoutStartSec=300
+# A telnet saveworld request (probe 3s + session 15s), a 5s settle and the tar;
+# the world is not large, and systemd killing the job mid-archive would leave
+# the partial file for the next prune to remove. The budget also has to cover
+# the ops-lock wait run.sh does first (LOCK_WAIT_SECS, 120s): the timer fires
+# on its own schedule and routinely queues behind an operator's restore or a
+# restart, and 300 left the archive itself 180s once that wait was paid. The
+# verify service is read-only and takes no lock, so it keeps the shorter one.
+TimeoutStartSec=600

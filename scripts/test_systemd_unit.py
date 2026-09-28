@@ -10,16 +10,20 @@ here:
                   systemd-driven stop/restart/shutdown must go through
                   scripts/run.sh stop (telnet save+shutdown, bounded wait,
                   forced-stop fallback) with a TimeoutStopSec covering the
-                  worst case (probe 3s + session 10s + podman wait 90s +
-                  podman stop 30s).
+                  whole command: the ops-lock wait run.sh does first
+                  (LOCK_WAIT_SECS) plus the stop path (probe 3s + session
+                  10s + podman wait 90s + podman stop 30s).
   shared defaults TELNET_PASSWORD/TELNET_PORT are owned by init_telnet_env in
                   scripts/lib-env.sh (baked into the image); hardcoding them
                   as Environment= lines here would create a second default
                   that can silently drift.
   durability      Restart=always brings a crashed server back on its own,
-                  Init=true reaps orphans for the whole uptime, and
-                  Network=host is what makes the game/telnet/dashboard ports
-                  LAN-reachable at all.
+                  with no start rate limit in the way (systemd's default
+                  5-in-10s stops a crash-looping server for good, which is
+                  the one case the boot-id log is written for), Init=true
+                  reaps orphans for the whole uptime, and Network=host is
+                  what makes the game/telnet/dashboard ports LAN-reachable
+                  at all.
   liveness        the unit probes the shipped lib (scripts/lib-env.sh
                   health_check) for a container that is up but no longer
                   serving, with a start period covering the first-boot depot
@@ -35,14 +39,34 @@ Each failed check prints a FAIL line; the process exits nonzero if any failed.
 from __future__ import annotations
 
 import re
+import sys
 
 from harness import ROOT, check, exit_status
 
 UNIT = ROOT / "systemd" / "7dtd-server.container"
 
-# Worst-case graceful-stop path in seconds (see module docstring); the unit
-# timeout must exceed it or systemd force-kills mid-save.
-WORST_STOP_SECS = 3 + 10 + 90 + 30
+# Worst-case graceful-stop path in seconds, excluding the ops-lock wait
+# run.sh does before the stop itself (see module docstring); the unit timeout
+# must exceed lock wait + this, or systemd force-kills mid-save.
+STOP_PATH_SECS = 3 + 10 + 90 + 30
+
+
+def run_sh_value(name: str) -> int:
+    """One integer assignment from scripts/run.sh, e.g. LOCK_WAIT_SECS=120.
+
+    Read from the script rather than restated here: the unit's stop budget is
+    only correct as long as it tracks the wait run.sh actually performs, and a
+    literal on this side drifts silently the moment that constant moves.
+    """
+    source = (ROOT / "scripts" / "run.sh").read_text(encoding="utf-8")
+    matches = re.findall(rf"^{name}=(\d+)$", source, re.MULTILINE)
+    if len(matches) != 1:
+        sys.exit(f"expected exactly one {name}=<int> in scripts/run.sh, found {len(matches)}")
+    return int(matches[0])
+
+
+LOCK_WAIT_SECS = run_sh_value("LOCK_WAIT_SECS")
+WORST_STOP_SECS = LOCK_WAIT_SECS + STOP_PATH_SECS
 
 
 text = UNIT.read_text(encoding="utf-8")
@@ -56,7 +80,7 @@ check(
 
 timeouts = [int(m) for m in re.findall(r"^TimeoutStopSec=(\d+)$", service, re.MULTILINE)]
 check(
-    f"TimeoutStopSec covers the worst-case graceful stop ({WORST_STOP_SECS}s)",
+    f"TimeoutStopSec covers the lock wait plus the worst-case stop ({WORST_STOP_SECS}s)",
     len(timeouts) == 1 and timeouts[0] >= WORST_STOP_SECS,
 )
 
@@ -94,6 +118,14 @@ check("Init=true (catatonit zombie reaper, same as start() in run.sh)", init_lin
 # dashboard ports are only reachable on the LAN through host networking.
 restart_lines = re.findall(r"^Restart=(.*)$", text, re.MULTILINE)
 check("Restart=always (a dead server must come back on its own)", restart_lines == ["always"])
+# Restart=always is only that without the start limit lifted: systemd's default
+# of 5 starts in 10s turns the crash loop into a permanently failed unit, and
+# the boot-id log the recovery path depends on then has no last boot to read.
+start_limits = re.findall(r"^StartLimitIntervalSec=(\d+)$", text, re.MULTILINE)
+check(
+    "no start rate limit (a crash loop must not end in a failed unit)",
+    start_limits == ["0"],
+)
 network_lines = re.findall(r"^Network=(.*)$", text, re.MULTILINE)
 check(
     "Network=host (game 26900 / telnet / dashboard ports are LAN-reachable)",
@@ -162,6 +194,17 @@ check(
 check(
     "the backup service needs no privilege escalation",
     re.findall(r"^NoNewPrivileges=(.*)$", backup_service, re.MULTILINE) == ["yes"],
+)
+# The backup takes the same ops lock the stop does, so its budget has to carry
+# the same wait: a timer that fires behind an operator's restore is the ordinary
+# case, not the exception, and a budget that ends mid-archive leaves a partial
+# file for the next prune to remove.
+backup_timeouts = [
+    int(m) for m in re.findall(r"^TimeoutStartSec=(\d+)$", backup_service, re.MULTILINE)
+]
+check(
+    f"the backup timeout covers the lock wait ({LOCK_WAIT_SECS}s)",
+    len(backup_timeouts) == 1 and backup_timeouts[0] > LOCK_WAIT_SECS,
 )
 check(
     "a missed backup runs at the next boot (Persistent=true)",

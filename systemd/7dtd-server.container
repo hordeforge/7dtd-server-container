@@ -11,6 +11,19 @@
 Description=7 Days to Die dedicated server (Navezgane, EfficientServer + APM bridge)
 After=network-online.target
 Wants=network-online.target
+# No start rate limit. The default (5 starts in 10s) is a backoff for a unit
+# that fails instantly and repeatedly, which is exactly what a crash-looping
+# server is: the game dies on a bad depot, a refused mount or a corrupt save,
+# podman restarts it, it dies again, and after the fifth start systemd gives up
+# and leaves the unit failed until someone intervenes. That is the opposite of
+# what Restart=always below promises and of what the documented recovery path
+# assumes: each restart is a new boot id, so an operator reads the FATAL of the
+# last boot out of `podman logs --timestamps` and fixes the cause. With the
+# limit in place there is nothing left to read, because nothing restarted. The
+# cost of removing it is a boot loop on a permanently broken host, which is
+# visible in the logs and in the failed unit, and is cheaper than a server that
+# stays down after a transient fault the next boot would have cleared.
+StartLimitIntervalSec=0
 
 [Container]
 Image=localhost/7dtd-server:latest
@@ -75,10 +88,16 @@ Restart=always
 # world save. Route every systemd-driven stop/restart/shutdown through the
 # same graceful path the ad-hoc lifecycle uses: telnet save+shutdown, a
 # bounded wait, then a forced-stop fallback (scripts/run.sh stop).
-# TimeoutStopSec must cover the worst case: telnet probe 3s + session 10s +
-# podman wait 90s + podman stop 30s.
+# TimeoutStopSec must cover the worst case of the whole command, and the
+# command starts by contending for the ops lock: run.sh stop waits up to
+# LOCK_WAIT_SECS (120s in scripts/run.sh) for a concurrent backup, restore or
+# install-only to finish before the graceful stop even begins. 180 covered the
+# stop alone (telnet probe 3s + session 10s + podman wait 90s + podman stop
+# 30s), so a stop that queued behind the nightly backup ran out of budget
+# mid-save and systemd killed the save path, the one outcome this unit exists
+# to prevent. 300 covers lock wait plus the stop.
 ExecStop=%h/7dtd-server/scripts/run.sh stop
-TimeoutStopSec=180
+TimeoutStopSec=300
 
 [Install]
 WantedBy=default.target

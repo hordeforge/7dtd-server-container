@@ -190,6 +190,19 @@ coverage:
 	rm -rf coverage
 	# Direct exec (not `bash script`): kcov traces the shebang interpreter;
 	# through an extra bash layer it produces an empty report.
+	# One --clean, for the first run only. A second one wipes the counts the
+	# first suite just recorded, so the badge measured the fuzz harness alone
+	# and the unit suite contributed nothing to the published number.
 	kcov --clean --include-pattern=lib-env.sh coverage ./scripts/test_lib_env.sh
-	kcov --clean --include-pattern=lib-env.sh coverage ./scripts/test_fuzz_env.sh
-	find coverage -name cobertura.xml | head -1 | xargs -I{} cp {} coverage.cobertura.xml
+	kcov --include-pattern=lib-env.sh coverage ./scripts/test_fuzz_env.sh
+	# Exactly one report, or say so. Two reports mean kcov did not merge the
+	# two runs, and taking whichever the directory order returned first would
+	# publish a number that measures half the suites and reads like the whole.
+	# Naming the paths beats publishing one at random.
+	@reports=$$(find coverage -name cobertura.xml); \
+	 lines=$$(printf '%s\n' "$$reports" | grep -c .); \
+	 if [ "$$lines" -ne 1 ]; then \
+	   echo "FATAL: kcov produced $$lines cobertura reports under coverage/ ($${reports:-none}); the two suites were not measured as one run, so there is no single coverage number to publish" >&2; \
+	   exit 1; \
+	 fi; \
+	 printf '%s\n' "$$reports" | xargs -I{} cp {} coverage.cobertura.xml

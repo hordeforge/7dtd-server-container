@@ -105,6 +105,28 @@ check(
     "kcov not found on PATH" in MAKEFILE,
 )
 
+# Both bash suites are measured in one kcov run. A --clean on the second run
+# wipes the counts the first recorded, so the published badge would cover the
+# fuzz harness alone while reading as the whole; and a `head -1` over the
+# reports would publish whichever one the directory order found, which is a
+# number nobody can trace.
+coverage = dry_run("coverage")
+kcov_runs = re.findall(r"^kcov .*$", coverage, re.MULTILINE)
+check(
+    "both bash suites are measured, in one kcov run",
+    len(kcov_runs) == 2
+    and "test_lib_env.sh" in kcov_runs[0]
+    and "test_fuzz_env.sh" in kcov_runs[1],
+)
+check(
+    "only the first kcov run cleans (a second --clean discards the first suite's counts)",
+    sum("--clean" in run for run in kcov_runs) == 1 and "--clean" in kcov_runs[0],
+)
+check(
+    "the coverage report is required to be unambiguous, not picked from several",
+    "head -1" not in coverage and "cobertura reports" in coverage,
+)
+
 # The venv is the interpreter the whole gate runs on, so which Python it gets
 # is a build property, not a contributor's local state. A .python-version bump
 # has to reach the venv, and the venv has to be built for that version rather
