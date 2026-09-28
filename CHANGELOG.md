@@ -61,6 +61,23 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   workflow records the document in the run summary for each tag. The output
   is generated, not committed, and carries no timestamp, so the same manifest
   regenerates it byte for byte.
+- **`run.sh status` says why a server is not serving.** The command was
+  `podman ps`, which answers "is the container there" and leaves an operator
+  who already knows that to go read the log by hand. It now prints the
+  container state, the verdict podman recorded, the health log podman keeps for
+  the probe (which names the port that stopped answering), and the last 20
+  timestamped log lines whenever the container is stopped or running but not
+  healthy. A container podman has no verdict for reads `health: unknown`
+  rather than being reported unhealthy. Still read-only.
+- **Severity is a field on every line the entrypoint writes.** `info`, `warn`
+  and `fatal` moved out of the message prose and into `level=`, so the stream
+  can be filtered (`grep level=warn`) without pattern matching, and the
+  entrypoint gained a `warn` helper so a diagnostic never rides the progress
+  stream. The last entrypoint line now names the game log before `exec`.
+- **A failed health probe says why.** `health_check` exited nonzero in
+  silence, so the health log podman keeps for each probe was empty and
+  `unhealthy` arrived with no cause anywhere; it now names the port it probed
+  and the bound it exceeded (a passing probe still prints nothing).
 - **A scheduled readability check on the save archives.** A backup that exited
   0 is a claim about the file it wrote that day, not proof the file is still
   good; a truncated off-host copy, a dropped tail or an archive nobody pruned

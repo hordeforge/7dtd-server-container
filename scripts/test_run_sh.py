@@ -140,6 +140,13 @@ with open(os.environ["STUB_LOG"], "ab") as log:
     log.write(b"\\0".join(a.encode("utf-8") for a in argv) + b"\\0\\0")
 if "ps" in argv:
     sys.stdout.write(os.environ.get("STUB_PS_OUTPUT", ""))
+if "inspect" in argv:
+    if "Health.Log" in " ".join(argv):
+        sys.stdout.write(os.environ.get("STUB_HEALTHLOG_OUTPUT", ""))
+    else:
+        sys.stdout.write(os.environ.get("STUB_INSPECT_OUTPUT", ""))
+if "logs" in argv:
+    sys.stdout.write(os.environ.get("STUB_LOGS_OUTPUT", ""))
 if "--env-file" in argv:
     src = argv[argv.index("--env-file") + 1]
     shutil.copy2(src, os.environ["STUB_SNAPSHOT"])
@@ -2204,6 +2211,75 @@ with tempfile.TemporaryDirectory() as tmp:
     check("the queued backup succeeds once the lock is free", waiter.returncode == 0)
     check("the queued backup says what it waited for", b"waiting:" in err)
     check("the queued backup wrote its archive", len(list(backups.iterdir())) == 1)
+
+# `status` is the command an operator runs during an incident, and `podman ps`
+# alone answers "is the container there": a server that is up but no longer
+# serving needs the verdict podman recorded and the last thing the container
+# said, in the same report. Each case below is one state that has to be
+# distinguishable from the others, including the two a collapsed report would
+# merge ("no verdict" and "unhealthy").
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    make_sandbox(tmpdir)
+    install_podman_stub(tmpdir, PODMAN_STUB)
+    run_sh = tmpdir / "scripts" / "run.sh"
+    ps_line = f"{NAME}  healthy-untested\n"
+    tail_line = "[entrypoint ts=2026-09-28T04:17:03Z boot=1] FATAL: boom\n"
+
+    def status_with(
+        inspect: str, health_log: str = "", logs: str = ""
+    ) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.run(
+            [str(run_sh), "status"],
+            env=stub_env(
+                tmpdir,
+                STUB_PS_OUTPUT=ps_line,
+                STUB_INSPECT_OUTPUT=inspect,
+                STUB_HEALTHLOG_OUTPUT=health_log,
+                STUB_LOGS_OUTPUT=logs,
+            ),
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+
+    proc = status_with("running healthy")
+    check(
+        "a serving container reports its state and stops there",
+        proc.returncode == 0
+        and ps_line in proc.stdout.decode()
+        and b"FATAL" not in proc.stderr
+        and b"last log lines" not in proc.stderr,
+    )
+    probe_reason = "FAIL: telnet console not answering on 127.0.0.1:8087 (probe exit 124)\n"
+    proc = status_with("running unhealthy", health_log=probe_reason, logs=tail_line)
+    report = proc.stdout.decode() + proc.stderr.decode()
+    check(
+        "an unhealthy container names the failing probe and tails its log",
+        proc.returncode == 0
+        and "not answering on 127.0.0.1:8087" in report
+        and tail_line in report,
+    )
+    proc = status_with("exited (1) 2 minutes ago", logs=tail_line)
+    report = proc.stdout.decode() + proc.stderr.decode()
+    check(
+        "a stopped container tails its last log lines",
+        proc.returncode == 0 and "state: exited" in report and tail_line in report,
+    )
+    # A container podman has no verdict for is not the same answer as an
+    # unhealthy one: it says so, and it does not claim a failure it cannot see.
+    proc = status_with("")
+    report = proc.stdout.decode() + proc.stderr.decode()
+    check(
+        "a container with no readable verdict is reported as unknown, not unhealthy",
+        proc.returncode == 0 and "health: unknown" in report and "last log lines" not in report,
+    )
+    # A read-only report stays read-only: no stop, no rm, no restart.
+    verbs = [rec[0] for rec in stub_invocations(tmpdir / "podman-argv.log") if rec]
+    check(
+        f"status mutates nothing (verbs: {sorted(set(verbs))})",
+        set(verbs) <= {b"ps", b"inspect", b"logs"},
+    )
 
 exit_status()
 print("run.sh secret-transport and build contract OK")

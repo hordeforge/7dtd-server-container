@@ -21,14 +21,25 @@ USERDATA_DIR=/root/.local/share/7DaysToDie
 # one grep groups a boot. Pinned key=value so a log parser can split the
 # fields without pattern-matching the message.
 BOOT_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
-log() {
-  printf '[entrypoint ts=%s boot=%s] %s\n' \
-    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$BOOT_ID" "$*"
+# level= is a field, not a word in the message: the three severities are the
+# whole vocabulary of this stream, and a parser (or `grep level=warn`) has to
+# pick them out without pattern-matching prose. A "WARN:" prefix inside the
+# message cannot be told from a boot step that merely quotes the word, and
+# FATAL was the only severity that stood out by its position in the line.
+log_at() { # level message...
+  local level="$1"
+  shift
+  printf '[entrypoint ts=%s boot=%s level=%s] %s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$BOOT_ID" "$level" "$*"
 }
+log() { log_at info "$@"; }
+# A warning is a diagnostic, not progress: stdout is the boot's progress stream
+# and the game's own output follows it on the same fd, so warnings go to stderr
+# where they cannot be read as a step that completed.
+warn() { log_at warn "$@" >&2; }
 
 fatal() {
-  printf '[entrypoint ts=%s boot=%s] FATAL: %s\n' \
-    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$BOOT_ID" "$*" >&2
+  log_at fatal "FATAL: $*" >&2
   exit 1
 }
 
@@ -166,7 +177,7 @@ seed_admin_file() {
       # >&2, like every other warning here: a WARN is a diagnostic, and
       # log()'s stdout is where the boot's progress lines go. sync_mods'
       # missing-Harmony warning is the same shape.
-      log "WARN: WEBADMIN_PASSWORD set but serveradmin.xml already exists in $USERDATA_DIR/Saves; seed skipped (delete that file to re-seed)" >&2
+      warn "WEBADMIN_PASSWORD set but serveradmin.xml already exists in $USERDATA_DIR/Saves; seed skipped (delete that file to re-seed)"
     fi
     return 0
   fi
@@ -281,7 +292,7 @@ sync_mods() {
   done
   shopt -u dotglob nullglob
   if [[ ! -d "$GAME_DIR/Mods/0_TFP_Harmony" ]]; then
-    log "WARN: 0_TFP_Harmony not present in depot Mods; C# mods will not load" >&2
+    warn "0_TFP_Harmony not present in depot Mods; C# mods will not load"
   fi
 }
 
@@ -301,6 +312,12 @@ seed_admin_file
 sync_mods
 
 cd "$GAME_DIR"
+# The last line the entrypoint writes. Everything after it on the container
+# stream is the game's own output, which carries no boot id: without this
+# marker a `podman logs` reader cannot tell where the harness stopped and the
+# game started, and the game log's own path is named here so the two streams
+# can be read side by side after an incident.
+log "starting 7DaysToDieServer.x86_64 (game log: $USERDATA_DIR/Logs/output.log)"
 exec ./7DaysToDieServer.x86_64 \
   -logfile "$USERDATA_DIR/Logs/output.log" \
   -quit -batchmode -nographics -dedicated \

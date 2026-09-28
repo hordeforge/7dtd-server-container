@@ -639,9 +639,21 @@ request_telnet() { # reply_var command timeout_secs
 # depends on a password the probe never sends: telnet_probe only opens a TCP
 # connect, so the password never leaves the container on this path.
 health_check() { # timeout_seconds (default 5)
-  local timeout_secs="${1:-5}"
+  local timeout_secs="${1:-5}" rc=0
   init_telnet_port
-  telnet_probe "$TELNET_PORT" "$timeout_secs"
+  if telnet_probe "$TELNET_PORT" "$timeout_secs"; then
+    return 0
+  else
+    rc=$?
+  fi
+  # A probe that fails silently records an empty line in the health log podman
+  # keeps, so "unhealthy" arrives with no reason anywhere: an operator cannot
+  # tell a wedged game from a wrong port from a probe that never ran. One line
+  # naming the port, the budget, and the probe's own exit status (124 when the
+  # connect outran the bound) is what `run.sh status` prints to close that gap.
+  # stderr, so a passing probe still writes nothing at all.
+  echo "FAIL: telnet console not answering on 127.0.0.1:$TELNET_PORT within ${timeout_secs}s (probe exit $rc)" >&2
+  return "$rc"
 }
 
 # MD5 hex digest of stdin, printed bare. md5sum(1) is GNU coreutils and does

@@ -73,10 +73,12 @@ Workspace root guide: [`hordeforge/.github` AGENTS.md](https://github.com/hordef
 11. **Threat-model references name files and functions, not line numbers.**
     Line pins in `docs/THREAT_MODEL.md` rotted within five commits; only
     `config/serverconfig.tmpl.xml` (stock TFP content) keeps line numbers.
-12. **The container's own output goes through `log`/`fatal`.** Both stamp
-    `ts=<UTC>` and `boot=<id>`; that stamped shape is what
-    `scripts/test_entrypoint_boot.py` parses, so a boot step that reports
-    itself with a bare `echo` breaks the one record a failed boot leaves.
+12. **The container's own output goes through `log`/`warn`/`fatal`.** All
+    three stamp `ts=<UTC>`, `boot=<id>` and `level=<severity>`; that stamped
+    shape is what `scripts/test_entrypoint_boot.py` parses, so a boot step
+    that reports itself with a bare `echo` breaks the one record a failed boot
+    leaves. Severity is the field, never a prefix inside the message, and
+    `warn` (not `log ... >&2`) is what a diagnostic uses.
 
 ## Operations (on the server host)
 
