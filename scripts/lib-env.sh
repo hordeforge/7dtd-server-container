@@ -87,6 +87,46 @@ load_env_file() {
   done < "$1"
 }
 
+# Install src at dst as a full copy, skipping the write when the two trees
+# are already identical. Callers pass absolute paths.
+#
+# Every deploy and every container boot copies whole mod trees (EfficientServer,
+# the APM bridge, BotMod) whose combined size is in the tens of megabytes, and
+# a redeploy that changed no mod, or a --restart unless-stopped recovery that
+# re-syncs the same bind-mounted /mods, is the common case. Deleting and
+# rewriting those bytes every time is pure disk write amplification on the boot
+# path; the comparison below reads both trees and writes nothing, so an
+# unchanged boot costs a read pass and no writes at all.
+#
+# diff -r -q compares content, not just size and mtime, and reports a
+# destination that gained, lost, or changed an entry, so a skipped copy is
+# always a destination already equal to the source. diff(1) comes from
+# diffutils, which the container image and the Linux and macOS workstations
+# all ship; where it is missing the copy runs unconditionally, the behavior
+# this helper replaced.
+#
+# Atomicity is the caller's contract and lives here: the copy lands in a
+# hidden sibling (missed by the staging scripts' `.*.tmp.*` sweep and by the
+# entrypoint's copy loop) and is renamed into place, so a cp killed midway
+# (disk full, Ctrl-C, container killed) never leaves a half-written mod dir.
+# Returns nonzero when the copy fails, with no staging entry left behind; the
+# caller owns the message, since each one names a different operation.
+sync_tree() { # src dst
+  local src="$1" dst="$2" staging
+  if [[ -e "$dst" ]] && command -v diff >/dev/null 2>&1 && diff -r -q "$src" "$dst" >/dev/null 2>&1; then
+    return 0
+  fi
+  staging="${dst%/*}/.${dst##*/}.tmp.$$"
+  mkdir -p "${dst%/*}"
+  rm -rf "$staging"
+  if ! cp -a "$src" "$staging"; then
+    rm -rf "$staging"
+    return 1
+  fi
+  rm -rf "$dst"
+  mv "$staging" "$dst"
+}
+
 # Shared character policy for values that travel through double-quoted shell
 # strings in the ops scripts (telnet_session) and are rendered by sed into XML
 # attribute values (serverconfig.xml, serveradmin.xml; < is illegal there):

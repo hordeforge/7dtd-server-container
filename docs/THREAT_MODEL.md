@@ -77,8 +77,9 @@ Every row above was verified against the tree at the review date.
    password requires deleting the file first (`entrypoint.sh` `seed_admin_file`).
 5. **Build to runtime.** Sibling repo `dist/` outputs -> `stage_mods.sh`
    stages real copies into `mods-available/` and `mods/` -> entrypoint
-   `sync_mods` copies `/mods/.` into the depot `Mods/` dir
-   (`entrypoint.sh` `sync_mods`) -> .NET assemblies loaded in-process by the game
+   `sync_mods` syncs each `/mods` entry into the depot `Mods/` dir
+   (`entrypoint.sh` `sync_mods`, `scripts/lib-env.sh` `sync_tree`) -> .NET
+   assemblies loaded in-process by the game
    with full trust. No signature or pin check exists at any hop.
 6. **Steam CDN and base registry to depot.** `FROM ...steamcmd:latest`
    (`Containerfile` `FROM`) plus per-boot `app_update validate`: content integrity
@@ -242,8 +243,12 @@ binding behavior, seed behavior) all match their referenced implementations.
   (`README.md` Configuration), config mutation via `setgamepref`
   (`config/serverconfig.tmpl.xml:107`). This is why R1 ranks first.
 - **Host-local writer of `mods/`:** drops a DLL, waits for the next restart;
-  `sync_mods` copies it into the game (`entrypoint.sh` `sync_mods`). Survives
+  `sync_mods` syncs it into the game (`entrypoint.sh` `sync_mods`). Survives
   until the next staging run wipes non-owned names (`scripts/stage_mods.sh` `mods/` wipe).
+  A write into the depot `Mods/` dir itself does not outlive a boot either:
+  `sync_mods` sweeps every entry `/mods` does not stage, and `sync_tree`
+  replaces any staged entry that differs from `/mods` rather than leaving the
+  local edit in place.
 
 None of these were demonstrated against a live system; each is derived from
 the named code path.

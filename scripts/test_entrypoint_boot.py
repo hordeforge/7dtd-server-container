@@ -17,6 +17,10 @@ step up to the exec boundary:
              operator password and remove the stale minted record
   bad-tmpl   an unrendered placeholder fatal-exits AND leaves neither the
              half-rendered temp file nor any seeded output behind
+  sync-mods  the per-boot Mods sync: what /mods no longer stages is swept,
+             stock 0_TFP_Harmony survives, hidden /mods entries still reach
+             Mods, an edited staged mod propagates, and a mod whose content
+             did not change is not rewritten (its inode survives the boot)
 
 Each failed check prints a FAIL line; the process exits nonzero if any failed.
 """
@@ -287,6 +291,77 @@ with tempfile.TemporaryDirectory() as tmp:
             "boot never reached config render after steamcmd gave up",
             not (game / "serverconfig.xml").exists(),
         )
+
+# sync_mods: the per-boot Mods sync. The cases above run with /mods absent,
+# so they never enter the copy loop; this one points /mods at a sandbox and
+# truncates the entrypoint after sync_mods so each run is one boot's sync and
+# nothing else. The performance contract is pinned here alongside the
+# behavior: a mod whose content did not change keeps its inode, so the boot
+# proved it skipped the rewrite instead of deleting and copying it back.
+with tempfile.TemporaryDirectory() as tmp:
+    root, game, _userdata = make_sandbox(Path(tmp) / "sync-mods", None)
+    mods = root / "mods"
+    mods.mkdir()
+    game_mods = game / "Mods"
+    (game_mods / "0_TFP_Harmony").mkdir(parents=True)
+    (game_mods / "0_TFP_Harmony" / "0_TFP_Harmony.dll").write_text("stock", encoding="utf-8")
+    # A mod the host no longer stages must be swept on the next boot.
+    (game_mods / "OldMod").mkdir()
+    (game_mods / "OldMod" / "old.dll").write_text("stale", encoding="utf-8")
+
+    for mod_name, mod_marker in (("EfficientServer", "cfg"), ("BotMod", "bot")):
+        mod_conf = mods / mod_name / "Config"
+        mod_conf.mkdir(parents=True)
+        (mod_conf / "config.json").write_text(mod_marker, encoding="utf-8")
+    # The old `cp -a /mods/.` carried hidden entries through; keep that.
+    (mods / ".hidden").write_text("h", encoding="utf-8")
+
+    ep = root / "entrypoint.sh"
+    patched = ep.read_text(encoding="utf-8").replace("/mods", str(mods))
+    # Replace the boot body (mkdir onward, ending at the exec) with the one
+    # call under test.
+    body_at = patched.index('mkdir -p "$GAME_DIR" "$USERDATA_DIR/Logs"')
+    ep.write_text(patched[:body_at] + "sync_mods\n", encoding="utf-8")
+
+    first = run_entrypoint(root, {})
+    check("sync-only boot exits 0", first.returncode == 0)
+    if first.returncode != 0:
+        print(first.stderr.decode(errors="replace"), file=sys.stderr)
+    check("unstaged mod swept from the game's Mods", not (game_mods / "OldMod").exists())
+    check("stock 0_TFP_Harmony kept", (game_mods / "0_TFP_Harmony" / "0_TFP_Harmony.dll").exists())
+    check(
+        "staged mods copied into the game's Mods",
+        (game_mods / "EfficientServer" / "Config" / "config.json").read_text(encoding="utf-8")
+        == "cfg",
+    )
+    check("hidden /mods entry still propagated", (game_mods / ".hidden").exists())
+    check("sync left no staging litter in Mods", no_temp_files(game_mods))
+
+    bot_cfg = game_mods / "BotMod" / "Config" / "config.json"
+    inode = bot_cfg.stat().st_ino
+    second = run_entrypoint(root, {})
+    check("second sync-only boot exits 0", second.returncode == 0)
+    check(
+        "an unchanged mod is not rewritten on the next boot (inode kept)",
+        bot_cfg.stat().st_ino == inode,
+    )
+
+    # The skip must not be a blind no-op: a mod edited under /mods (the
+    # /api/perf toggle writes the EfficientServer config there) has to land.
+    (mods / "BotMod" / "Config" / "config.json").write_text("toggled", encoding="utf-8")
+    run_entrypoint(root, {})
+    check(
+        "an edited staged mod still propagates",
+        (game_mods / "BotMod" / "Config" / "config.json").read_text(encoding="utf-8") == "toggled",
+    )
+
+    shutil.rmtree(mods / "EfficientServer")
+    run_entrypoint(root, {})
+    check("a mod dropped from /mods is swept", not (game_mods / "EfficientServer").exists())
+    check(
+        "stock 0_TFP_Harmony survives the sweep",
+        (game_mods / "0_TFP_Harmony" / "0_TFP_Harmony.dll").exists(),
+    )
 
 if failed_checks:
     sys.exit(1)

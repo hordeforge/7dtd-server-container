@@ -60,36 +60,47 @@ for i in "${!NAMES[@]}"; do
   name="${NAMES[$i]}"
   src="${SRCS[$i]}"
   if [[ -d "$src" ]]; then
-    # Copy to a sibling temp name and rename (hidden, so it never matches
-    # the ls/globs below): a cp killed midway must not leave a half-written
-    # mod dir that later gets copied into mods/.
-    staging="$ROOT/mods-available/.${name}.tmp.$$"
-    rm -rf "$staging"
-    if ! cp -a "$src" "$staging"; then
-      rm -rf "$staging"
+    # sync_tree skips the copy when mods-available/$name is already identical
+    # to $src, which is the usual outcome of a redeploy that changed no mod,
+    # and stages through a hidden temp rename otherwise.
+    if ! sync_tree "$src" "$ROOT/mods-available/$name"; then
       echo "FATAL: failed to copy $src into mods-available/; check disk space and permissions" >&2
       exit 1
     fi
-    rm -rf "$ROOT/mods-available/$name"
-    mv "$staging" "$ROOT/mods-available/$name"
     echo "staged $name <- $src"
   else
     echo "WARN: missing $src; $name not staged" >&2
   fi
 done
 
-# The wipe keeps hidden files, but the up-front sweep above already removed
+# Remove what the enabled set no longer names, and nothing else, so a mod
+# enabled by hand survives only until the next staging run. Entries in NAMES
+# are left for the sync_tree calls below, which rewrite one only when its
+# content differs from mods-available/; wiping the whole tree first would
+# leave nothing to compare against and copy every mod on every run.
+# The sweep keeps hidden files, but the up-front sweep above already removed
 # any stale staging entries.
-rm -rf "$ROOT/mods/"*
+for d in "$ROOT/mods"/*/; do
+  [[ -d "$d" ]] || continue
+  name="${d%/}"
+  name="${name##*/}"
+  enabled=0
+  for wanted in "${NAMES[@]}"; do
+    if [[ "$name" == "$wanted" ]]; then
+      enabled=1
+      break
+    fi
+  done
+  if (( enabled == 0 )); then
+    rm -rf "$d"
+  fi
+done
 for name in "${NAMES[@]}"; do
   if [[ -d "$ROOT/mods-available/$name" ]]; then
-    staging="$ROOT/mods/.${name}.tmp.$$"
-    if ! cp -a "$ROOT/mods-available/$name" "$staging"; then
-      rm -rf "$staging"
+    if ! sync_tree "$ROOT/mods-available/$name" "$ROOT/mods/$name"; then
       echo "FATAL: failed to enable $name (copy into mods/ failed)" >&2
       exit 1
     fi
-    mv "$staging" "$ROOT/mods/$name"
   else
     echo "WARN: enabled mod $name not staged (missing in mods-available/); server will start without it" >&2
   fi

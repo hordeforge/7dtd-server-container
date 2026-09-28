@@ -42,18 +42,15 @@ if [[ -d mods-available ]]; then
     [[ -d "$d" ]] || continue
     name="$(basename "$d")"
     if [[ -d "mods-available/$name" ]]; then
-      # Copy to a sibling temp name and rename: a cp killed midway (disk
-      # full, Ctrl-C) must never leave a half-written mod dir in mods/ for
-      # the entrypoint to copy into the game.
-      staging="mods/.${name}.tmp.$$"
-      rm -rf "$staging"
-      if ! cp -a "mods-available/$name" "$staging"; then
-        rm -rf "$staging"
+      # sync_tree stages through a hidden temp rename, so a cp killed midway
+      # (disk full, Ctrl-C) never leaves a half-written mod dir in mods/ for
+      # the entrypoint to copy into the game, and skips the write entirely
+      # when mods/ already matches mods-available/, which is the usual case
+      # for a restart that changed no mod.
+      if ! sync_tree "mods-available/$name" "mods/$name"; then
         echo "FATAL: failed to stage $name from mods-available/$name; keeping existing mods/" >&2
         exit 1
       fi
-      rm -rf "$d"
-      mv "$staging" "$d"
       echo "restaged $name from mods-available/"
     fi
   done

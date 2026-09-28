@@ -134,7 +134,7 @@ cd ../7dtd-server-container && ./scripts/deploy.sh --restart
 ```
 
 This stages the new build, rsyncs it to the server, and restarts the
-container (which re-copies `mods/` into the game's `Mods/`). On the server
+container (which syncs `mods/` into the game's `Mods/`). On the server
 itself, `./scripts/update_mods.sh` does the restage + restart step.
 
 ## Configuration

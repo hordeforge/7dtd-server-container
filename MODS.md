@@ -121,4 +121,6 @@ brain toggle, and the scoreboard (kills, deaths, score per bot). API:
    with `bot reload`).
 
 The container image is static; mods are always the bind-mounted `mods/` dir,
-re-copied into the game's `Mods/` by the entrypoint at every container start.
+synced into the game's `Mods/` by the entrypoint at every container start. A
+mod whose content did not change is left untouched rather than deleted and
+copied back.
