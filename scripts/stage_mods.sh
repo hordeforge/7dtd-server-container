@@ -172,6 +172,22 @@ for d in "$enabled_staging"/*/; do
   fi
 done
 rm -rf "$enabled_staging"
+# The swap above empties mods/ through a glob, and a glob has no word for a
+# dot entry: without this, a hidden mod (`.Foo`, which the entrypoint copies
+# into the game's Mods dir like any other) would outlive every staging run
+# while the header and MODS.md promise that nothing outside NAMES survives
+# one. This run's own staging dir is already gone by here. A concurrent run's
+# in-flight `.*.tmp.<pid>` stays, the same rule sweep_stale_staging uses, so
+# the second staging run is not deleted out from under the first.
+for entry in "$ROOT/mods"/.[!.]*; do
+  [[ -e "$entry" ]] || continue
+  entry_pid="${entry##*.}"
+  if [[ "${entry##*/}" == *.tmp.* && "$entry_pid" =~ ^[1-9][0-9]*$ ]] \
+    && kill -0 "$entry_pid" 2>/dev/null; then
+    continue
+  fi
+  rm -rf "$entry"
+done
 
 echo "enabled:  $(list_dir "$ROOT/mods")"
 echo "available: $(list_dir "$ROOT/mods-available")"

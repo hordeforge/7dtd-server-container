@@ -1429,23 +1429,21 @@ with tempfile.TemporaryDirectory() as tmp:
             f"BACKUP_KEEP={bad!r} is refused",
             proc.returncode == 1 and b"BACKUP_KEEP must be" in proc.stderr,
         )
-    # A leading zero is a plain count, not an octal literal: 08 must prune to
+    # A leading zero is a plain count, not an octal literal: 08 must report as
     # eight archives, not abort the run inside the prune arithmetic.
-    for padded_keep in ("08", "09", "0007", "007"):
+    for zero_padded in ("08", "09", "0007", "007"):
         proc = subprocess.run(
             [str(run_sh), "config"],
-            env={**env, "BACKUP_KEEP": padded_keep},
+            env={**env, "BACKUP_KEEP": zero_padded},
             capture_output=True,
             check=False,
             timeout=30,
         )
+        report = proc.stdout.decode()
+        want = rf"^BACKUP_KEEP\s+{int(zero_padded)}\s"
         check(
-            f"BACKUP_KEEP={padded_keep!r} is read in base 10",
-            proc.returncode == 0
-            and re.search(
-                rf"^BACKUP_KEEP\s+{int(padded_keep)}\s", proc.stdout.decode(), re.MULTILINE
-            )
-            is not None,
+            f"BACKUP_KEEP={zero_padded!r} is read in base 10",
+            proc.returncode == 0 and re.search(want, report, re.MULTILINE) is not None,
         )
     # The upper bound is enforced on the digit string, not on bash's
     # evaluation of it. A value wider than 2^64 wraps in bash's arithmetic
@@ -1582,11 +1580,12 @@ with tempfile.TemporaryDirectory() as tmp:
 
 
 # An archive that lists cleanly and then fails mid-extraction (here: an entry
-# nested under a path the archive already stored as a file) is the one
-# restore failure that has already removed the saves it was replacing. The
-# failure message must name the pre-restore snapshot holding them, because
-# that archive is the only copy and the operator cannot know its name
-# without reading backups/ by hand.
+# nested under a path the archive already stored as a file) is the failure a
+# preflight cannot catch: tar -tzf reads every entry, so the archive is
+# accepted and the refusal comes from tar itself part-way through the write.
+# Extraction lands in a staging dir first, so the world must still be in place
+# when it does, and no pre-restore snapshot is spent on a restore that never
+# reached the point of discarding anything.
 with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
     make_sandbox(tmpdir)
@@ -1616,14 +1615,21 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     out = proc.stdout + proc.stderr
     check("a half-extractable archive fails the restore", proc.returncode != 0)
-    snapshot_names = [p.name for p in backups.glob("7dtd-saves-*-prerestore*.tar.gz")]
     check(
-        "the failed restore left a pre-restore snapshot behind",
-        len(snapshot_names) == 1,
+        "the failed restore left the world in place",
+        (saves / "r.0.0.region").read_bytes() == b"current-world",
     )
     check(
-        "the extraction failure names that snapshot",
-        bool(snapshot_names) and snapshot_names[0].encode() in out,
+        "the failed restore spent no pre-restore snapshot",
+        not list(backups.glob("7dtd-saves-*-prerestore*.tar.gz")),
+    )
+    check(
+        "the failed restore says the world is unchanged",
+        b"is unchanged" in out,
+    )
+    check(
+        "the failed restore left no staging dir behind",
+        not list((tmpdir / "data" / "userdata").glob(".restore.tmp.*")),
     )
 
 

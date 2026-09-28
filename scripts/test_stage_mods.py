@@ -137,6 +137,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # so a blanket rm of the `.*.tmp.*` shape would delete a concurrent run's
     # tree between its cp and its rename.
     seeded_mod(mods, "OldMod", "stale")
+    seeded_mod(mods, ".SneakyMod", "hidden")
     dead_a = tmp_litter(mods, "EfficientServer", dead_pid())
     dead_b = tmp_litter(mods_available, "BotMod", dead_pid())
     live = tmp_litter(mods, "7dtd-server-apm-bridge", os.getpid())
@@ -161,6 +162,12 @@ with tempfile.TemporaryDirectory() as tmp:
         ),
     )
     check("stale hand-enabled mod was wiped", not (mods / "OldMod").exists())
+    # A dot entry is a mod the game loads all the same: the entrypoint copies
+    # /mods/. into the game's Mods dir. The swap glob cannot see it, so the
+    # run has to remove it explicitly or the header's promise ("everything in
+    # mods/ outside NAMES is wiped") is false for exactly the entry an
+    # operator would use to slip a mod past the enabled set.
+    check("a hidden mod in mods/ was wiped", not (mods / ".SneakyMod").exists())
     check("dead owners' staging litter swept from both directories", not dead_a.exists())
     check("dead owners' staging litter swept from mods-available too", not dead_b.exists())
     check(

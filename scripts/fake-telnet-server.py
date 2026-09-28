@@ -10,9 +10,10 @@ Usage: fake-telnet-server.py PORT OUTPUT_PATH [--hold]
 PORT 0 binds an ephemeral port and prints the chosen port on stdout (flushed)
 once listening; the test reads it instead of racing on a fixed port.
 
---hold accepts the first connection and then goes silent forever (never
-replies, never closes): the endpoint behind the bounded-session test, which
-asserts the client side ends itself at its timeout instead of hanging.
+--hold accepts the first connection and then goes silent without replying for
+HOLD_SECS, far longer than any client timeout the tests use, before closing:
+the endpoint behind the bounded-session test, which asserts the client side
+ends itself at its timeout instead of hanging.
 
 Framing is quiescence-based: input is collected until QUIET seconds pass with
 nothing new or the peer closes, so the exchange stays byte-exact no matter how

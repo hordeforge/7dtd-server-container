@@ -8,7 +8,10 @@
 # KEY=value lines only; values are taken literally (no variable expansion, no
 # command substitution, no word splitting); one matching pair of surrounding
 # quotes is stripped. The file is data, never code: nothing in it is eval'd.
-# Malformed lines are skipped, but each skip warns on stderr: a typo'd key
+# A well-formed line carrying a key this project does not configure is
+# refused outright by check_env_file_keys, before any value is applied; a
+# malformed line (one whose key is not a key) is skipped with a warning on
+# stderr. Either way the line is named: a typo'd key
 # (e.g. TELNET_PASSWD=) must not silently fall back to the default value with
 # no trace of why the operator's line had no effect.
 #

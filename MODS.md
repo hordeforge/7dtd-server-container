@@ -14,8 +14,8 @@ Toggle on the server host:
 ```bash
 cd ~/7dtd-server
 ./scripts/perf.sh status            # current state
-./scripts/perf.sh off               # disable + restart container
-./scripts/perf.sh on                # re-enable + restart container
+./scripts/perf.sh off               # disable, then restart the container
+./scripts/perf.sh on                # re-enable, then restart the container
 ./scripts/perf.sh measure           # bridge `apm status` snapshot via telnet
 ```
 
@@ -24,7 +24,9 @@ admin) and use the **Performance mod** card at the top of the APM panel; it
 flips the same config and restarts the server.
 
 The toggle flips `Enabled` in `mods/EfficientServer/Config/efficientserver.json`
-and restarts the container. To observe the difference, keep the world and
+and restarts the container. A command that asks for the state the config
+already holds writes nothing and does not restart, so repeating `perf.sh on`
+costs no world save. To observe the difference, keep the world and
 player count fixed, grab a `measure` (or an APM capture) with the mod on and
 again with it off, and compare frame times / section timings.
 

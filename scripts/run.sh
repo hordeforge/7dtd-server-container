@@ -13,8 +13,9 @@
 # SEVENDTD_IMAGE. SOURCE_DATE_EPOCH pins the image mtimes for a reproducible
 # `build`. A git-ignored .env in this directory fills unset variables;
 # variables already present in the environment win over it, defaults come last.
-# Exit codes: 0 success, 2 usage error (unknown command or --help misuse),
-# other nonzero failures as reported by the failing step.
+# Exit codes: 0 success (including -h/--help, which wins over any extra
+# word), 2 usage error (unknown command or a stray argument), 1 a failed
+# operation or a rejected configuration value.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -69,8 +70,9 @@ data/.ops.lock first, so the daily backup timer, a systemd-driven stop and an
 operator command cannot interleave. A command that finds the lock held waits
 up to 120s and then fails without touching anything.
 
-Exit codes: 0 success, 2 usage error (unknown command or a stray argument),
-1 a failed operation or a rejected configuration value.
+Exit codes: 0 success (including -h/--help, which wins over any extra word),
+2 usage error (unknown command or a stray argument), 1 a failed operation or
+a rejected configuration value.
 EOF
 }
 
@@ -215,30 +217,23 @@ BACKUP_KEEP_MAX=999999999
 # Backup retention varies per host (disk size, how far back an operator wants
 # to reach), so it is a validated config value with a committed default rather
 # than a constant. Same boundary treatment as the steamcmd switches: a
-# non-numeric or out-of-range value is refused instead of reaching the
-# arithmetic in archive_saves, where "abc" compares as 0 (prune every archive)
-# and a 0 would delete the archive just written. The rule itself lives in
-# check_backup_keep, called from check_env_values, so the `config` report
-# survives a rejected value the way it does for every other key it reports.
+# non-numeric, below-minimum, or out-of-range value is refused instead of
+# reaching the arithmetic in archive_saves, where "abc" compares as 0 (prune
+# every archive) and a 0 would delete the archive just written. The rule
+# itself lives in check_backup_keep, called from check_env_values, so the
+# `config` report survives a rejected value the way it does for every other key
+# it reports.
+#
+# The leading zeros go here, once, because bash arithmetic reads a zero-padded
+# literal as octal: 08 is not a number to (( )), it is a parse error whose
+# return status a following `if` reads as "the test passed", so a padded count
+# would slip past the range check and reach the prune with stderr noise as the
+# only sign. Stripping here (rather than 10# at each use) also keeps one
+# spelling for the config report, the validator, and the prune.
 KEEP_BACKUPS="${BACKUP_KEEP:-7}"
-# Read in base 10 here, in the main shell, not only inside check_backup_keep:
-# `config` runs the value rules in a subshell, so a padded count would be
-# reported in the form the run itself never uses. A leading zero is padding,
-# not an octal literal, and bash does not agree: (( 08 < 1 )) is an arithmetic
-# error, not a comparison, so the value would slip past the rules below and
-# then fail inside the prune arithmetic, leaving the excess unset and every
-# archive kept. A value the rules reject is left alone here and named by the
-# report.
-case "$KEEP_BACKUPS" in
-  '' | *[!0-9]*) ;;
-  *)
-    # An over-wide value is left as typed: 10# would wrap it to a count
-    # nobody set, and check_backup_keep refuses it by name instead.
-    if (( ${#KEEP_BACKUPS} <= BACKUP_KEEP_MAX_DIGITS )); then
-      KEEP_BACKUPS=$(( 10#$KEEP_BACKUPS ))
-    fi
-    ;;
-esac
+while [[ ${#KEEP_BACKUPS} -gt 1 && "$KEEP_BACKUPS" == 0* ]]; do
+  KEEP_BACKUPS="${KEEP_BACKUPS#0}"
+done
 
 NAME="${SEVENDTD_CONTAINER_NAME:-7dtd-server}"
 IMAGE="${SEVENDTD_IMAGE:-localhost/7dtd-server:latest}"
@@ -306,9 +301,20 @@ apply_steamcmd_defaults
 # STEAMCMD_UPDATE=true must fail here instead of silently disabling the per-boot
 # depot validation, and an unsafe or missing password must fail on the host,
 # before a container starts.
+# The largest archive count worth keeping. Five digits is not a physical limit
+# on a disk, it is the point where the value stops being a retention choice
+# and is a mistyped number: arithmetic past it is also what makes the range
+# check unreliable, because a 64-bit (( )) silently wraps a wider value
+# instead of reporting it (99999999999999999999 reads as a negative number and
+# passes a ">= 1" test), and a wrapped count is what archive_saves would then
+# prune with.
+BACKUP_KEEP_MAX=99999
 check_backup_keep() {
-  local digits="$KEEP_BACKUPS"
-  case "$digits" in
+  # The value is compared as the stripped digit string it is, never as an
+  # arithmetic operand: leading zeros are already gone, so "0" is the only
+  # below-minimum value left, and the width test below is the one that keeps a
+  # number too wide for (( )) from ever reaching the prune.
+  case "$KEEP_BACKUPS" in
     ''|*[!0-9]*)
       echo "FATAL: BACKUP_KEEP must be numeric (got '$KEEP_BACKUPS')" >&2
       exit 1
@@ -317,21 +323,17 @@ check_backup_keep() {
   # Bound the digits before any arithmetic. bash reads an integer as 64-bit
   # and wraps a longer one silently, so 18446744073709551617 is 1 there: a
   # 20-digit value would reach the comparison as a small one and pass a
-  # ceiling no count could justify. This also keeps `(( ))` from aborting the
-  # whole run on the overflow error a value past the machine word
+  # ceiling no count could justify. The width test also keeps `(( ))` from
+  # aborting the whole run on the overflow error a value past the machine word
   # ("99999999999999999999") raises, which reads as a failed backup rather
-  # than a rejected value. Equal-or-fewer digits than the ceiling itself
-  # means both sides fit a machine word, so the numeric compare below is safe.
+  # than a rejected value. Equal-or-fewer digits than the ceiling itself means
+  # both sides fit a machine word.
+  if [[ "$KEEP_BACKUPS" == '0' ]]; then
+    echo "FATAL: BACKUP_KEEP must be at least 1 (got '$KEEP_BACKUPS')" >&2
+    exit 1
+  fi
   if (( ${#KEEP_BACKUPS} > ${#BACKUP_KEEP_MAX} )); then
     echo "FATAL: BACKUP_KEEP must be at most $BACKUP_KEEP_MAX (got '$KEEP_BACKUPS')" >&2
-    exit 1
-  fi
-  if (( KEEP_BACKUPS > BACKUP_KEEP_MAX )); then
-    echo "FATAL: BACKUP_KEEP must be at most $BACKUP_KEEP_MAX (got '$KEEP_BACKUPS')" >&2
-    exit 1
-  fi
-  if (( KEEP_BACKUPS < BACKUP_KEEP_MIN )); then
-    echo "FATAL: BACKUP_KEEP must be at least $BACKUP_KEEP_MIN (got '$KEEP_BACKUPS')" >&2
     exit 1
   fi
 }

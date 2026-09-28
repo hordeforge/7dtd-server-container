@@ -96,10 +96,10 @@ fi
 # server host (.env travels on purpose so the server-side scripts render and
 # validate the same values). The .scratch* pattern also covers scratch files
 # dropped beside the directory (e.g. .scratch_<name>.sh copies kept for
-# reference). Quoted because the pattern must reach rsync verbatim: unquoted,
-# the shell expands it against the caller's cwd first, so a deploy run from a
-# directory that happens to hold .scratch passes a narrower exclude than the
-# one this script documents.
+# reference). Every pattern is quoted so it reaches rsync verbatim: unquoted,
+# the shell expands it against the working directory before rsync sees it, so
+# a repo holding a `.scratch/` directory sent the literal name `.scratch`
+# instead of the pattern and the scratch tree rode along to the server host.
 # --delay-updates stages every updated file in the receiver's .~tmp~ directory
 # and renames it into place only once the whole transfer finished, so a
 # dropped connection or an rsync killed mid-run cannot leave the server host
@@ -109,15 +109,15 @@ fi
 # revisions.
 rsync_rc=0
 rsync -a --delete --delay-updates --timeout=60 -e "ssh -o ConnectTimeout=10" \
-  --exclude .git \
-  --exclude data \
-  --exclude backups \
-  --exclude .mypy_cache \
-  --exclude .ruff_cache \
-  --exclude .venv \
-  --exclude __pycache__ \
-  --exclude coverage \
-  --exclude coverage.cobertura.xml \
+  --exclude '.git' \
+  --exclude 'data' \
+  --exclude 'backups' \
+  --exclude '.mypy_cache' \
+  --exclude '.ruff_cache' \
+  --exclude '.venv' \
+  --exclude '__pycache__' \
+  --exclude 'coverage' \
+  --exclude 'coverage.cobertura.xml' \
   --exclude '.scratch*' \
   "$ROOT/" "${SSH_USER}@${HOST}:${DEST_DIR}/" || rsync_rc=$?
 # rsync --delete applies deletions as it goes, so a failed transfer can still

@@ -128,12 +128,15 @@ printf 'DUP=first\nDUP=second\nEMPTYQ=""\nHASH=a#b\nCRVAL=abc\r\n' > "$tmp/corne
   fi
   echo "loader literal corners OK"
 )
-# Malformed lines are skipped, but every skip must be visible: a typo'd key
-# (e.g. TELNET_PASSWD=) would otherwise fall back to the shared default with
-# no trace of why the operator's line had no effect. Warnings name the key's
-# first word and the line number, never the line: a malformed line can carry a
-# secret value in full ('TELNET_PASSWORD hunter2'), so echoing it would put the
-# password in the log of every script that loads the file.
+# Malformed lines are skipped, but every skip must be visible: a key that is
+# not a key (1BAD=, BAD-KEY=) would otherwise fall back to the shared default
+# with no trace of why the operator's line had no effect. A well-formed but
+# unknown key is the other case and is refused outright, by
+# check_env_file_keys rather than by the loader, so it is not in this file.
+# Warnings name the key's first word and the line number, never the line: a
+# malformed line can carry a secret value in full ('TELNET_PASSWORD hunter2'),
+# so echoing it would put the password in the log of every script that loads
+# the file.
 printf 'GOOD=kept\n1BAD=x\nBAD-KEY=y\nNOEQUALS\n' > "$tmp/malformed.env"
 (
   cd "$tmp"
