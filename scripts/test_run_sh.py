@@ -1407,8 +1407,10 @@ with tempfile.TemporaryDirectory() as tmp:
     (tmpdir / ".env").unlink()
 
     # BACKUP_KEEP is a validated config value: a bad one fails before the run
-    # does anything, instead of reaching the prune arithmetic.
-    for bad in ("abc", "0", "-1", "00", "99999999999999999999"):
+    # does anything, instead of reaching the prune arithmetic. 18446744073709551617
+    # is 2^64+1, which bash arithmetic wraps to 1 with no error: a bound tested
+    # only with (( )) accepts it as a retention of one archive.
+    for bad in ("abc", "0", "-1", "00", "99999999999999999999", "18446744073709551617"):
         proc = subprocess.run(
             [str(run_sh), "status"],
             env={**env, "BACKUP_KEEP": bad},

@@ -180,15 +180,34 @@ if [[ -f "$ROOT/.env" ]]; then
   load_env_file "$ROOT/.env"
 fi
 
+# The retention domain, as named constants rather than literals inside the
+# rules. The ceiling is far past any real archive count (a daily timer at that
+# value keeps more archives than the host has days of disk), and bounding it is
+# what keeps the value inside 64-bit arithmetic, which bash wraps silently.
+BACKUP_KEEP_MIN=1
+BACKUP_KEEP_MAX=999999999
+
 # Backup retention varies per host (disk size, how far back an operator wants
 # to reach), so it is a validated config value with a committed default rather
 # than a constant. Same boundary treatment as the steamcmd switches: a
-# non-numeric or below-minimum value is refused instead of reaching the
+# non-numeric or out-of-range value is refused instead of reaching the
 # arithmetic in archive_saves, where "abc" compares as 0 (prune every archive)
 # and a 0 would delete the archive just written. The rule itself lives in
 # check_backup_keep, called from check_env_values, so the `config` report
 # survives a rejected value the way it does for every other key it reports.
 KEEP_BACKUPS="${BACKUP_KEEP:-7}"
+# A leading zero is padding, not an octal literal, and bash does not agree:
+# (( 08 < 1 )) is an arithmetic error, not a comparison, so the value slipped
+# past the rules below and then failed inside the prune arithmetic, leaving
+# the excess unset and every archive kept. Strip the padding here, in the main
+# shell, so the value the report prints, the check accepts and the prune
+# subtracts are one number. A non-numeric value is left alone so
+# check_backup_keep can name what the operator actually wrote.
+normalize_backup_keep() {
+  KEEP_BACKUPS="${KEEP_BACKUPS#"${KEEP_BACKUPS%%[!0]*}"}"
+  KEEP_BACKUPS="${KEEP_BACKUPS:-0}"
+}
+normalize_backup_keep
 
 NAME="${SEVENDTD_CONTAINER_NAME:-7dtd-server}"
 IMAGE="${SEVENDTD_IMAGE:-localhost/7dtd-server:latest}"
@@ -263,8 +282,19 @@ check_backup_keep() {
       exit 1
       ;;
   esac
-  if (( KEEP_BACKUPS < 1 )); then
-    echo "FATAL: BACKUP_KEEP must be at least 1 (got '$KEEP_BACKUPS')" >&2
+  # Bound the digits before any arithmetic. bash reads an integer as 64-bit
+  # and wraps a longer one silently, so 18446744073709551617 is 1 there: a
+  # 20-digit value would reach the comparison as a small one and pass a
+  # ceiling no count could justify. The length test comes first and || stops
+  # the arithmetic from running on what it rejected, so the value handed to
+  # (( )) is at most as many digits as the ceiling itself.
+  if (( ${#KEEP_BACKUPS} > ${#BACKUP_KEEP_MAX} )) ||
+     (( KEEP_BACKUPS > BACKUP_KEEP_MAX )); then
+    echo "FATAL: BACKUP_KEEP must be at most $BACKUP_KEEP_MAX (got '$KEEP_BACKUPS')" >&2
+    exit 1
+  fi
+  if (( KEEP_BACKUPS < BACKUP_KEEP_MIN )); then
+    echo "FATAL: BACKUP_KEEP must be at least $BACKUP_KEEP_MIN (got '$KEEP_BACKUPS')" >&2
     exit 1
   fi
 }

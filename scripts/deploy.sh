@@ -97,8 +97,15 @@ fi
 # validate the same values). The .scratch* pattern also covers scratch files
 # dropped beside the directory (e.g. .scratch_<name>.sh copies kept for
 # reference).
+# --delay-updates stages every updated file in the receiver's .~tmp~ directory
+# and renames it into place only once the whole transfer finished, so a
+# dropped connection or an rsync killed mid-run cannot leave the server host
+# running a half-written script: the tree is the old one or the new one, never
+# a file that was cut off in the middle. Without it a failed push is not just
+# incomplete but mixed, and the run.sh that then boots it is the residue of two
+# revisions.
 rsync_rc=0
-rsync -a --delete --timeout=60 -e "ssh -o ConnectTimeout=10" \
+rsync -a --delete --delay-updates --timeout=60 -e "ssh -o ConnectTimeout=10" \
   --exclude .git \
   --exclude data \
   --exclude backups \
@@ -110,9 +117,10 @@ rsync -a --delete --timeout=60 -e "ssh -o ConnectTimeout=10" \
   --exclude coverage.cobertura.xml \
   --exclude .scratch* \
   "$ROOT/" "${SSH_USER}@${HOST}:${DEST_DIR}/" || rsync_rc=$?
-# rsync --delete applies deletions as it goes, so a failed transfer leaves the
-# server host with a partial tree (scripts, and possibly fewer mods). Name the
-# phase and the residue instead of letting the run die on rsync's own exit.
+# rsync --delete applies deletions as it goes, so a failed transfer can still
+# leave the server host with fewer files than it started with (--delay-updates
+# covers the contents of what is transferred, not the removals). Name the phase
+# and the residue instead of letting the run die on rsync's own exit.
 if (( rsync_rc != 0 )); then
   echo "FATAL: rsync of $ROOT/ to ${SSH_USER}@${HOST}:${DEST_DIR}/ failed (exit $rsync_rc); the tree there is partial -- re-run $0 before trusting the server host" >&2
   exit 1

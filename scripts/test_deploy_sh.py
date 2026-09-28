@@ -19,8 +19,8 @@ system directories, so the probe cannot accidentally see the host's timeout:
 
 Scenarios:
   plain       no --restart: staging runs, rsync runs once with the pinned
-              argv (--delete, --timeout, and the data/backups excludes), ssh
-              never does
+              argv (--delete, --delay-updates, --timeout, and the
+              data/backups excludes), ssh never does
   supervised  --restart with timeout on PATH: ssh runs under it, bound to
               300s, and the destination reaches ssh via stdin only
   degraded    --restart with neither timeout nor gtimeout: exit 0, WARN
@@ -110,10 +110,13 @@ EXPECTED_SSH_ARGV = [
 
 # The whole rsync argv is load-bearing, not just its last word: --delete with a
 # dropped --exclude data/backups would wipe server-owned saves and backup
-# archives, and a dropped --timeout=60 would leave a stalled transfer hanging.
+# archives, a dropped --delay-updates would let an interrupted push leave a
+# half-written script on the server host, and a dropped --timeout=60 would
+# leave a stalled transfer hanging.
 EXPECTED_RSYNC_ARGV = [
     b"-a",
     b"--delete",
+    b"--delay-updates",
     b"--timeout=60",
     b"-e",
     b"ssh -o ConnectTimeout=10",

@@ -103,7 +103,9 @@ jobs:
           # answers v43; the pin stays the SHA fetched above.
           git -C "$src" tag v43 FETCH_HEAD
           cmake -S "$src" -B "$build" -DCMAKE_BUILD_TYPE=Release
-          cmake --build "$build" --parallel 2
+          # No job-count cap: cmake sizes it from the runner's own core count,
+          # and the badge job pays this build on every push to main.
+          cmake --build "$build" --parallel
           sudo cmake --install "$build"
           kcov --version
       - run: make coverage

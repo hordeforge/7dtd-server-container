@@ -145,6 +145,11 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   the game re-read it. Repeating the same command used to cost a world save,
   a shutdown and a boot for no change.
 
+- **The coverage badge job builds kcov with the runner's own core count.** It
+  is compiled from source on every push to main (`--parallel 2` capped a
+  four-core runner at half its cores); the cap is gone and cmake sizes the
+  build itself.
+
 ### Fixed
 
 - **The quadlet unit tried to pull an image nobody publishes.** The image is
@@ -164,7 +169,25 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   of whatever the build environment happened to export. The `Containerfile`
   now sets `DEBIAN_FRONTEND=noninteractive` as a build `ARG` (not an `ENV`, so
   it does not survive into the runtime image) for that one layer.
-
+- **A `BACKUP_KEEP` with a leading zero passed validation and then broke the
+  prune.** `check_backup_keep` read the value with `(( ))`, where bash reads a
+  leading-zero literal as octal: `08` is an arithmetic error rather than a
+  comparison, so the `(( KEEP_BACKUPS < 1 ))` test failed closed and the value
+  was accepted, then `archive_saves` hit the same error inside
+  `excess=$(( ${#archives[@]} - KEEP_BACKUPS ))` and left the prune count
+  unset, keeping every archive. The value is now normalized to base 10 when it
+  is read, so `0007` is seven. The upper bound the docs promised is enforced
+  too, and it is tested before any arithmetic: bash reads an integer as 64-bit
+  and wraps a longer one silently, so `18446744073709551617` (2^64+1) reached
+  the ceiling check as `1` and was accepted as a retention of one archive.
+- **An interrupted `deploy.sh` push could leave the server host running a
+  half-written script.** The transfer wrote files in place, so a dropped
+  connection mid-file left a truncated `scripts/run.sh` behind and the next
+  boot ran it. The push now passes `--delay-updates`: rsync stages every
+  updated file in the receiver's `.~tmp~` directory and renames it into place
+  only once the transfer finished, so the tree there is the old one or the new
+  one. Deletions (`--delete`) still apply as they go, which the failure
+  message already says.
 - **The telnet helpers assumed GNU coreutils on every host that runs the ops
   scripts.** `telnet_session` and `telnet_probe` called `timeout(1)` directly,
   so on a macOS workstation, where that binary is coreutils-only and ships as
