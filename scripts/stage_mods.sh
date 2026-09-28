@@ -46,6 +46,8 @@ enabled set (EfficientServer, 7dtd-server-apm-bridge, BotMod) as real
 copies in mods/. Takes no arguments; everything in mods/ outside the
 enabled set is wiped on every successful run. To enable another mod
 persistently, add its name to NAMES in this script.
+
+Exit codes: 0 success, 2 usage error (a stray argument), 1 a failed stage.
 EOF
 }
 

@@ -233,10 +233,13 @@ with tempfile.TemporaryDirectory() as tmp:
     old_record = (userdata / "Saves" / ".webadmin-password").read_bytes()
     proc = run_entrypoint(root, {"WEBADMIN_PASSWORD": "operator-pass-1"})
     out2 = proc.stdout.decode(errors="replace")
+    err2 = proc.stderr.decode(errors="replace")
     check("second boot exits 0", proc.returncode == 0)
+    # The warning rides stderr, not the boot's stdout progress stream (same
+    # rule as every other WARN in these scripts).
     check(
         "seed skipped with a warning when WEBADMIN_PASSWORD cannot apply",
-        "seed skipped" in out2,
+        "seed skipped" in err2 and "seed skipped" not in out2,
     )
     check(
         "existing credential record untouched",

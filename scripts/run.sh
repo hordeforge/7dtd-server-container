@@ -56,6 +56,9 @@ SEVENDTD_IMAGE. SOURCE_DATE_EPOCH pins the image mtimes for a reproducible
 variables already present in the environment win over it, defaults come last.
 An unknown key in .env is refused. deploy.sh reads SEVENDTD_SERVER_HOST,
 SEVENDTD_SERVER_USER and SEVENDTD_SERVER_DIR from the environment.
+
+Exit codes: 0 success, 2 usage error (unknown command or a stray argument),
+1 a failed operation or a rejected configuration value.
 EOF
 }
 

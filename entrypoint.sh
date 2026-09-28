@@ -137,7 +137,10 @@ seed_admin_file() {
     # A password provided after the one-time seed cannot apply to the existing
     # file; say so instead of letting the operator value vanish silently.
     if [[ -n "${WEBADMIN_PASSWORD:-}" ]]; then
-      log "WARN: WEBADMIN_PASSWORD set but serveradmin.xml already exists in $USERDATA_DIR/Saves; seed skipped (delete that file to re-seed)"
+      # >&2, like every other warning here: a WARN is a diagnostic, and
+      # log()'s stdout is where the boot's progress lines go. sync_mods'
+      # missing-Harmony warning is the same shape.
+      log "WARN: WEBADMIN_PASSWORD set but serveradmin.xml already exists in $USERDATA_DIR/Saves; seed skipped (delete that file to re-seed)" >&2
     fi
     return 0
   fi

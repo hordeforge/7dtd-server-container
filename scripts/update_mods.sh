@@ -17,6 +17,9 @@ Restage enabled mods from mods-available/ (if present) and restart the
 container so the entrypoint re-syncs the game's Mods/ dir. No image
 rebuild: mods are bind-mounted from ./mods. Takes no arguments; the usual
 trigger is remote, `./scripts/deploy.sh --restart`.
+
+Exit codes: 0 success, 2 usage error (a stray argument), 1 a failed restage
+or restart.
 EOF
 }
 

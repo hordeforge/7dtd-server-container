@@ -12,6 +12,7 @@ usage: start.sh [-h|--help]
 Daily shortcut for scripts/run.sh start: recreate and start the container
 (graceful stop first). Takes no other arguments; a stray one is rejected
 there. scripts/run.sh --help has the full command list.
+Exit codes: 0 success, 2 usage error, 1 a failed start.
 EOF
     exit 0
     ;;

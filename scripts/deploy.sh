@@ -27,6 +27,9 @@ Stage mods, then rsync this project to ${SSH_USER}@${HOST}:${DEST_DIR}/.
 Env overrides: SEVENDTD_SERVER_HOST (default ${HOST}),
 SEVENDTD_SERVER_USER (default ${SSH_USER}),
 SEVENDTD_SERVER_DIR (default ${DEST_DIR}).
+
+Exit codes: 0 success, 2 usage error (bad flag or rejected target value),
+1 a failed deploy or restart step.
 EOF
 }
 

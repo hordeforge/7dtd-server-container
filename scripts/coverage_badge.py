@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""Render the line-coverage badge SVG from a Cobertura XML report."""
+"""Render the line-coverage badge SVG from a Cobertura XML report.
+
+Usage: coverage_badge.py [--help] COBERTURA_XML OUTPUT.svg
+
+COBERTURA_XML is the Cobertura report to read; OUTPUT.svg is the badge file
+to write (its previous contents are left untouched when the render fails).
+`--help` prints this text on stdout and exits 0, like every other CLI here.
+Exits 2 on a wrong operand count, 1 when the report or the output is
+unusable.
+"""
 
 from __future__ import annotations
 
@@ -34,6 +43,12 @@ def badge(pct: int, fill: str) -> str:
 
 
 def main(argv: list[str]) -> int:
+    # Help wins wherever it appears, like every common CLI parser and like
+    # check-config-xml.py, so a stray --help cannot be mistaken for a report
+    # path and answered with a parse error.
+    if any(a in ("-h", "--help") for a in argv[1:]):
+        print(__doc__.strip())
+        return 0
     if len(argv) != 3:
         print(f"usage: {argv[0]} COBERTURA_XML OUTPUT.svg", file=sys.stderr)
         return 2

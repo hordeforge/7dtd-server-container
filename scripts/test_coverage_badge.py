@@ -73,6 +73,18 @@ check("four operands exit 2", too_many == 2)
 usage = err.getvalue()
 check("usage line names both operands", "COBERTURA_XML" in usage and "OUTPUT.svg" in usage)
 
+# --help is a question, not an invocation: it must answer on stdout and exit
+# 0 wherever it appears, like every other CLI in this repo. Without the guard
+# a bare `coverage_badge.py --help` is read as a report path and answered with
+# a parse error on stderr under exit 1.
+help_out, help_err = io.StringIO(), io.StringIO()
+with contextlib.redirect_stdout(help_out), contextlib.redirect_stderr(help_err):
+    help_rc = coverage_badge.main(["coverage_badge", "--help"])
+check(
+    "--help exits 0 on stdout with nothing on stderr",
+    help_rc == 0 and "COBERTURA_XML" in help_out.getvalue() and help_err.getvalue() == "",
+)
+
 
 # Failure paths must exit 1 with a message naming the input, never a raw
 # traceback (the badge step runs unattended in CI; the operator needs the

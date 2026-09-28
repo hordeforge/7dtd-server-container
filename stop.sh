@@ -13,6 +13,7 @@ usage: stop.sh [-h|--help]
 Daily shortcut for scripts/run.sh stop: telnet save + shutdown, then a
 forced stop as fallback. Takes no other arguments; a stray one is rejected
 there. scripts/run.sh --help has the full command list.
+Exit codes: 0 success, 2 usage error, 1 a failed stop.
 EOF
     exit 0
     ;;

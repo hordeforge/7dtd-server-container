@@ -30,6 +30,9 @@ Toggle the EfficientServer (perf) mod and observe its effects.
 Observe the effects with:
   ./scripts/perf.sh measure   # bridge `apm status` snapshot via telnet
   APM web panel: http://<server>:8080
+
+Exit codes: 0 success, 2 usage error (unknown command or a stray argument),
+1 a failed operation or a rejected configuration value.
 EOF
 }
 
