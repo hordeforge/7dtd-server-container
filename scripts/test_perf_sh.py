@@ -28,34 +28,13 @@ Each failed check prints a FAIL line; the process exits nonzero if any failed.
 
 from __future__ import annotations
 
-import os
 import shutil
 import socket
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
-from harness import SCRIPTS, check, exit_status
-
-
-def resolved_bin_path(*bins: str) -> str:
-    """A PATH carrying the tools the scripts under test shell out to.
-
-    perf.sh runs through /usr/bin/env bash, so PATH must resolve sed, grep,
-    tail, and tr. Resolve those directories from the running host instead of
-    assuming a fixed /usr/bin:/bin, which is not where coreutils lives on
-    NixOS, a brew-only prefix, or a slim test image.
-    """
-    dirs: set[Path] = set()
-    for binary in bins:
-        found = shutil.which(binary)
-        if found is None:
-            print(f"FAIL: required binary not found on PATH: {binary}", file=sys.stderr)
-            sys.exit(1)
-        dirs.add(Path(found).parent)
-    return os.pathsep.join(str(d) for d in sorted(dirs))
-
+from harness import SCRIPTS, check, exit_status, resolved_bin_path
 
 SANDBOX_PATH = resolved_bin_path("bash", "sed", "grep", "tail", "tr", "ls")
 

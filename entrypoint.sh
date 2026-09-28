@@ -222,28 +222,27 @@ sync_mods() {
       rm -rf "$d"
     fi
   done
-  if [[ -d /mods ]]; then
-    # dotglob so hidden entries in /mods reach the game's Mods dir exactly as
-    # the `cp -a /mods/.` this replaced did; the host staging scripts sweep
-    # their own .*.tmp.* leftovers precisely because of that. nullglob keeps an
-    # empty /mods from expanding to the literal pattern.
-    #
-    # The stock depot copy is never overwritten: this dir is the game's own
-    # and is not staged from the host.
-    shopt -s dotglob nullglob
-    for d in /mods/*; do
-      name="${d##*/}"
-      case "$name" in
-        0_TFP_Harmony) continue ;;
-      esac
-      # Same named-failure treatment the host staging scripts give their
-      # copies: a bare cp error under set -e would abort the boot naming paths
-      # only, leaving the operator to guess which boot step failed.
-      sync_tree "$d" "$mods/$name" \
-        || fatal "sync_mods: failed to sync $d into $mods/$name"
-    done
-    shopt -u dotglob nullglob
-  fi
+  # dotglob so hidden entries in /mods reach the game's Mods dir exactly as
+  # the `cp -a /mods/.` this replaced did; the host staging scripts sweep
+  # their own .*.tmp.* leftovers precisely because of that. nullglob keeps a
+  # missing or empty /mods from expanding to the literal pattern, so a boot
+  # with no /mods mounted syncs nothing instead of the pattern itself.
+  #
+  # The stock depot copy is never overwritten: this dir is the game's own and
+  # is not staged from the host.
+  shopt -s dotglob nullglob
+  for d in /mods/*; do
+    name="${d##*/}"
+    case "$name" in
+      0_TFP_Harmony) continue ;;
+    esac
+    # Same named-failure treatment the host staging scripts give their
+    # copies: a bare cp error under set -e would abort the boot naming paths
+    # only, leaving the operator to guess which boot step failed.
+    sync_tree "$d" "$mods/$name" \
+      || fatal "sync_mods: failed to sync $d into $mods/$name"
+  done
+  shopt -u dotglob nullglob
   if [[ ! -d "$GAME_DIR/Mods/0_TFP_Harmony" ]]; then
     log "WARN: 0_TFP_Harmony not present in depot Mods; C# mods will not load" >&2
   fi

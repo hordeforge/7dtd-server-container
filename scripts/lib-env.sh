@@ -293,38 +293,23 @@ sweep_stale_staging() { # dir...
 # (so the MD5 the dashboard stores and the password an operator types agree,
 # with no NFC/NFD pair to normalize), and the rendered XML attribute is
 # well-formed in whatever encoding the game reads it as.
-printable_ascii_check() { # value; prints the rejection reason, or nothing
-  local LC_ALL=C
+reject_unsafe_value() { # name value
+  local name="$1" LC_ALL=C
   # Leading or trailing whitespace would not survive the trip through the
   # podman --env-file renderer in run.sh (its parser trims each line), so the
   # value the container sees would silently differ from the one validated
   # here; reject both edges up front. Interior whitespace is kept.
-  case "$1" in
+  case "$2" in
     [[:space:]]*|*[[:space:]])
-      printf 'whitespace'
-      return 0
+      echo "FATAL: $name must not start or end with whitespace" >&2
+      exit 1
       ;;
   esac
   # The pattern matches each forbidden character literally; the escaped quote
   # inside it is the only way to write a literal single quote in a pattern.
   # shellcheck disable=SC1003  # intentional literal-quote case pattern
-  case "$1" in
+  case "$2" in
     *'\'*|*'|'*|*'&'*|*"'"*|*'"'*|*'$'*|*'`'*|*'<'*|*'>'*|*[![:print:]]*)
-      printf 'charset'
-      return 0
-      ;;
-  esac
-}
-
-reject_unsafe_value() { # name value
-  local name="$1" reason
-  reason="$(printable_ascii_check "$2")"
-  case "$reason" in
-    whitespace)
-      echo "FATAL: $name must not start or end with whitespace" >&2
-      exit 1
-      ;;
-    charset)
       echo "FATAL: $name must be printable ASCII: no backslash, |, &, ', \", \$, backtick, <, >, control characters, or non-ASCII characters" >&2
       exit 1
       ;;
@@ -383,7 +368,7 @@ check_telnet_port() {
 apply_telnet_defaults() {
   if [[ -z "${TELNET_PASSWORD:-}" && "${ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD:-0}" == "1" ]]; then
     echo "WARN: TELNET_PASSWORD unset; falling back to the public lab default (opted in via ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD=1)." >&2
-    TELNET_PASSWORD=retest
+    TELNET_PASSWORD="$DEFAULT_TELNET_PASSWORD"
   fi
   TELNET_PORT="${TELNET_PORT:-$DEFAULT_TELNET_PORT}"
 }
@@ -405,7 +390,6 @@ check_telnet_env() {
     echo "FATAL: TELNET_PASSWORD unset. Set a private value in .env or the environment; the committed default is public and a set telnet password makes the game listen on every interface. Set ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD=1 only to run the lab on the public default." >&2
     exit 1
   fi
-  TELNET_PASSWORD="${TELNET_PASSWORD:-$DEFAULT_TELNET_PASSWORD}"
   TELNET_PORT="${TELNET_PORT:-$DEFAULT_TELNET_PORT}"
   reject_unsafe_value TELNET_PASSWORD "$TELNET_PASSWORD"
   check_telnet_port

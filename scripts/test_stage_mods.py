@@ -40,7 +40,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from harness import SCRIPTS, check, exit_status
+from harness import SCRIPTS, check, exit_status, resolved_bin_path
 
 # stage_mods.sh's SRCS array, keyed the way the script enables them.
 SIBLING_OF = {
@@ -51,22 +51,6 @@ SIBLING_OF = {
 NAMES = list(SIBLING_OF)
 
 WS_LINE = 'WS="$(cd "$ROOT/.." && pwd)"'
-
-
-# The scripts under test run through /usr/bin/env bash, so PATH must resolve
-# the tools they shell out to. Resolve those directories from the running host
-# instead of assuming a fixed /usr/bin:/bin, which is not where coreutils
-# lives on NixOS, brew-only prefixes, or a slim test image.
-def resolved_bin_path(*bins: str) -> str:
-    dirs: set[Path] = set()
-    for binary in bins:
-        found = shutil.which(binary)
-        if found is None:
-            print(f"FAIL: required binary not found on PATH: {binary}", file=sys.stderr)
-            sys.exit(1)
-        dirs.add(Path(found).parent)
-    return os.pathsep.join(str(d) for d in sorted(dirs))
-
 
 SANDBOX_PATH = resolved_bin_path("bash", "cp", "mv", "rm", "ls", "mkdir", "basename", "dirname")
 

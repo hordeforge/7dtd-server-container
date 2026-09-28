@@ -286,7 +286,6 @@ show_config() { # verdict
     # into KEEP_BACKUPS, and the container name/image into NAME/IMAGE).
     key="${entry%%=*}"
     var="${entry#*=}"
-    [[ "$var" == "$key" ]] && var="$key"
     case "$key" in
       *PASSWORD*)
         if [[ -z "${!key+x}" ]]; then
@@ -759,7 +758,6 @@ case "$COMMAND" in
   backup)       backup ;;
   restore)      restore "${2:-}" ;;
   logs)         podman logs -f "$NAME" ;;
-  config)       show_config ;;
   # Anchor the name filter: podman treats it as a regex, and unanchored it
   # would also list the $NAME-install pre-warm container.
   status)       podman ps -a --filter "name=^${NAME}$" ;;

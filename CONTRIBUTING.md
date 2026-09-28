@@ -48,7 +48,8 @@ and no em dashes, in commits, PR text, code or docs.
 
 A Python suite is `scripts/test_<thing>.py`: import the shared reporter from
 `scripts/harness.py` (`check(name, condition)` prints one line per pinned
-behavior, `exit_status()` fails the run), then `make test-one
+behavior, `exit_status()` fails the run, `resolved_bin_path(*bins)` builds the
+sandbox PATH a suite needs when it drives a shell script), then `make test-one
 SUITE=test_<thing>.py`. Bash behavior goes into `scripts/test_lib_env.sh` or
 the matching `scripts/test_<thing>.py` that drives a script through its real
 entry point. Every non-trivial function needs a case; a case that would only
