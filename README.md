@@ -345,10 +345,13 @@ Checking the backups before you need them:
 
 `verify-backup` runs the same preflight `restore` applies (readable gzip/tar,
 a `Saves/` payload, no entry outside the archive root) without restoring
-anything or stopping the server, and prints each archive's size and age. It
-exits 1 when an archive is unreadable or the newest one is older than three
-days, which means the backup schedule stopped running. The exit code of the
-`backup` run that wrote a file is not evidence the file is still good.
+anything or stopping the server, and prints one `OK:` line per verified
+archive with its size and age. Every refusal goes to stderr, so
+`./scripts/run.sh verify-backup | grep '^OK:'` lists only the archives a
+recovery can use. It exits 1 when an archive is unreadable or the newest one
+is older than three days, which means the backup schedule stopped running.
+The exit code of the `backup` run that wrote a file is not evidence the file
+is still good.
 
 Every command that writes `data/`, `backups/` or the container (`start`,
 `run`, `restart`, `install-only`, `stop`, `backup`, `restore`) takes one

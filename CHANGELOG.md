@@ -246,11 +246,6 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   caller and `base64` of an empty hex (the empty string) was written into
   `serveradmin.xml` as a password the dashboard would accept. The status is
   propagated now, and an empty digest is refused with the same loud failure.
-- **`deploy.sh` let the shell expand its own rsync exclude pattern.** The
-  `--exclude .scratch*` argument was unquoted, so a deploy run from a
-  directory that happens to hold a `.scratch*` entry replaced the pattern with
-  that filename and stopped excluding the scratch trees the pattern exists for.
-  It is quoted now.
 - **The `.env` fuzz harness asserted a predicate the lib no longer has.** The
   printable-ASCII rule moved into `reject_unsafe_value`, which exits instead of
   printing a reason, and the harness kept calling the old name. A bash
@@ -286,6 +281,17 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   and the health probe was still inside its 30-minute start period (no
   verdict at all). It now says the container is up, that nothing is serving
   yet, and where to watch it.
+- **`run.sh version` failed on a host whose environment was broken.** The
+  command cats one committed file, but it ran after the `.env` load and the
+  value rules, so a host with no `TELNET_PASSWORD` set was answered with
+  `FATAL: TELNET_PASSWORD unset` and no version at all. It now answers where
+  `--help` does, before any setup side effect, so "which build is this host
+  running" is a question a broken host can still answer.
+- **`verify-backup` reported its failures on stdout.** The `FAIL:` lines sat
+  beside the `OK:` lines a piped run collects, so `run.sh verify-backup | grep
+  '^OK:'` could not tell a healthy archive from a refusal. The refusals now go
+  to stderr with the rest of the diagnostics (the `reason above` they refer to
+  was already there), and stdout carries only verified archives.
 - **The quadlet unit tried to pull an image nobody publishes.** The image is
   built on the server host and is never pushed to a registry, but the unit
   carried no `Pull=`, so quadlet's `missing` default stayed quiet only while

@@ -1201,6 +1201,23 @@ with tempfile.TemporaryDirectory() as tmp:
         not data_dir.exists(),
     )
 
+    # `version` answers from the committed file alone, in the same place
+    # --help does: no .env load, no value rules, no data dir. A host whose
+    # environment is broken must still be able to say which build it runs.
+    (tmpdir / "VERSION").write_text("9.9.9\n", encoding="utf-8")
+    proc = subprocess.run(
+        [str(run_sh), "version"], env=broken_env, capture_output=True, check=False, timeout=30
+    )
+    check(
+        "version answers with a broken environment",
+        proc.returncode == 0 and proc.stdout == b"9.9.9\n" and proc.stderr == b"",
+    )
+    check("version created no runtime dirs", not data_dir.exists())
+    proc = subprocess.run(
+        [str(run_sh), "version", "9.9.9"], env=env, capture_output=True, check=False, timeout=30
+    )
+    check("version still rejects a stray argument", proc.returncode == 2)
+
     proc = subprocess.run(
         [str(run_sh), "stop", "--keep", "3"],
         env=env,
@@ -1703,10 +1720,6 @@ with tempfile.TemporaryDirectory() as tmp:
         broken.name.encode() in out and b"Saves is unchanged" in out,
     )
     check(
-        "the failed restore says the world is unchanged",
-        b"is unchanged" in out,
-    )
-    check(
         "the failed restore left no staging dir behind",
         not list((tmpdir / "data" / "userdata").glob(".restore.tmp.*")),
     )
@@ -1774,6 +1787,14 @@ with tempfile.TemporaryDirectory() as tmp:
         "the failed verify carries tar's own diagnostic",
         b"tar:" in out or b"gzip:" in out,
     )
+    # stdout is the verified-archive report; a refusal is a diagnostic and
+    # belongs on stderr, so a redirected run keeps its failures out of the
+    # data stream and `verify-backup | grep '^OK:'` counts only archives a
+    # recovery can use.
+    check(
+        "the failed verify reports its failures on stderr",
+        b"FAIL:" in proc.stderr and b"FAIL:" not in proc.stdout,
+    )
 
     # A named archive is verified on its own, so an operator can check one
     # copy without the rest of backups/.
@@ -1799,7 +1820,11 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     check(
         "verify-backup fails on a named archive that is not there",
-        proc.returncode == 1 and b"no such backup archive" in proc.stdout,
+        proc.returncode == 1 and b"no such backup archive" in proc.stderr,
+    )
+    check(
+        "a verify with nothing to report writes nothing to stdout",
+        proc.stdout == b"",
     )
 
     # A readable archive nobody has refreshed: the backup schedule is not

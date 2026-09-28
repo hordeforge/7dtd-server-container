@@ -53,8 +53,11 @@ Manage the 7dtd-server podman container; all runtime state lives in ./data
   verify-backup  check that the archives in backups/ are still readable
                  and restorable, without restoring one (no argument =
                  every archive, otherwise just the named one), and fail
-                 when the newest is older than the daily schedule allows
-  version        print the VERSION file (the canonical version home)
+                 when the newest is older than the daily schedule allows;
+                 one 'OK:' line per verified archive on stdout, every
+                 refusal on stderr
+  version        print the VERSION file (the canonical version home); answers
+                 without loading .env or validating any value, like --help
 
 Env overrides: TELNET_PASSWORD, TELNET_PORT, WEBADMIN_PASSWORD,
 STEAMCMD_UPDATE, STEAMCMD_ONLY, BACKUP_KEEP, SEVENDTD_CONTAINER_NAME,
@@ -98,6 +101,17 @@ require_command "$COMMAND" \
 case "$COMMAND" in
   restore|verify-backup) require_optional_arg usage "${@:2}" ;;
   *)       require_argc 0 usage "${2:-}" ;;
+esac
+
+# `version` cats one committed file and does nothing else, so it answers in the
+# same place --help does: before the .env load, the value rules and the data
+# dir. An operator asking a host which build it runs must not be answered with
+# a FATAL about a telnet password that has nothing to do with the question,
+# and `run.sh version` is how the release tag and the image label are compared.
+# The one canonical version home (REPOSITORY_STANDARDS.md section 8); the
+# release workflow refuses a tag that disagrees with it.
+case "$COMMAND" in
+  version) cat "$ROOT/VERSION"; exit 0 ;;
 esac
 
 # Is $NAME in the running set? podman's output is captured rather than piped
@@ -926,12 +940,16 @@ verify_backup() { # [archive]
   fi
   for archive in "${archives[@]}"; do
     if [[ ! -f "$archive" ]]; then
-      echo "FAIL: no such backup archive: $archive"
+      # Diagnostics on stderr, the verified archives on stdout, so
+      # `verify-backup | grep '^OK:'` counts what a recovery can actually use
+      # and a redirected run keeps its failures out of the data stream. The
+      # reason check_archive_payload prints above goes the same way.
+      echo "FAIL: no such backup archive: $archive" >&2
       failed=1
       continue
     fi
     if ! check_archive_payload "$archive"; then
-      echo "FAIL: $archive is not restorable (reason above); an incident today would not recover from it"
+      echo "FAIL: $archive is not restorable (reason above); an incident today would not recover from it" >&2
       failed=1
       continue
     fi
@@ -1091,9 +1109,8 @@ build_image() {
 
 case "$COMMAND" in
   build)        build_image ;;
-  # The one canonical version home (REPOSITORY_STANDARDS.md section 8); the
-  # release workflow refuses a tag that disagrees with it.
-  version)      cat "$ROOT/VERSION" ;;
+  # `version` is answered above, beside --help and before any setup side
+  # effect, so it never reaches this dispatcher.
   # Everything below mutates data/, backups/ or the container, so every one of
   # them serializes on the ops lock. The read-only commands (logs, status,
   # config, verify-backup) and the image build do not: they change nothing

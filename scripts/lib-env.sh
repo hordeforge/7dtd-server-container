@@ -340,23 +340,38 @@ sweep_stale_staging() { # dir...
 # (so the MD5 the dashboard stores and the password an operator types agree,
 # with no NFC/NFD pair to normalize), and the rendered XML attribute is
 # well-formed in whatever encoding the game reads it as.
-reject_unsafe_value() { # name value
-  local name="$1" LC_ALL=C
+# Why a value is refused, or nothing at all when it passes. The classifier the
+# error message is built on, split out so a rule can be asked about a value
+# without having it exit the calling shell (the seeded fuzz harness checks this
+# contract on every case it generates).
+printable_ascii_check() { # value; prints 'whitespace', 'charset', or nothing
+  local LC_ALL=C
   # Leading or trailing whitespace would not survive the trip through the
   # podman --env-file renderer in run.sh (its parser trims each line), so the
   # value the container sees would silently differ from the one validated
   # here; reject both edges up front. Interior whitespace is kept.
-  case "$2" in
-    [[:space:]]*|*[[:space:]])
-      echo "FATAL: $name must not start or end with whitespace" >&2
-      exit 1
-      ;;
+  case "$1" in
+    [[:space:]]*|*[[:space:]]) printf 'whitespace'; return 0 ;;
   esac
   # The pattern matches each forbidden character literally; the escaped quote
   # inside it is the only way to write a literal single quote in a pattern.
   # shellcheck disable=SC1003  # intentional literal-quote case pattern
-  case "$2" in
-    *'\'*|*'|'*|*'&'*|*"'"*|*'"'*|*'$'*|*'`'*|*'<'*|*'>'*|*[![:print:]]*)
+  case "$1" in
+    *'\'*|*'|'*|*'&'*|*"'"*|*'"'*|*'$'*|*'`'*|*'<'*|*'>'*|*[![:print:]]*) printf 'charset'; return 0 ;;
+  esac
+  printf ''
+}
+
+reject_unsafe_value() { # name value
+  local name="$1" reason
+  reason="$(printable_ascii_check "$2")"
+  case "$reason" in
+    '') ;;
+    whitespace)
+      echo "FATAL: $name must not start or end with whitespace" >&2
+      exit 1
+      ;;
+    *)
       echo "FATAL: $name must be printable ASCII: no backslash, |, &, ', \", \$, backtick, <, >, control characters, or non-ASCII characters" >&2
       exit 1
       ;;

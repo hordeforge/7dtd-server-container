@@ -53,9 +53,9 @@ Workspace root guide: [`hordeforge/.github` AGENTS.md](https://github.com/hordef
    `TELNET_PASSWORD` is required; the committed `retest` default is public and
    opt-in only, via `ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD=1` (same as the
    workspace lab). The webadmin password is minted at first seed when unset.
-   Secret values are printable ASCII, enforced by `reject_unsafe_value` with
-   its character tests under `LC_ALL=C` so the host and the container agree
-   whatever locale either runs under.
+   Secret values are printable ASCII, enforced by `printable_ascii_check`
+   under `LC_ALL=C` (`reject_unsafe_value` turns its answer into the refusal)
+   so the host and the container agree whatever locale either runs under.
 7. **No AI attribution, no em dashes** in shipped text.
 8. Version pin: mods are built for V3.2.0. If a newer depot build ships and
    mods fail to load, rebuild mods in the sibling repos, restage, redeploy.
