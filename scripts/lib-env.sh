@@ -85,6 +85,50 @@ list_dir() { # dir
   fi
 }
 
+# The complete set of keys a .env may carry, space separated. One owner so
+# the loader, the .env.example template, and the docs cannot disagree about
+# what this project configures. scripts/test_lib_env.sh fails when a key here
+# is missing from .env.example, and when .env.example documents a key that is
+# not here, so the two stay one list.
+ENV_FILE_KEYS="ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD BACKUP_KEEP \
+SEVENDTD_CONTAINER_NAME SEVENDTD_IMAGE SEVENDTD_SERVER_DIR \
+SEVENDTD_SERVER_HOST SEVENDTD_SERVER_USER STEAMCMD_ONLY STEAMCMD_UPDATE \
+TELNET_PASSWORD TELNET_PORT WEBADMIN_PASSWORD"
+
+# Reject a key this project does not configure, before any value is applied.
+# A misspelled key (TELNET_PORTT=9099) is otherwise a line the loader accepts
+# and every script ignores, so the operator's setting silently has no effect
+# and the shared default applies instead, which is the same invisible
+# misconfiguration the malformed-line warnings above exist to prevent. A hard
+# failure is the right verdict here: .env is per-deployment and git-ignored,
+# the message names the file and the offending key (never its value, which
+# for these keys is a secret), and the fix is deleting one line. Malformed
+# lines stay a warning (load_env_file already names them); a key that is
+# well formed but unknown is a config mistake, not a syntax slip.
+check_env_file_keys() { # file
+  local file="$1" line key
+  if [[ ! -r "$file" ]]; then
+    echo "FATAL: cannot read env file '$file'" >&2
+    exit 1
+  fi
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      ''|'#'*) continue ;;
+      'export '*) line="${line#'export '}" ;;
+    esac
+    case "$line" in *=*) ;; *) continue ;; esac
+    key="${line%%=*}"
+    # Same key-shape test load_env_file applies; an invalid key is its warning
+    # to raise, not an unknown-key failure.
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    case " $ENV_FILE_KEYS " in
+      *" $key "*) continue ;;
+    esac
+    echo "FATAL: $file: unknown key '$key'; this project configures only: $ENV_FILE_KEYS (see .env.example)" >&2
+    exit 1
+  done < "$file"
+}
+
 load_env_file() {
   local line key value q
   # An unreadable file would otherwise abort the caller with a bare redirect
@@ -321,23 +365,34 @@ check_telnet_port() {
   fi
 }
 
-# Fill unset TELNET_PORT with the committed lab default, apply the committed
-# lab default TELNET_PASSWORD only when the operator opted into it, then
-# enforce the value rules above. One owner of both the defaults and the
-# validate step so host scripts and the container entrypoint cannot drift
-# apart. Call after load_env_file where a .env is in play.
+# Fill the committed defaults for anything the environment and .env left
+# unset. Never fails, so a caller can ask what this host would actually run
+# without tripping the fail-fast rules below; init_telnet_env and
+# init_steamcmd_env are these fills plus their value rules.
 #
 # The lab default password is public (it ships in this repo), and a set
 # TelnetPassword makes the game listen for telnet on all interfaces, so a boot
 # that fell back to it would expose a console to everyone on the LAN. A telnet
 # password is full server control (shutdown, admin add, setgamepref), so the
 # public default is opt-in: without ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD=1 a
-# boot that would use it fails here, on the host, before any container starts,
-# and the entrypoint fails the same way when the unit pins no password. The
-# opt-in is a {0,1} domain pin like init_steamcmd_env's, so a typo like
-# ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD=true is refused instead of silently
-# meaning "no".
-init_telnet_env() {
+# boot that would use it fails in check_telnet_env, on the host, before any
+# container starts, and the entrypoint fails the same way when the unit pins
+# no password. The opt-in is a {0,1} domain pin like the steamcmd switches', so
+# a typo like ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD=true is refused instead of
+# silently meaning "no".
+apply_telnet_defaults() {
+  if [[ -z "${TELNET_PASSWORD:-}" && "${ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD:-0}" == "1" ]]; then
+    echo "WARN: TELNET_PASSWORD unset; falling back to the public lab default (opted in via ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD=1)." >&2
+    TELNET_PASSWORD=retest
+  fi
+  TELNET_PORT="${TELNET_PORT:-$DEFAULT_TELNET_PORT}"
+}
+
+# The fail-fast half: a required value present, a safe value in every
+# character class, a port in range. One owner of the value rules so host
+# scripts and the container entrypoint cannot drift apart. Call after
+# load_env_file where a .env is in play.
+check_telnet_env() {
   local allow="${ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD:-0}"
   case "$allow" in
     0|1) ;;
@@ -347,27 +402,44 @@ init_telnet_env() {
       ;;
   esac
   if [[ -z "${TELNET_PASSWORD:-}" ]]; then
-    if [[ "$allow" != "1" ]]; then
-      echo "FATAL: TELNET_PASSWORD unset. Set a private value in .env or the environment; the committed default is public and a set telnet password makes the game listen on every interface. Set ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD=1 only to run the lab on the public default." >&2
-      exit 1
-    fi
-    echo "WARN: TELNET_PASSWORD unset; falling back to the public lab default (opted in via ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD=1)." >&2
+    echo "FATAL: TELNET_PASSWORD unset. Set a private value in .env or the environment; the committed default is public and a set telnet password makes the game listen on every interface. Set ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD=1 only to run the lab on the public default." >&2
+    exit 1
   fi
   TELNET_PASSWORD="${TELNET_PASSWORD:-$DEFAULT_TELNET_PASSWORD}"
-  TELNET_PORT="${TELNET_PORT:-$DEFAULT_TELNET_PORT}"
   reject_unsafe_value TELNET_PASSWORD "$TELNET_PASSWORD"
   check_telnet_port
 }
 
-# Fill unset STEAMCMD_UPDATE/STEAMCMD_ONLY with the committed defaults, then
-# pin both to the documented {0,1} domain. Every reader compares the values
-# literally (run.sh forwards them via podman -e; the entrypoint tests == 1 /
-# == 0), so a natural spelling like STEAMCMD_UPDATE=true would silently mean
-# "skip depot validation on every boot": reject anything outside {0,1} up
-# front, the same boundary treatment init_telnet_env gives its values.
-init_steamcmd_env() {
+init_telnet_env() {
+  apply_telnet_defaults
+  check_telnet_env
+}
+
+# Fill unset TELNET_PORT with the committed lab default and enforce the value
+# rules. Split out of init_telnet_env so the container health probe can own a
+# port without the password rules: a probe authenticates nothing, so making
+# it depend on TELNET_PASSWORD (which init_telnet_env refuses to default
+# without the opt-in) fails every probe on a container started with no telnet
+# environment, which is exactly the quadlet unit's shape. One owner of the
+# default keeps the probe and the entrypoint on the same port.
+init_telnet_port() {
+  TELNET_PORT="${TELNET_PORT:-$DEFAULT_TELNET_PORT}"
+  check_telnet_port
+}
+
+# Fill unset STEAMCMD_UPDATE/STEAMCMD_ONLY with the committed defaults. Never
+# fails, for the same reason apply_telnet_defaults does not.
+apply_steamcmd_defaults() {
   STEAMCMD_UPDATE="${STEAMCMD_UPDATE:-1}"
   STEAMCMD_ONLY="${STEAMCMD_ONLY:-0}"
+}
+
+# Pin both switches to the documented {0,1} domain. Every reader compares the
+# values literally (run.sh forwards them via podman -e; the entrypoint tests ==
+# 1 / == 0), so a natural spelling like STEAMCMD_UPDATE=true would silently
+# mean "skip depot validation on every boot": reject anything outside {0,1} up
+# front, the same boundary treatment check_telnet_env gives its values.
+check_steamcmd_env() {
   local name value
   for name in STEAMCMD_UPDATE STEAMCMD_ONLY; do
     value="${!name}"
@@ -379,6 +451,11 @@ init_steamcmd_env() {
         ;;
     esac
   done
+}
+
+init_steamcmd_env() {
+  apply_steamcmd_defaults
+  check_steamcmd_env
 }
 
 # Single owner of the telnet wire exchange: open one /dev/tcp session to
@@ -441,19 +518,14 @@ request_telnet() { # reply_var command timeout_secs
 
 # Container health probe: is the game actually serving its telnet console
 # right now. Exits 0 when the endpoint accepts a connection, nonzero
-# otherwise. telnet_probe only opens a TCP connect, so the password never
-# leaves the container on this path.
-#
-# The port comes from the same default and the same check init_telnet_env
-# applies, but the password gate does not run here: the probe executes as a
-# bare `bash -c` inside the container, where a unit pinning no
-# TELNET_PASSWORD (the quadlet) leaves it unset, and init_telnet_env then
-# exits 1 on the unset password, so every healthy server would report
-# unhealthy forever.
+# otherwise. Sources its own port from init_telnet_port so a container started
+# with no telnet environment (the quadlet unit pins none) still probes the
+# port the entrypoint defaulted to, and so a probe never depends on a password
+# the probe never sends: telnet_probe only opens a TCP connect, so the
+# password never leaves the container on this path.
 health_check() { # timeout_seconds (default 5)
   local timeout_secs="${1:-5}"
-  TELNET_PORT="${TELNET_PORT:-$DEFAULT_TELNET_PORT}"
-  check_telnet_port
+  init_telnet_port
   telnet_probe "$TELNET_PORT" "$timeout_secs"
 }
 

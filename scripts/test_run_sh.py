@@ -1158,6 +1158,11 @@ with tempfile.TemporaryDirectory() as tmp:
 # SOURCE_DATE_EPOCH is the reproducible-builds.org stamp for that; a value podman
 # would reject must fail before the build rather than produce a half-stamped
 # image.
+#
+# `config` is the operator's view of the effective configuration: every value
+# the next start would use, where it came from, and no secret. It also has to
+# survive the misconfiguration it diagnoses, so a rejected value is a reported
+# verdict rather than the end of the report.
 with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
     install_podman_stub(tmpdir, PODMAN_STUB)
@@ -1205,6 +1210,98 @@ with tempfile.TemporaryDirectory() as tmp:
         rc != 0 and b"FATAL" in err and b"not-a-number" in err,
     )
     check("a malformed SOURCE_DATE_EPOCH never reaches podman", b"--timestamp" not in malformed)
+
+    env = stub_env(tmpdir)
+    # A .env that fills exactly one value: everything else must be reported as
+    # coming from the committed default, and the .env value from the file.
+    (tmpdir / ".env").write_text("SEVENDTD_IMAGE=localhost/from-env-file:tag\n", encoding="utf-8")
+
+    proc = subprocess.run(
+        [str(run_sh), "config"], env=env, capture_output=True, check=False, timeout=30
+    )
+    report = proc.stdout.decode()
+    check("config exits 0", proc.returncode == 0)
+    check(
+        "config reports the .env value and attributes it to the file",
+        "localhost/from-env-file:tag" in report and "(.env)" in report,
+    )
+    check(
+        "config reports the committed default",
+        "SEVENDTD_CONTAINER_NAME" in report and "(default)" in report,
+    )
+    check("config names the environment as the source", "(environment)" in report)
+    check(
+        "config never prints a secret value",
+        TELNET_PASSWORD not in report and "pass word 12" not in report,
+    )
+    check(
+        "config says an unset webadmin password is minted", b"minted at first seed" in proc.stdout
+    )
+    check(
+        "config reports no rejected value on a clean configuration",
+        b"values rejected: none" in proc.stdout,
+    )
+
+    # A rejected value must not take the report down with it: the operator
+    # needs the other values while fixing this one.
+    proc = subprocess.run(
+        [str(run_sh), "config"],
+        env={**env, "STEAMCMD_UPDATE": "true"},
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    check("config exits 0 with a rejected value", proc.returncode == 0)
+    check("config names the rejected value", b"STEAMCMD_UPDATE must be 0 or 1" in proc.stdout)
+    check("config still reports the values", b"TELNET_PORT" in proc.stdout)
+
+    # The report reads the same file the loader does, and a key no script
+    # configures is a hard error rather than a silently ignored line.
+    (tmpdir / ".env").write_text("TELEMET_PORT=9000\n", encoding="utf-8")
+    proc = subprocess.run(
+        [str(run_sh), "config"], env=env, capture_output=True, check=False, timeout=30
+    )
+    check(
+        "a misspelled .env key is refused",
+        proc.returncode == 1 and b"unknown key 'TELEMET_PORT'" in proc.stderr,
+    )
+    (tmpdir / ".env").unlink()
+
+    # BACKUP_KEEP is a validated config value: a bad one fails before the run
+    # does anything, instead of reaching the prune arithmetic.
+    for bad in ("abc", "0", "-1"):
+        proc = subprocess.run(
+            [str(run_sh), "status"],
+            env={**env, "BACKUP_KEEP": bad},
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+        check(
+            f"BACKUP_KEEP={bad!r} is refused",
+            proc.returncode == 1 and b"BACKUP_KEEP must be" in proc.stderr,
+        )
+    proc = subprocess.run(
+        [str(run_sh), "config"],
+        env={**env, "BACKUP_KEEP": "3"},
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    check(
+        "config reports the BACKUP_KEEP override",
+        b"BACKUP_KEEP" in proc.stdout and b"3" in proc.stdout,
+    )
+    # An empty value is "not set", the same convention the steamcmd switches
+    # use, so it falls back to the committed default instead of failing.
+    proc = subprocess.run(
+        [str(run_sh), "config"],
+        env={**env, "BACKUP_KEEP": ""},
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    check("an empty BACKUP_KEEP falls back to the default", proc.returncode == 0)
 
 exit_status()
 print("run.sh secret-transport and build contract OK")

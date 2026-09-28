@@ -143,6 +143,77 @@ printf 'GOOD=kept\n1BAD=x\nBAD-KEY=y\nNOEQUALS\n' > "$tmp/malformed.env"
   echo "loader malformed-line visibility OK"
 )
 source "$ROOT/scripts/lib-env.sh"
+
+# Unknown keys in .env must be refused: a misspelled key is otherwise a line
+# the loader accepts and every script ignores, so the operator's value silently
+# loses to the committed default. The refusal names the file and the key, never
+# its value, and runs before any value is applied.
+printf 'TELNET_PORT=9000\nTELNET_PORTT=9001\n' > "$tmp/typo.env"
+if ( check_env_file_keys "$tmp/typo.env" ) 2>"$tmp/typo-err.txt"; then
+  echo "FAIL: a misspelled .env key was accepted" >&2; exit 1
+fi
+typo_err="$( < "$tmp/typo-err.txt" )"
+[[ "$typo_err" == *"typo.env: unknown key 'TELNET_PORTT'"* ]] || {
+  echo "FAIL: the unknown-key refusal must name the file and the key (got '$typo_err')" >&2; exit 1; }
+[[ "$typo_err" == *TELNET_PORT\ * ]] || {
+  echo "FAIL: the unknown-key refusal must list the known keys (got '$typo_err')" >&2; exit 1; }
+printf 'SECRET_PASSWORD_ONLY=hunter2\n' > "$tmp/typo-secret.env"
+if ( check_env_file_keys "$tmp/typo-secret.env" ) 2>"$tmp/typo-secret-err.txt"; then
+  echo "FAIL: an unknown key whose value is a secret was accepted" >&2; exit 1
+fi
+if grep -qF hunter2 "$tmp/typo-secret-err.txt"; then
+  echo "FAIL: the unknown-key refusal leaked a value to stderr" >&2; exit 1
+fi
+# A file that only carries known keys passes, in every spelling the loader
+# accepts, and malformed lines stay the loader's warning rather than this
+# function's failure.
+printf '# comment\nexport STEAMCMD_ONLY=0\nTELNET_PORT=9000\n\n' > "$tmp/known.env"
+check_env_file_keys "$tmp/known.env"
+printf '1BAD=x\nNOEQUALS\n' > "$tmp/known-malformed.env"
+check_env_file_keys "$tmp/known-malformed.env"
+# Every key the loader accepts must be documented in .env.example, and every
+# key .env.example documents must be one the loader accepts: the template and
+# the value list are the same list, and neither may drift.
+for key in $ENV_FILE_KEYS; do
+  grep -qE "^#?[[:space:]]*(export[[:space:]]+)?${key}=" "$ROOT/.env.example" || {
+    echo "FAIL: ENV_FILE_KEYS lists '$key', which .env.example does not document" >&2; exit 1; }
+done
+documented_keys="$(sed -nE 's/^#?[[:space:]]*(export[[:space:]]+)?([A-Z][A-Z0-9_]*)=.*/\2/p' "$ROOT/.env.example" | sort -u)"
+for key in $documented_keys; do
+  case " $ENV_FILE_KEYS " in
+    *" $key "*) ;;
+    *) echo "FAIL: .env.example documents '$key', which ENV_FILE_KEYS does not list" >&2; exit 1 ;;
+  esac
+done
+echo "env key set matches .env.example OK"
+
+# apply_* fills the committed defaults without any of the fail-fast rules, so
+# a report can show what a start would run; check_* is the fail-fast half. The
+# two together must behave exactly like the init_* wrappers they replace.
+(
+  set -euo pipefail
+  source "$ROOT/scripts/lib-env.sh"
+  unset TELNET_PASSWORD TELNET_PORT STEAMCMD_UPDATE STEAMCMD_ONLY
+  apply_telnet_defaults
+  [[ "${TELNET_PORT}" == 8087 && -z "${TELNET_PASSWORD+x}" ]] || {
+    echo "FAIL: apply_telnet_defaults must default the port but not the password" >&2; exit 1; }
+  apply_steamcmd_defaults
+  [[ "${STEAMCMD_UPDATE}" == 1 && "${STEAMCMD_ONLY}" == 0 ]] || {
+    echo "FAIL: apply_steamcmd_defaults did not apply defaults" >&2; exit 1; }
+  echo "apply_* defaults OK"
+)
+# The opted-in public default still comes from apply, and a provided port
+# survives it (a fresh bash: the values must not leak into this suite's own).
+out="$(ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD=1 TELNET_PORT=26902 bash -c '
+  set -euo pipefail
+  source "'"$ROOT"'/scripts/lib-env.sh"
+  unset TELNET_PASSWORD
+  apply_telnet_defaults 2>/dev/null
+  printf "%s %s" "$TELNET_PASSWORD" "$TELNET_PORT"
+')"
+[[ "$out" == "retest 26902" ]] || {
+  echo "FAIL: apply_telnet_defaults mishandled the opted-in default (got '$out')" >&2; exit 1; }
+
 WEBADMIN_PASSWORD='correct-horse-battery' check_webadmin_password
 # shellcheck disable=SC2016  # single-quoted literals: each bad value must reach the checker unexpanded
 for bad in 'a|b' 'a&b' 'a"b' "a'b" 'a<b' 'a>b' 'a\b' 'a$b' 'a`b'; do

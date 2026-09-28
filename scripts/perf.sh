@@ -62,6 +62,7 @@ ENABLED_LINE_RE='^  "Enabled"[[:space:]]*:[[:space:]]*'
 # defaults. Values are literal (see scripts/lib-env.sh); nothing in .env is
 # executed.
 if [[ -f "$ROOT/.env" ]]; then
+  check_env_file_keys "$ROOT/.env"
   load_env_file "$ROOT/.env"
 fi
 # The password travels through telnet_session in measure() below, so the

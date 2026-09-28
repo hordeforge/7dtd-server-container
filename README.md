@@ -42,7 +42,7 @@ exposing this host beyond a trusted LAN.
 | `scripts/stage_mods.sh` | Copy built mods from sibling `dist/` into `mods-available/`, recreate the enabled copies |
 | `scripts/deploy.sh` | Stage mods + rsync this project to the server host (`--restart` also restarts the container) |
 | `scripts/update_mods.sh` | Server-side: restage enabled mods + restart container (no image rebuild) |
-| `scripts/run.sh` | Container lifecycle on the server host (build/start/install-only/logs/stop/backup/restore/status/version; `--help` lists them) |
+| `scripts/run.sh` | Container lifecycle on the server host (build/start/install-only/logs/stop/backup/restore/status/config/version; `--help` lists them) |
 | `scripts/perf.sh` | EfficientServer toggle (`on`/`off`/`status`) + telnet `apm status` snapshot (`measure`) |
 | `scripts/lib-env.sh` | Shared `.env` loader, telnet value validation, telnet session helper (sourced by the ops scripts) |
 | `start.sh` / `stop.sh` | Top-level daily shortcuts: start / graceful stop (wrap `run.sh`) |
@@ -180,7 +180,13 @@ export WEBADMIN_PASSWORD=change-me          # dashboard webuser password; if uns
                                             # random one is minted at first seed and
                                             # written to data/userdata/Saves/.webadmin-password
 export STEAMCMD_UPDATE=0                    # skip steamcmd validate on next start
+export BACKUP_KEEP=14                        # save archives kept in backups/ (default 7)
 ```
+
+`./scripts/run.sh config` prints the effective configuration of this host,
+where each value came from (environment, `.env`, or the committed default),
+and whether the value rules accept it. Secret values are never printed; it
+reports them as set or unset.
 
 `TELNET_PASSWORD` is required. The committed lab default (`retest`) is public
 and a set telnet password makes the game listen on every interface, so a boot
@@ -207,7 +213,9 @@ installing it.
 Or keep them in a git-ignored `.env` file in this directory; copy
 [`.env.example`](.env.example) as the starting point. Values are taken
 literally (no shell expansion); one matching pair of surrounding quotes is
-stripped. The telnet password is rendered into `serverconfig.xml` at every
+stripped, and a key this project does not configure is refused (the list
+lives in `.env.example` and in `ENV_FILE_KEYS` in `scripts/lib-env.sh`, which a
+test keeps in step). The telnet password is rendered into `serverconfig.xml` at every
 start, so it must be printable ASCII: no backslash, pipe, ampersand,
 single/double quotes, dollar, backtick, angle brackets, control characters, or
 non-ASCII characters; the port must be in 1..65535. Both are checked before the
@@ -230,8 +238,8 @@ Add players to the admin list via telnet after joining, e.g.
   server to `saveworld` via telnet first (best effort; a skipped save only
   warns), archives `data/userdata/Saves/` to `backups/7dtd-saves-<UTC stamp>
   .tar.gz` (owner-only, it carries `serveradmin.xml` and the webadmin record),
-  and keeps the newest 7 archives by that stamp, which is UTC so the order
-  survives a DST transition or a host timezone change. `deploy.sh` never
+  and keeps the newest `BACKUP_KEEP` archives (default 7) by that stamp, which
+  is UTC so the order survives a DST transition or a host timezone change. `deploy.sh` never
   touches `backups/`. Rollback of code or mods is not automated: redeploy an
   older sibling build; saves are unaffected by deploys.
 

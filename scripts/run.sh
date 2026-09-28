@@ -3,15 +3,15 @@
 # host networking). All runtime state lives in ./data on the host; the
 # container itself is disposable.
 #
-# Usage: run.sh {build|start|run|restart|install-only|stop|logs|status|backup|restore|version}
+# Usage: run.sh {build|start|run|restart|install-only|stop|logs|status|config|backup|restore|version}
 # (`run` is an alias of `start`; `backup` archives the world saves and
 # `restore [archive]` puts one back, defaulting to the newest.)
 # `--help` prints the command list without touching the environment or data/.
 # Env overrides: TELNET_PASSWORD, TELNET_PORT, WEBADMIN_PASSWORD,
-# STEAMCMD_UPDATE, STEAMCMD_ONLY, SEVENDTD_CONTAINER_NAME, SEVENDTD_IMAGE.
-# SOURCE_DATE_EPOCH pins the image mtimes for a reproducible `build`.
-# A git-ignored .env in this directory fills unset variables; variables
-# already present in the environment win over it, defaults come last.
+# STEAMCMD_UPDATE, STEAMCMD_ONLY, BACKUP_KEEP, SEVENDTD_CONTAINER_NAME,
+# SEVENDTD_IMAGE. SOURCE_DATE_EPOCH pins the image mtimes for a reproducible
+# `build`. A git-ignored .env in this directory fills unset variables;
+# variables already present in the environment win over it, defaults come last.
 # Exit codes: 0 success, 2 usage error (unknown command or --help misuse),
 # other nonzero failures as reported by the failing step.
 set -euo pipefail
@@ -24,7 +24,7 @@ source "$ROOT/scripts/lib-env.sh"
 
 usage() {
   cat <<'EOF'
-usage: run.sh {build|start|run|restart|install-only|stop|logs|status|backup|restore|version}
+usage: run.sh {build|start|run|restart|install-only|stop|logs|status|config|backup|restore|version}
 
 Manage the 7dtd-server podman container; all runtime state lives in ./data
 (the container itself is disposable).
@@ -37,7 +37,10 @@ Manage the 7dtd-server podman container; all runtime state lives in ./data
   stop           graceful stop: telnet save + shutdown, then force stop
   logs           follow container logs
   status         show container state (default with no command)
-  backup         archive world saves into backups/ (keeps the newest 7)
+  config         print the effective configuration and where each value came
+                 from, with the secret values redacted
+  backup         archive world saves into backups/ (keeps the newest
+                 BACKUP_KEEP archives, default 7)
   restore        replace data/userdata/Saves with a backup archive
                  (no argument = the newest backup in backups/; the
                  -prerestore snapshots it skips are never picked that
@@ -47,10 +50,12 @@ Manage the 7dtd-server podman container; all runtime state lives in ./data
   version        print the VERSION file (the canonical version home)
 
 Env overrides: TELNET_PASSWORD, TELNET_PORT, WEBADMIN_PASSWORD,
-STEAMCMD_UPDATE, STEAMCMD_ONLY, SEVENDTD_CONTAINER_NAME, SEVENDTD_IMAGE.
-SOURCE_DATE_EPOCH pins the image mtimes for a reproducible `build`.
-A git-ignored .env in this directory fills unset variables; variables
-already present in the environment win over it, defaults come last.
+STEAMCMD_UPDATE, STEAMCMD_ONLY, BACKUP_KEEP, SEVENDTD_CONTAINER_NAME,
+SEVENDTD_IMAGE. SOURCE_DATE_EPOCH pins the image mtimes for a reproducible
+`build`. A git-ignored .env in this directory fills unset variables;
+variables already present in the environment win over it, defaults come last.
+An unknown key in .env is refused. deploy.sh reads SEVENDTD_SERVER_HOST,
+SEVENDTD_SERVER_USER and SEVENDTD_SERVER_DIR from the environment.
 EOF
 }
 
@@ -70,7 +75,7 @@ esac
 # (guards live in scripts/lib-env.sh, shared with the other ops scripts).
 COMMAND="${1:-status}"
 require_command "$COMMAND" \
-  'build|start|run|restart|install-only|stop|logs|status|backup|restore|version' usage
+  'build|start|run|restart|install-only|stop|logs|status|config|backup|restore|version' usage
 # restore alone takes an archive path; every other command takes none, so a
 # stray second word is still the usage error it was before.
 case "$COMMAND" in
@@ -112,7 +117,6 @@ container_exists() {
 GAME_DIR="$ROOT/data/game"
 USERDATA_DIR="$ROOT/data/userdata"
 BACKUP_DIR="$ROOT/backups"
-KEEP_BACKUPS=7
 # Name marker for the snapshot restore() takes of the saves it is about to
 # replace. It keeps that snapshot out of the newest-by-default restore target:
 # a bare `restore` run twice would otherwise pick its own pre-restore snapshot
@@ -121,11 +125,45 @@ KEEP_BACKUPS=7
 # naming the archive explicitly.
 PRERESTORE_SUFFIX=prerestore
 
+# The keys `config` reports, and which of them were already in the
+# environment before the .env load below. The snapshot has to happen here:
+# init_telnet_env / init_steamcmd_env / the :- defaults further down fill the
+# unset ones, after which every value reads as "set" and provenance is lost.
+CONFIG_KEYS="TELNET_PASSWORD WEBADMIN_PASSWORD TELNET_PORT STEAMCMD_UPDATE \
+STEAMCMD_ONLY BACKUP_KEEP=KEEP_BACKUPS SEVENDTD_CONTAINER_NAME=NAME \
+SEVENDTD_IMAGE=IMAGE"
+declare -A CONFIG_SOURCE
+for config_key in $CONFIG_KEYS; do
+  config_key="${config_key%%=*}"
+  [[ -n "${!config_key+x}" ]] && CONFIG_SOURCE["$config_key"]='environment'
+done
+
 # Load the git-ignored .env (precedence as documented in the lib header).
 # Values are data, never executed, and an explicit override such as
-# `TELNET_PORT=9099 ./scripts/run.sh stop` always takes effect.
+# `TELNET_PORT=9099 ./scripts/run.sh stop` always takes effect. The key check
+# runs first: an unknown key is refused before any of its file's values are
+# applied, so a typo'd line cannot half-configure the run.
 if [[ -f "$ROOT/.env" ]]; then
+  check_env_file_keys "$ROOT/.env"
   load_env_file "$ROOT/.env"
+fi
+
+# Backup retention varies per host (disk size, how far back an operator wants
+# to reach), so it is a validated config value with a committed default rather
+# than a constant. Same boundary treatment as the steamcmd switches: a
+# non-numeric or below-minimum value fails here instead of reaching the
+# arithmetic in archive_saves, where "abc" compares as 0 (prune every archive)
+# and a 0 would delete the archive just written.
+KEEP_BACKUPS="${BACKUP_KEEP:-7}"
+case "$KEEP_BACKUPS" in
+  ''|*[!0-9]*)
+    echo "FATAL: BACKUP_KEEP must be numeric (got '$KEEP_BACKUPS')" >&2
+    exit 1
+    ;;
+esac
+if (( KEEP_BACKUPS < 1 )); then
+  echo "FATAL: BACKUP_KEEP must be at least 1 (got '$KEEP_BACKUPS')" >&2
+  exit 1
 fi
 
 NAME="${SEVENDTD_CONTAINER_NAME:-7dtd-server}"
@@ -182,24 +220,94 @@ trap 'exit 143' TERM
 # `command not found`.
 sweep_stale_secret_env_files
 
-# Telnet values come from the environment or .env, get the shared lab defaults
-# if still unset, and are validated before any container starts (the password
-# is sent by telnet_session in stop() and rendered into serverconfig.xml
-# inside the container; rationale and rules: scripts/lib-env.sh).
-init_telnet_env
+# Telnet values come from the environment or .env and get the shared lab
+# defaults if still unset (the password is sent by telnet_session in stop() and
+# rendered into serverconfig.xml inside the container; rationale and rules:
+# scripts/lib-env.sh). The defaults are applied in every case, including the
+# config report, so it shows what the next start would actually run.
+apply_telnet_defaults
+apply_steamcmd_defaults
 
-# Same boundary treatment for the steamcmd switches: defaults applied, values
-# pinned to {0,1}. A typo like STEAMCMD_UPDATE=true must fail here instead of
-# silently disabling the per-boot depot validation (init_steamcmd_env).
-init_steamcmd_env
+# The value rules, before any command acts on them: a typo like
+# STEAMCMD_UPDATE=true must fail here instead of silently disabling the per-boot
+# depot validation, and an unsafe or missing password must fail on the host,
+# before a container starts.
+check_env_values() {
+  check_telnet_env
+  check_steamcmd_env
+  # Optional dashboard webuser password: when provided it is validated here so
+  # a bad value fails on the host instead of mid-boot in the container. When
+  # unset, the entrypoint mints a random one at seed time (see
+  # seed_admin_file); the empty pass-through below keeps that behavior.
+  if [[ -n "${WEBADMIN_PASSWORD:-}" ]]; then
+    check_webadmin_password
+  fi
+}
 
-# Optional dashboard webuser password: when provided it is validated here so a
-# bad value fails on the host instead of mid-boot in the container. When
-# unset, the entrypoint mints a random one at seed time (see seed_admin_file);
-# the empty pass-through below keeps that behavior.
-if [[ -n "${WEBADMIN_PASSWORD:-}" ]]; then
-  check_webadmin_password
+show_config() { # verdict
+  # The effective configuration of this run, with the source of each value
+  # (environment, .env, or the committed default) and no secret value. This is
+  # how an operator answers "which telnet port is this host actually using,
+  # and where did it come from" without reading three files, and how a
+  # misconfiguration gets a name instead of a guess.
+  local entry key var value source
+  for entry in $CONFIG_KEYS; do
+    # Each entry is the config key, plus the variable holding its effective
+    # value when that differs from the key itself (BACKUP_KEEP is validated
+    # into KEEP_BACKUPS, and the container name/image into NAME/IMAGE).
+    key="${entry%%=*}"
+    var="${entry#*=}"
+    [[ "$var" == "$key" ]] && var="$key"
+    case "$key" in
+      *PASSWORD*)
+        if [[ -z "${!key+x}" ]]; then
+          # An unset WEBADMIN_PASSWORD is not a missing value: the entrypoint
+          # mints one at first seed. Say which, or the operator reads a
+          # required-looking key as broken.
+          if [[ "$key" == WEBADMIN_PASSWORD ]]; then
+            value='(unset: minted at first seed)'
+          else
+            value='(unset)'
+          fi
+        else
+          value='(set, redacted)'
+        fi
+        ;;
+      *) value="${!var}" ;;
+    esac
+    source="${CONFIG_SOURCE[$key]:-}"
+    if [[ -z "$source" ]]; then
+      # Not in the environment: the .env filled it, or a default did. The
+      # committed defaults are exactly the values a .env line would carry for
+      # these keys, so a key absent from the file is the default. The file was
+      # already read (and key-checked) above when it exists.
+      if [[ -f "$ROOT/.env" ]] && grep -qE "^[[:space:]]*(export[[:space:]]+)?${key}=" "$ROOT/.env"; then
+        source='.env'
+      else
+        source='default'
+      fi
+    fi
+    printf '%-28s %-32s (%s)\n' "$key" "$value" "$source"
+  done
+  printf '\n%s\n' "$1"
+  echo "Secret values are never printed: read a minted WEBADMIN_PASSWORD from"
+  echo "data/userdata/Saves/.webadmin-password on the server host."
+}
+
+if [[ "$COMMAND" == config ]]; then
+  # A diagnostic has to survive the misconfiguration it diagnoses, so the value
+  # rules run in a subshell and their verdict becomes a line of the report
+  # instead of the end of it. Every other command still refuses to run on a
+  # rejected value.
+  config_verdict='values rejected: none'
+  if ! verdict="$(check_env_values 2>&1)"; then
+    config_verdict="values rejected: ${verdict}"
+  fi
+  show_config "$config_verdict"
+  exit 0
 fi
+
+check_env_values
 
 mkdir -p "$GAME_DIR" "$USERDATA_DIR" "$ROOT/mods" "$ROOT/config"
 
@@ -584,6 +692,7 @@ case "$COMMAND" in
   backup)       backup ;;
   restore)      restore "${2:-}" ;;
   logs)         podman logs -f "$NAME" ;;
+  config)       show_config ;;
   # Anchor the name filter: podman treats it as a regex, and unanchored it
   # would also list the $NAME-install pre-warm container.
   status)       podman ps -a --filter "name=^${NAME}$" ;;
