@@ -179,4 +179,14 @@ coverage:
 	# through an extra bash layer it produces an empty report.
 	kcov --clean --include-pattern=lib-env.sh coverage ./scripts/test_lib_env.sh
 	kcov --clean --include-pattern=lib-env.sh coverage ./scripts/test_fuzz_env.sh
-	find coverage -name cobertura.xml | head -1 | xargs -I{} cp {} coverage.cobertura.xml
+	# The report is named and checked, not piped through xargs: xargs -I
+	# runs its command once even on empty input on BSD/macOS, so a kcov run
+	# that produced no report would `cp` a file literally named '{}' and
+	# leave the real failure unreported.
+	set -euo pipefail; \
+	report="$$(find coverage -name cobertura.xml | head -1)"; \
+	test -n "$$report" || { \
+	  echo "FATAL: kcov wrote no cobertura.xml under coverage/; there is no report to read" >&2; \
+	  exit 1; \
+	}; \
+	cp "$$report" coverage.cobertura.xml
