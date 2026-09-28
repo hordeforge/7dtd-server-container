@@ -29,14 +29,30 @@ before 1.1.1 are reconstructed from their GitHub release notes.
   of "however long since anyone remembered". A failed run exits nonzero and
   leaves the unit failed where systemd can see it. Install it next to the
   quadlet (commands in the README).
+- **Container health probe.** `run.sh start` and the quadlet unit pass
+  `--health-cmd`, so `run.sh status` and `systemctl --user status` report
+  `unhealthy` for a server process that is up but no longer answering on the
+  telnet console. The probe opens a TCP connect only (no password), and a
+  30 minute start period exempts the first boot's depot download. A red
+  status is reported, never acted on.
 
 ### Changed
 
 - The quadlet starts the container with `--security-opt=no-new-privileges`.
   Container root stays (rootless podman maps it to the host user), but nothing
   in the image needs a setuid escalation.
+- **Container secrets travel in an owner-only env file.** `run.sh` hands
+  `TELNET_PASSWORD` and `WEBADMIN_PASSWORD` to podman through a `0600`
+  mktemp file instead of `-e KEY=VALUE`, which kept the values
+  world-readable in `/proc/<pid>/cmdline` for the whole run. The file is
+  removed on every exit path, and a run that only stops or backs up reclaims
+  files stranded by an earlier SIGKILL.
 
 ### Fixed
+
+- **`run.sh` runs every command again.** The stale-secret sweep was called
+  before its definition, so each invocation died with
+  `sweep_stale_secret_env_files: command not found` (exit 127).
 
 - **Backup archive stamps are UTC.** `run.sh backup` named archives with the
   host wall clock while the prune read that name as the age order, so a
@@ -65,7 +81,6 @@ before 1.1.1 are reconstructed from their GitHub release notes.
   1-second per-attempt bound, short enough that a loaded machine could land
   the kill before the stub recorded its attempt and make the test report a
   missing retry. The bound is 3s now, still far below the real one.
->
 
 ## [1.1.3] - 2026-09-21
 
