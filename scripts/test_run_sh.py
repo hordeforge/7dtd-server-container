@@ -57,6 +57,7 @@ Each failed check prints a FAIL line; the process exits nonzero if any failed.
 
 from __future__ import annotations
 
+import datetime
 import os
 import re
 import shutil
@@ -560,6 +561,49 @@ with tempfile.TemporaryDirectory() as tmp:
         "backup never writes a secret env file",
         b"--env-file" not in (tmpdir / "podman-argv.log").read_bytes(),
     )
+
+
+# backup() stamp zone: the prune reads it as the age sort key, so it has to be
+# the instant (UTC), not the host wall clock. In a zone with a nonzero offset
+# a local stamp is hours off, which is what a TZ change or a DST transition
+# reorders; a fall-back transition also repeats a local stamp outright.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    make_sandbox(tmpdir)
+    install_podman_stub(tmpdir, PODMAN_STUB)
+    (tmpdir / "data" / "userdata" / "Saves" / "region").mkdir(parents=True)
+    (tmpdir / "data" / "userdata" / "Saves" / "region" / "r.0.0.region").write_bytes(b"chunkdata")
+    before = datetime.datetime.now(datetime.timezone.utc)
+    env = stub_env(tmpdir, TZ="Europe/Warsaw")
+    proc = subprocess.run(
+        [str(tmpdir / "scripts" / "run.sh"), "backup"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    check("backup under a DST zone exits 0", proc.returncode == 0)
+    if proc.returncode != 0:
+        print(proc.stderr.decode(errors="replace"), file=sys.stderr)
+    stamps = [
+        p.name.removeprefix("7dtd-saves-").removesuffix(".tar.gz")
+        for p in (tmpdir / "backups").glob("7dtd-saves-*.tar.gz")
+    ]
+    check("backup wrote one archive to name", len(stamps) == 1)
+    if len(stamps) == 1:
+        try:
+            stamp = datetime.datetime.strptime(stamps[0], "%Y%m%d-%H%M%S").replace(
+                tzinfo=datetime.timezone.utc
+            )
+        except ValueError:
+            check("backup stamp parses as %Y%m%d-%H%M%S", False)
+        else:
+            check("backup stamp parses as %Y%m%d-%H%M%S", True)
+            drift = abs((stamp - before).total_seconds())
+            check(
+                "the backup stamp is UTC, not the host wall clock (Europe/Warsaw)",
+                drift < 120,
+            )
 
 
 # backup() while the server runs: saveworld goes over telnet before tar.

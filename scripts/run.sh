@@ -325,7 +325,11 @@ backup() {
   # Saves/, so it gets the entrypoint's credential-file treatment: owner-only.
   umask 077
   local stamp archive tar_rc=0
-  stamp="$(date +%Y%m%d-%H%M%S)"
+  # UTC, because the prune below reads the stamp as the age sort key. A local
+  # stamp repeats across a fall-back transition (two archives, one name, the
+  # second overwriting the first) and reorders after a host TZ change, so a
+  # newer save can be pruned as the oldest.
+  stamp="$(date -u +%Y%m%d-%H%M%S)"
   archive="$BACKUP_DIR/7dtd-saves-$stamp.tar.gz"
   # GNU tar exits 1 for warnings alone (a file changed as it was read, which
   # happens when the game writes during a live backup): keep that archive and
@@ -339,7 +343,7 @@ backup() {
   if (( tar_rc == 1 )); then
     echo "WARN: files changed while archiving (server running?); the archive may mix save states" >&2
   fi
-  # Timestamps sort lexicographically, so glob order is age order: prune the
+  # UTC stamps sort lexicographically, so glob order is age order: prune the
   # oldest beyond KEEP_BACKUPS so a scheduled backup cannot fill the disk.
   local archives=() excess i
   shopt -s nullglob

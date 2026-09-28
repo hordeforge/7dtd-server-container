@@ -10,6 +10,14 @@ before 1.1.1 are reconstructed from their GitHub release notes.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Backup archive stamps are UTC.** `run.sh backup` named archives with the
+  host wall clock while the prune read that name as the age order, so a
+  fall-back DST transition could repeat a stamp (one archive overwriting the
+  other) and a host timezone change or deploy to another region could prune a
+  newer save as the oldest. Existing archives keep their names.
+
 ## [1.1.3] - 2026-09-21
 
 ### Changed

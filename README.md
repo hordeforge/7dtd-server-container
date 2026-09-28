@@ -180,9 +180,11 @@ Add players to the admin list via telnet after joining, e.g.
   under `data/game/`.
 - Back up the saves with `./scripts/run.sh backup`: it asks the running
   server to `saveworld` via telnet first (best effort; a skipped save only
-  warns), archives `data/userdata/Saves/` to `backups/7dtd-saves-<timestamp>
+  warns), archives `data/userdata/Saves/` to `backups/7dtd-saves-<UTC stamp>
   .tar.gz` (owner-only, it carries `serveradmin.xml` and the webadmin record),
-  and keeps the newest 7 archives. `deploy.sh` never touches `backups/`.
+  and keeps the newest 7 archives by that stamp, which is UTC so the order
+  survives a DST transition or a host timezone change. `deploy.sh` never
+  touches `backups/`.
   Rollback of code or mods is not automated: redeploy an older sibling build;
   saves are unaffected by deploys.
 
