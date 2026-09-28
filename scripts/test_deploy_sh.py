@@ -336,6 +336,8 @@ with tempfile.TemporaryDirectory() as tmp:
     # The FATAL is the only message here that may carry the failure: the
     # pre-restart "deployed ..." line goes to stdout and already names the host,
     # so a combined-stream match would pass on the success line alone.
+    # Raw bytes here, not the decoded err the earlier blocks bind: the
+    # assertions below match on the exact bytes deploy.sh wrote.
     raw_err = proc.stderr
     fatal = next((line for line in raw_err.splitlines() if line.startswith(b"FATAL:")), b"")
     check("failing remote restart exits 1", proc.returncode == 1)

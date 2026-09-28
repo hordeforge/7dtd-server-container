@@ -104,10 +104,17 @@ check(
 # longer serving shows up as unhealthy. The command must reach the port
 # through the lib baked into the image (init_telnet_env owns it), never a
 # port number written a second time here.
+# The unit cannot call into run.sh, so the probe string is written twice; pin
+# the two copies against each other here or a fix to one silently leaves the
+# other probing a different thing.
+run_sh = (ROOT / "scripts" / "run.sh").read_text(encoding="utf-8")
+run_health_cmd = re.findall(r'^HEALTH_CMD="(.*)"$', run_sh, re.MULTILINE)
 health_cmd = re.findall(r"^HealthCmd=(.*)$", text, re.MULTILINE)
+check("run.sh carries exactly one health probe command", len(run_health_cmd) == 1)
 check(
     "unit health probe calls the lib shipped in the image",
-    health_cmd == ["bash -c 'source /usr/local/lib/7dtd-lib-env.sh && health_check'"],
+    run_health_cmd == ["bash -c 'source /usr/local/lib/7dtd-lib-env.sh && health_check'"]
+    and health_cmd == run_health_cmd,
 )
 check(
     "unit carries a health interval and a start period for the first boot",
