@@ -52,6 +52,16 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   backup schedule not running). `systemd/7dtd-backup-verify.{service,timer}`
   runs it weekly, so a bad archive leaves the unit failed where the backup
   timer's failure already does.
+- **Every line the container writes is stamped, and stamped with a boot id.**
+  `entrypoint.sh` printed `[entrypoint] <message>` with no clock, and podman
+  adds none unless asked, so the boot log an operator reads after a bad boot
+  (`run.sh logs`, the journal, the tail `run.sh start` dumps on a boot that
+  died) could not be ordered against the game's own lines or read a week
+  later. Every line now carries `ts=<UTC>` and `boot=<stamp>-<pid>`; the boot
+  id is shared by every line of one boot, so a crash loop (several boots in
+  one container log under `--restart unless-stopped`) is separable with a
+  single grep. `run.sh logs` and the failed-start tail also pass
+  `--timestamps`, which is what dates the game's own output, still undated.
 - **A discoverable local loop.** `make` prints the task list, `make test-one
   SUITE=<name>` runs a single suite instead of all twelve, and `make check`
   runs lint and test in CI's order. A missing `uv` or `shellcheck` now fails
@@ -252,6 +262,13 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   named `padded` reused a name an earlier block had bound to a `list[bytes]`,
   so mypy reported the loop, its `env=` argument and the `int()` on it as
   three errors. The loop variable is now `zero_padded`.
+- **`run.sh start` reported a start that was not one.** `podman run -d`
+  returns before the entrypoint has done anything, and the smoke check only
+  proves the container is still up, so the closing line claimed a started
+  server while the depot download and the world load were still ahead of it
+  and the health probe was still inside its 30-minute start period (no
+  verdict at all). It now says the container is up, that nothing is serving
+  yet, and where to watch it.
 - **The quadlet unit tried to pull an image nobody publishes.** The image is
   built on the server host and is never pushed to a registry, but the unit
   carried no `Pull=`, so quadlet's `missing` default stayed quiet only while

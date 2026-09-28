@@ -275,30 +275,55 @@ probe="$FUZZ_PROBE_VALUE"
 if [[ "$(ascii_length "$probe")" != "$FUZZ_LENGTH" ]]; then
   report "ascii_length does not count bytes"
 fi
-# The printable-ASCII rule ships as reject_unsafe_value, which exits rather
-# than printing a reason. Calling it in a subshell turns that exit back into
-# the oracle's verdict: an empty reason must survive, a named one must not,
-# and the refusal has to name the setting it refused without carrying the
-# value.
+# reject_unsafe_value owns the domain now (it is what both the host scripts
+# and the entrypoint call), and it exits with a refusal on stderr rather than
+# printing a reason. Calling it in a subshell turns that exit back into the
+# oracle's verdict: a clean value is accepted silently, each refused class is
+# refused for its own reason, the refusal names the setting it refused, and
+# it carries neither the value nor a traceback.
 unsafe_err="$(scratch)"
 ( reject_unsafe_value TELNET_PASSWORD "$probe" ) > /dev/null 2> "$unsafe_err"
 unsafe_rc=$?
-if [[ -n "$FUZZ_REASON" ]]; then
-  if (( unsafe_rc == 0 )); then
-    report "reject_unsafe_value accepted a value the contract refuses"
-  else
-    unsafe_msg="$( < "$unsafe_err" )"
+unsafe_msg="$( < "$unsafe_err" )"
+case "$unsafe_msg" in
+  *Traceback*) report "reject_unsafe_value leaked a traceback" ;;
+esac
+case "$FUZZ_REASON" in
+  '')
+    if (( unsafe_rc != 0 )); then
+      report "reject_unsafe_value refused a value the oracle accepts"
+    fi
+    [[ -z "$unsafe_msg" ]] ||
+      report "an accepted value still printed a refusal"
+    ;;
+  whitespace)
+    if (( unsafe_rc != 1 )); then
+      report "reject_unsafe_value exited $unsafe_rc on a whitespace value, expected 1"
+    fi
     case "$unsafe_msg" in
-      *TELNET_PASSWORD*) ;;
-      *) report "a value refusal does not name the setting" ;;
+      *whitespace*) ;;
+      *) report "a whitespace refusal does not name the reason" ;;
     esac
+    ;;
+  charset)
+    if (( unsafe_rc != 1 )); then
+      report "reject_unsafe_value exited $unsafe_rc on an unsafe-charset value, expected 1"
+    fi
     case "$unsafe_msg" in
-      *Traceback*) report "reject_unsafe_value leaked a traceback" ;;
+      *"printable ASCII"*) ;;
+      *) report "a charset refusal does not name the reason" ;;
     esac
-    no_leak "$unsafe_msg" "a value refusal"
-  fi
-elif (( unsafe_rc != 0 )); then
-  report "reject_unsafe_value refused a value the contract accepts"
+    ;;
+  *)
+    report "the oracle returned an unknown class: $FUZZ_REASON"
+    ;;
+esac
+if (( unsafe_rc != 0 )); then
+  case "$unsafe_msg" in
+    *TELNET_PASSWORD*) ;;
+    *) report "a value refusal does not name the setting" ;;
+  esac
+  no_leak "$unsafe_msg" "a value refusal"
 fi
 # A refusal that names the value it refused is the contract; one that leaks a
 # traceback or stays silent is not.

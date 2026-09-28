@@ -152,20 +152,11 @@ BACKUP_DIR="$ROOT/backups"
 # repeated recovery must never produce. Undoing a restore stays possible by
 # naming the archive explicitly.
 PRERESTORE_SUFFIX=prerestore
-# How many digits BACKUP_KEEP may carry: the documented range in .env.example
-# is 1 to 999999999. bash arithmetic is signed 64-bit and wraps silently past
-# it, so a wider value would pass the range check and reach the prune loop as a
-# count nobody typed.
-BACKUP_KEEP_MAX_DIGITS=9
 # How many suffixes archive_saves tries while claiming a free archive name.
 # A collision costs one name per second, so this is many orders of magnitude
 # past a real race; anything that still cannot be claimed is a create failure
 # no further suffix will fix, and the retry must end rather than spin.
 ARCHIVE_CLAIM_TRIES=100
-# Ceiling on BACKUP_KEEP, well past any host's worth of daily archives, and
-# comfortably inside the machine word so the prune arithmetic never overflows
-# on an operator typo.
-MAX_BACKUP_KEEP=100000
 # How old the newest archive may be before verify-backup calls the backup
 # schedule broken. Two daily runs plus a day of slack: past this, the timer
 # is not running, not merely late, and the RPO is whatever the oldest
@@ -301,14 +292,6 @@ apply_steamcmd_defaults
 # STEAMCMD_UPDATE=true must fail here instead of silently disabling the per-boot
 # depot validation, and an unsafe or missing password must fail on the host,
 # before a container starts.
-# The largest archive count worth keeping. Five digits is not a physical limit
-# on a disk, it is the point where the value stops being a retention choice
-# and is a mistyped number: arithmetic past it is also what makes the range
-# check unreliable, because a 64-bit (( )) silently wraps a wider value
-# instead of reporting it (99999999999999999999 reads as a negative number and
-# passes a ">= 1" test), and a wrapped count is what archive_saves would then
-# prune with.
-BACKUP_KEEP_MAX=99999
 check_backup_keep() {
   # The value is compared as the stripped digit string it is, never as an
   # arithmetic operand: leading zeros are already gone, so "0" is the only
@@ -328,8 +311,8 @@ check_backup_keep() {
   # ("99999999999999999999") raises, which reads as a failed backup rather
   # than a rejected value. Equal-or-fewer digits than the ceiling itself means
   # both sides fit a machine word.
-  if [[ "$KEEP_BACKUPS" == '0' ]]; then
-    echo "FATAL: BACKUP_KEEP must be at least 1 (got '$KEEP_BACKUPS')" >&2
+  if (( 10#$KEEP_BACKUPS < BACKUP_KEEP_MIN )); then
+    echo "FATAL: BACKUP_KEEP must be at least $BACKUP_KEEP_MIN (got '$KEEP_BACKUPS')" >&2
     exit 1
   fi
   if (( ${#KEEP_BACKUPS} > ${#BACKUP_KEEP_MAX} )); then
@@ -553,11 +536,14 @@ HEALTH_CMD="bash -c 'source /usr/local/lib/7dtd-lib-env.sh && health_check'"
 # unhealthy in `podman ps` / `systemctl --user status`, which is the signal
 # that a server process is alive but no longer serving. podman never restarts
 # or kills on a health status, so a red status cannot take the server down.
+# Named because start()'s closing lines report it: an operator told "started"
+# has to know how long a boot stays unjudged.
+HEALTH_START_PERIOD=30m
 HEALTH_FLAGS=(
   --health-cmd "$HEALTH_CMD"
   --health-interval 60s
   --health-retries 3
-  --health-start-period 30m
+  --health-start-period "$HEALTH_START_PERIOD"
 )
 
 start() {
@@ -581,13 +567,24 @@ start() {
   until container_running; do
     if (( waited >= 4 )); then
       echo "FATAL: $NAME is not running right after start; last log lines:" >&2
-      podman logs --tail 20 "$NAME" >&2 || true
+      # Timestamped for the same reason run.sh logs is: the lines below are the
+      # only record of how far the boot got, and without a clock on them the
+      # gap between them is the question an operator is asking.
+      podman logs --tail 20 --timestamps "$NAME" >&2 || true
       exit 1
     fi
     sleep 1
     waited=$((waited + 1))
   done
-  echo "started $NAME (game 26900, telnet $TELNET_PORT, dashboard 8080)"
+  # "Up" is all the smoke check can prove, and a boot spends the next minutes
+  # on the depot and the world load before anything answers. Reporting that as
+  # a start leaves the operator with no way to tell a healthy boot from one
+  # wedged in a load, so the line names what is still outstanding and where to
+  # watch it; podman applies no health verdict until HEALTH_START_PERIOD is
+  # over, so the probe cannot answer the question yet either.
+  echo "started $NAME (container up; game 26900, telnet $TELNET_PORT, dashboard 8080)"
+  echo "the game is not serving yet: follow the boot with './scripts/run.sh logs'"
+  echo "(no health verdict before $HEALTH_START_PERIOD; 'run.sh status' shows it once the game opens the console)"
 }
 
 install_only() {
@@ -1072,7 +1069,12 @@ case "$COMMAND" in
   # verify-backup only reads backups/: it restores nothing and writes no
   # archive of its own, so it never contends for the lock.
   verify-backup) verify_backup "${2:-}" ;;
-  logs)         podman logs -f "$NAME" ;;
+  # --timestamps: the game's own lines carry no clock, and neither do the
+  # entrypoint's before they were stamped, so without this the stream an
+  # operator watches a boot in cannot be ordered or correlated with a later
+  # --tail dump. Cheap (one prefix per line), and the only way to tell how
+  # long a boot phase took.
+  logs)         podman logs -f --timestamps "$NAME" ;;
   # Anchor the name filter: podman treats it as a regex, and unanchored it
   # would also list the $NAME-install pre-warm container.
   status)       podman ps -a --filter "name=^${NAME}$" ;;

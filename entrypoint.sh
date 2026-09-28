@@ -10,9 +10,27 @@ set -euo pipefail
 GAME_DIR=/root/7dtd
 USERDATA_DIR=/root/.local/share/7DaysToDie
 
-log() { echo "[entrypoint] $*"; }
+# One stamp and one boot id on every line this entrypoint writes, because
+# these lines are the boot's only record and they outlive the boot: podman
+# stamps nothing unless asked (`run.sh logs` asks), and the quadlet journal
+# adds its own second to each line. Without them an operator cannot place an
+# entrypoint line against the game's own output in the same stream, and after
+# a crash loop --restart unless-stopped leaves several boots in one container
+# log with nothing to say which is which. The boot id is a second-resolution
+# UTC stamp plus the PID: unique per boot, and shared by every line of it, so
+# one grep groups a boot. Pinned key=value so a log parser can split the
+# fields without pattern-matching the message.
+BOOT_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+log() {
+  printf '[entrypoint ts=%s boot=%s] %s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$BOOT_ID" "$*"
+}
 
-fatal() { echo "[entrypoint] FATAL: $*" >&2; exit 1; }
+fatal() {
+  printf '[entrypoint ts=%s boot=%s] FATAL: %s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$BOOT_ID" "$*" >&2
+  exit 1
+}
 
 # The base image exists to put steamcmd on PATH; this entrypoint otherwise
 # only runs inside that image (it sources the lib and templates copied in by

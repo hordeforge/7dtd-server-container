@@ -160,6 +160,29 @@ password, so a server that is running but no longer serving reads `unhealthy`
 the depot before the game opens the port). A health status is reported, never
 acted on: podman does not restart or kill on it.
 
+`./scripts/run.sh start` says so too: the line it prints names the container
+and the ports, then says nothing is serving yet, because up to a few minutes
+of depot and world load sit between the container starting and the console
+answering, and the health probe abstains over the same window.
+
+### Reading a boot
+
+`./scripts/run.sh logs` follows the container log with a container timestamp
+on every line, so the entrypoint's progress lines and the game's own output
+(undated by the game) can be ordered against each other. Lines the
+entrypoint writes carry two more fields:
+
+```
+[entrypoint ts=2026-09-28T04:17:03Z boot=20260928T041701Z-1] render serverconfig.xml (telnet port 8087)
+```
+
+`ts` is UTC, `boot` is that boot's id, and every line of one boot carries the
+same one. A container that restarts (`--restart unless-stopped`, or the
+quadlet unit's `Restart=always`) keeps the old lines, so a crash loop leaves
+several boots in the same log; `podman logs 7dtd-server | grep
+'boot=20260928T041701Z-1'` pulls one of them out. A `FATAL:` line is the
+boot's reason for ending and always says which step failed.
+
 ## Loading mods
 
 The enabled set is `EfficientServer`, `7dtd-server-apm-bridge` and `BotMod`
@@ -406,5 +429,8 @@ login still matches.
   all interfaces; confirm nothing else uses `TELNET_PORT`.
 - **`(unhealthy)` in `run.sh status`:** the container is up but the telnet
   console stopped answering, so the game is wedged rather than gone. Read
-  `podman logs --tail 50 7dtd-server` and the game log under
+  `podman logs --tail 50 --timestamps 7dtd-server` and the game log under
   `data/userdata/Logs/`, then `./scripts/run.sh restart`.
+- **The container keeps restarting:** each restart is a new boot id, so
+  `podman logs --timestamps 7dtd-server` shows the last boot's `FATAL:` line
+  as its last entry; that line names the step that failed.

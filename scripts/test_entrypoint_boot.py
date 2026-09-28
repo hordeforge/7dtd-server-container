@@ -34,6 +34,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -183,6 +184,25 @@ def no_temp_files(*dirs: Path) -> bool:
     # ".<mod>.tmp.$$", ".<mod>.tmp.retired.$$"): a suffix-only test passes on a
     # Mods dir littered with exactly the artifacts it claims to exclude.
     return all(".tmp" not in p.name for d in dirs for p in d.iterdir())
+
+
+# The entrypoint's own lines, in the one shape it writes them
+# (`[entrypoint ts=<stamp> boot=<id>] <message>`), read back from a stream the
+# fake server also writes to. The stub and the entrypoint are separate writers
+# on the same fd, so a line that is not an entrypoint line is the game's or
+# steamcmd's and is not this contract's to stamp.
+LINE_RE = re.compile(r"^\[entrypoint ts=(?P<ts>\S+) boot=(?P<boot>\S+)\] (?P<msg>.*)$")
+
+
+def entrypoint_lines(stream: bytes) -> list[str]:
+    return [
+        m.group(0) for m in map(LINE_RE.match, stream.decode(errors="replace").splitlines()) if m
+    ]
+
+
+def boot_id(line: str) -> str:
+    match = LINE_RE.match(line)
+    return match.group("boot") if match else ""
 
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -498,6 +518,38 @@ with tempfile.TemporaryDirectory() as tmp:
         sorted(p.name for p in game_mods.glob(".*.tmp.*")) == [in_flight.name],
     )
     check("the sweep left no temp litter", no_temp_files(game_mods))
+
+# The boot's own log lines are the only record of a boot that ended badly, and
+# under --restart unless-stopped several boots share one container log. So every
+# line carries a UTC stamp and this boot's id, and one grep groups a boot.
+# Pinned on a boot that both succeeds (progress + WARN lines) and a boot that
+# fatal-exits, because the two ride different streams and a stamp on only one
+# of them would pass a check that reads the wrong stream.
+with tempfile.TemporaryDirectory() as tmp:
+    root, _game, userdata = make_sandbox(Path(tmp) / "stamps", None)
+    proc = run_entrypoint(root, {})
+    boot_lines = entrypoint_lines(proc.stdout) + entrypoint_lines(proc.stderr)
+    check("a successful boot stamps every line it wrote", len(boot_lines) >= 2)
+    check(
+        "every line of one boot carries the same boot id",
+        len({boot_id(line) for line in boot_lines}) == 1,
+    )
+    # A boot that fatal-exits rides stderr and is the case that matters: the
+    # progress lines a healthy boot prints are already in the operator's
+    # terminal, the failure is what gets read a week later out of the journal.
+    bad_root, _bad_game, _ = make_sandbox(Path(tmp) / "stamps-fatal", "cfg_userdata")
+    proc = run_entrypoint(bad_root, {})
+    fatal_lines = entrypoint_lines(proc.stderr)
+    if not check("the drifted boot fatal-exits", proc.returncode != 0):
+        print(proc.stderr.decode(errors="replace"), file=sys.stderr)
+    check(
+        "the fatal line is stamped like a progress line",
+        bool(fatal_lines) and "FATAL" in fatal_lines[0],
+    )
+    check(
+        "two boots never share a boot id",
+        bool(fatal_lines) and boot_id(fatal_lines[0]) not in {boot_id(line) for line in boot_lines},
+    )
 
 exit_status()
 print("entrypoint boot contract OK")

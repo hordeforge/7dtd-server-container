@@ -1328,10 +1328,11 @@ with tempfile.TemporaryDirectory() as tmp:
     check("a SOURCE_DATE_EPOCH past int64 never reaches podman", b"--timestamp" not in wrapped)
     check("a SOURCE_DATE_EPOCH past int64 fails loudly", rc != 0)
     # Zero padding is a decimal stamp, not octal (00001000 is 512 bare).
-    rc, _, padded = run_build("00001700000")
+    rc, _, padded_epoch = run_build("00001700000")
     check(
         "a zero-padded SOURCE_DATE_EPOCH is read as decimal",
-        b"--timestamp" in padded and padded[padded.index(b"--timestamp") + 1] == b"00001700000",
+        b"--timestamp" in padded_epoch
+        and padded_epoch[padded_epoch.index(b"--timestamp") + 1] == b"00001700000",
     )
 
     env = stub_env(tmpdir)
@@ -1453,20 +1454,20 @@ with tempfile.TemporaryDirectory() as tmp:
     # be accepted, so the bound cannot be enforced by refusing anything long.
     # `config` exits 0 on a rejected value by design (it exists to diagnose
     # one), so the verdict line, not the return code, carries the answer.
-    for wrapped, accepted in (
+    for wide, accepted in (
         ("18446744073709551617", False),
         ("999999999", True),
         ("1000000000", False),
     ):
         proc = subprocess.run(
             [str(run_sh), "config"],
-            env={**env, "BACKUP_KEEP": wrapped},
+            env={**env, "BACKUP_KEEP": wide},
             capture_output=True,
             check=False,
             timeout=30,
         )
         check(
-            f"BACKUP_KEEP={wrapped!r} is {'accepted' if accepted else 'refused'} at the bound",
+            f"BACKUP_KEEP={wide!r} is {'accepted' if accepted else 'refused'} at the bound",
             proc.returncode == 0
             and (b"values rejected: FATAL: BACKUP_KEEP" in proc.stdout) is not accepted,
         )
@@ -1583,10 +1584,12 @@ with tempfile.TemporaryDirectory() as tmp:
 # nested under a path the archive already stored as a file) is the failure a
 # preflight cannot catch: tar -tzf reads every entry, so the archive is
 # accepted and the refusal comes from tar itself part-way through the write.
-# Extraction lands in a staging dir first, so the world must still be in place
-# when it does, no pre-restore snapshot is spent on a restore that never
-# reached the point of discarding anything, and the message names the archive
-# that failed and says Saves is unchanged.
+# It is also the recovery path that would destroy the world it was replacing if
+# extraction ran in place. It does not: extraction lands in a staging dir
+# first, so the run dies with Saves untouched, no retention slot spent on a
+# pre-restore snapshot of a world nothing replaced, and no staging litter for
+# the next restore to find. The message names the archive that failed and says
+# Saves is unchanged.
 with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
     make_sandbox(tmpdir)
