@@ -1306,7 +1306,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
     # BACKUP_KEEP is a validated config value: a bad one fails before the run
     # does anything, instead of reaching the prune arithmetic.
-    for bad in ("abc", "0", "-1"):
+    for bad in ("abc", "0", "-1", "00", "99999999999999999999"):
         proc = subprocess.run(
             [str(run_sh), "status"],
             env={**env, "BACKUP_KEEP": bad},
@@ -1317,6 +1317,22 @@ with tempfile.TemporaryDirectory() as tmp:
         check(
             f"BACKUP_KEEP={bad!r} is refused",
             proc.returncode == 1 and b"BACKUP_KEEP must be" in proc.stderr,
+        )
+    # A leading zero is a plain count, not an octal literal: 08 must prune to
+    # eight archives, not abort the run inside the prune arithmetic.
+    for padded in ("08", "09", "0007", "007"):
+        proc = subprocess.run(
+            [str(run_sh), "config"],
+            env={**env, "BACKUP_KEEP": padded},
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+        check(
+            f"BACKUP_KEEP={padded!r} is read in base 10",
+            proc.returncode == 0
+            and re.search(rf"^BACKUP_KEEP\s+{int(padded)}\s", proc.stdout.decode(), re.MULTILINE)
+            is not None,
         )
     proc = subprocess.run(
         [str(run_sh), "config"],
