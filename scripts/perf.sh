@@ -66,6 +66,9 @@ ENABLED_LINE_RE='^  "Enabled"[[:space:]]*:[[:space:]]*'
 # executed.
 if [[ -f "$ROOT/.env" ]]; then
   check_env_file_keys "$ROOT/.env"
+  # The file carries both passwords, so its mode is tightened before a single
+  # value is read out of it (same rule run.sh applies, one owner in the lib).
+  ensure_private_file "$ROOT/.env"
   load_env_file "$ROOT/.env"
 fi
 # The password travels through telnet_session in measure() below, so the

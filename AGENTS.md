@@ -27,7 +27,7 @@ Workspace root guide: [`hordeforge/.github` AGENTS.md](https://github.com/hordef
 | Daily save-backup schedule | `systemd/7dtd-backup.service`, `systemd/7dtd-backup.timer` (runs `run.sh backup`) |
 | Weekly archive readability check | `systemd/7dtd-backup-verify.service`, `systemd/7dtd-backup-verify.timer` (runs `run.sh verify-backup`) |
 | Version (canonical home) + changelog + tag gate | `VERSION` (`run.sh version`), `CHANGELOG.md`, `.github/workflows/release.yml` (tag must match `VERSION` *and* have a dated `## [X.Y.Z]` section); the image's `org.opencontainers.image.version` label copies it and `scripts/test_containerfile.py` fails the gate when they drift |
-| Player-data inventory, host file modes, erasure path | `README.md` "Player data on the host"; `ensure_private_dir` in `scripts/run.sh` and the entrypoint's process-wide `umask 077` are what keep `data/` and `backups/` owner-only |
+| Player-data inventory, host file modes, erasure path | `README.md` "Player data on the host"; `ensure_private_dir` in `scripts/run.sh`, `ensure_private_file` in `scripts/lib-env.sh` and the entrypoint's process-wide `umask 077` are what keep `data/`, `backups/` and `.env` owner-only |
 
 ## Does not own
 

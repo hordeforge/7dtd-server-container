@@ -1624,6 +1624,27 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     (tmpdir / ".env").unlink()
 
+    # .env carries both passwords, so the mode the operator's copy landed with
+    # is part of the control, not a detail: a file copied under a permissive
+    # umask reads as 0644 and hands the telnet and webadmin passwords to every
+    # other account on the host. The run tightens it in place, and tightening
+    # must not stop the report from working.
+    env_file = tmpdir / ".env"
+    env_file.write_text("SEVENDTD_IMAGE=localhost/mode-check:tag\n", encoding="utf-8")
+    env_file.chmod(0o644)
+    proc = subprocess.run(
+        [str(run_sh), "config"], env=env, capture_output=True, check=False, timeout=30
+    )
+    check(
+        "a world-readable .env is tightened to 0600",
+        proc.returncode == 0 and oct(env_file.stat().st_mode & 0o777) == "0o600",
+    )
+    check(
+        "tightening .env does not stop the config report",
+        "localhost/mode-check:tag" in proc.stdout.decode("utf-8"),
+    )
+    env_file.unlink()
+
     # The container name is the body of the anchored `podman ps --filter
     # name=^${NAME}$` regex and the image reference is a podman -t argument, so
     # a value carrying regex or option syntax is refused here rather than
