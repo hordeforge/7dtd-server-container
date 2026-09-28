@@ -57,6 +57,7 @@ Each failed check prints a FAIL line; the process exits nonzero if any failed.
 
 from __future__ import annotations
 
+import contextlib
 import datetime
 import os
 import re
@@ -69,6 +70,7 @@ import tarfile
 import tempfile
 import time
 from pathlib import Path
+from typing import Iterator
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = ROOT / "scripts"
@@ -391,15 +393,27 @@ with tempfile.TemporaryDirectory() as tmp:
 # Graceful stop against a live telnet endpoint: the shutdown request is the
 # only thing standing between a running game and a forced stop without a
 # world save, so the wire bytes and the podman verb sequence are pinned here.
-def start_fake_telnet(output: Path) -> tuple[subprocess.Popen[bytes], str]:
-    """Start fake-telnet-server.py on an ephemeral port; return (proc, port)."""
+@contextlib.contextmanager
+def start_fake_telnet(output: Path) -> Iterator[str]:
+    """Run fake-telnet-server.py on an ephemeral port, yielding the port.
+
+    The process is reaped and its stdout pipe closed on every exit from the
+    block, including a failing check: a reader fd left open pins the endpoint
+    process's output, and an unreaped one keeps the server alive past the case
+    that started it.
+    """
     proc = subprocess.Popen(
         [sys.executable, str(SCRIPTS / "fake-telnet-server.py"), "0", str(output)],
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
     )
     assert proc.stdout is not None
-    return proc, proc.stdout.readline().decode().strip()
+    try:
+        yield proc.stdout.readline().decode().strip()
+    finally:
+        proc.kill()
+        proc.wait()
+        proc.stdout.close()
 
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -407,8 +421,7 @@ with tempfile.TemporaryDirectory() as tmp:
     install_podman_stub(tmpdir, PODMAN_STUB)
     log = tmpdir / "podman-argv.log"
     wire = tmpdir / "wire.bin"
-    server, port = start_fake_telnet(wire)
-    try:
+    with start_fake_telnet(wire) as port:
         check("fake telnet endpoint reported a port", port.isdigit())
         env = stub_env(tmpdir, STUB_PS_OUTPUT=f"{NAME}\n", TELNET_PORT=port)
         proc = subprocess.run(
@@ -418,9 +431,6 @@ with tempfile.TemporaryDirectory() as tmp:
             check=False,
             timeout=120,
         )
-    finally:
-        server.kill()
-        server.wait()
     check("graceful stop exits 0", proc.returncode == 0)
     if proc.returncode != 0:
         print(proc.stderr.decode(errors="replace"), file=sys.stderr)
@@ -615,8 +625,7 @@ with tempfile.TemporaryDirectory() as tmp:
     saves.mkdir(parents=True)
     (saves / "region.zip").write_bytes(b"save")
     wire = tmpdir / "wire.bin"
-    server, port = start_fake_telnet(wire)
-    try:
+    with start_fake_telnet(wire) as port:
         env = stub_env(tmpdir, STUB_PS_OUTPUT=f"{NAME}\n", TELNET_PORT=port)
         proc = subprocess.run(
             [str(tmpdir / "scripts" / "run.sh"), "backup"],
@@ -625,9 +634,6 @@ with tempfile.TemporaryDirectory() as tmp:
             check=False,
             timeout=120,
         )
-    finally:
-        server.kill()
-        server.wait()
     check("live backup exits 0", proc.returncode == 0)
     if proc.returncode != 0:
         print(proc.stderr.decode(errors="replace"), file=sys.stderr)

@@ -102,6 +102,13 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+# Reclaim env files stranded by a SIGKILLed previous run. Every command
+# sweeps, not just the ones that start a container: these files carry the
+# telnet and webadmin passwords, so a run that only stops or backs up must not
+# leave one sitting in $TMPDIR for the days before the next start. (Defined
+# below; called here so the sweep outlives the start-path ownership.)
+sweep_stale_secret_env_files
+
 # Telnet values come from the environment or .env, get the shared lab defaults
 # if still unset, and are validated before any container starts (the password
 # is sent by telnet_session in stop() and rendered into serverconfig.xml
@@ -126,9 +133,10 @@ mkdir -p "$GAME_DIR" "$USERDATA_DIR" "$ROOT/mods" "$ROOT/config"
 # Secret env files orphaned by a killed previous run (SIGKILL bypasses every
 # trap) would accumulate in $TMPDIR forever: mktemp never reuses a name and
 # each file carries both secrets. The owning PID therefore rides in the file
-# name, and make_common sweeps entries whose owner is gone; a live concurrent
-# run's file (its PID answers kill -0) is left alone. A PID recycled to an
-# unrelated process only shields one stale file until that process exits.
+# name, and the sweep above (plus make_common, before each new file) reclaims
+# entries whose owner is gone; a live concurrent run's file (its PID answers
+# kill -0) is left alone. A PID recycled to an unrelated process only shields
+# one stale file until that process exits.
 sweep_stale_secret_env_files() {
   local f base pid
   for f in "${TMPDIR:-/tmp}"/7dtd-container-env.*.*; do

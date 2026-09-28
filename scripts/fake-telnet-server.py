@@ -31,36 +31,41 @@ HOLD_SECS = 300  # --hold silence span; the client timeout must fire long before
 
 port, out = int(sys.argv[1]), sys.argv[2]
 hold = "--hold" in sys.argv[3:]
-srv = socket.socket()
-srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-srv.bind(("127.0.0.1", port))
-srv.listen(1)
-if port == 0:
-    print(srv.getsockname()[1], flush=True)
-if hold:
-    conn, _ = srv.accept()
-    time.sleep(HOLD_SECS)
-    conn.close()
-    srv.close()
-    sys.exit(0)
-while True:
-    conn, _ = srv.accept()
-    buf = bytearray()
-    try:
-        conn.settimeout(QUIET)
+
+
+def main() -> None:
+    # Every socket is a with-block: a send/reply error on a probed connection
+    # would otherwise unwind past the closes below and leave the listener and
+    # the accepted connection open for the life of the process.
+    with socket.socket() as srv:
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("127.0.0.1", port))
+        srv.listen(1)
+        if port == 0:
+            print(srv.getsockname()[1], flush=True)
+        if hold:
+            with srv.accept()[0]:
+                time.sleep(HOLD_SECS)
+            return
         while True:
-            chunk = conn.recv(4096)
-            if not chunk:
+            with srv.accept()[0] as conn:
+                buf = bytearray()
+                try:
+                    conn.settimeout(QUIET)
+                    while True:
+                        chunk = conn.recv(4096)
+                        if not chunk:
+                            break
+                        buf += chunk
+                except OSError:
+                    pass  # recv timeout = quiescence; reset/error ends collection too
+                if not buf:
+                    continue  # readiness probe; wait for the real client
+                conn.sendall(b"telnet ok\n")
                 break
-            buf += chunk
-    except OSError:
-        pass  # recv timeout = quiescence; reset/error ends collection too
-    if not buf:
-        conn.close()
-        continue  # readiness probe; wait for the real client
-    conn.sendall(b"telnet ok\n")
-    conn.close()
-    break
-srv.close()
-with Path(out).open("wb") as f:
-    f.write(buf)
+    with Path(out).open("wb") as f:
+        f.write(buf)
+
+
+if __name__ == "__main__":
+    main()

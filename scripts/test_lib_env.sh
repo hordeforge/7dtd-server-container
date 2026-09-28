@@ -18,13 +18,17 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 tmp="$(mktemp -d)"
 server_pid=
-cleanup() {
-  # One EXIT hook for the whole run: reap the fake server if started, always
-  # remove the scratch dir (a previous version leaked it per run).
+stop_fake_server() {
   if [[ -n "$server_pid" ]]; then
     kill "$server_pid" 2>/dev/null || true
     wait "$server_pid" 2>/dev/null || true
+    server_pid=
   fi
+}
+cleanup() {
+  # One EXIT hook for the whole run: reap the fake server if started, always
+  # remove the scratch dir (a previous version leaked it per run).
+  stop_fake_server
   rm -rf "$tmp"
 }
 trap cleanup EXIT
@@ -294,6 +298,11 @@ echo "telnet_session port guard OK"
 start_fake_server() { # received_bytes_path [fake-server args...]
   local port_file="$tmp/port.txt"
   : > "$port_file"
+  # Stop and reap the previous endpoint first: a case that ended before its
+  # server saw a client leaves that one sitting in accept() with its listener
+  # open, and only the newest pid is registered with the EXIT hook, so
+  # restarts would otherwise accumulate a live process per case.
+  stop_fake_server
   python3 "$ROOT/scripts/fake-telnet-server.py" 0 "$@" >"$port_file" &
   server_pid=$!
   for _ in $(seq 1 100); do
