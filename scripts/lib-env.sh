@@ -106,16 +106,18 @@ is_env_key() { # key; true when the loader would accept this key
   [[ "$1" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]
 }
 
-# Did this .env actually supply this key? Replays the loader's own line walk
-# (blank and comment lines skipped, one optional 'export ' stripped, the key
-# side taken up to the first '=') and asks is_env_key about the result, so the
-# answer is exactly the set of keys load_env_file went on to apply. A looser
-# pattern here is how `run.sh config` ends up reporting ".env" as the source
-# of a value the loader refused to read, which is the one answer the report
-# must never get wrong. Whether the value won over the environment is the
-# caller's own question, answered by its pre-load snapshot.
-env_file_supplies() { # file key
-  local file="$1" want="$2" line key
+# The keys this .env actually supplies, one per line. Replays the loader's
+# own line walk (blank and comment lines skipped, one optional 'export '
+# stripped, the key side taken up to the first '=') and asks is_env_key about
+# the result, so the answer is exactly the set of keys load_env_file went on
+# to apply. A looser pattern here is how `run.sh config` ends up reporting
+# ".env" as the source of a value the loader refused to read, which is the one
+# answer the report must never get wrong. One pass per file, so a caller
+# asking about several keys reads the file once and asks about the set.
+# Whether a value won over the environment is the caller's own question,
+# answered by its pre-load snapshot.
+env_file_keys() { # file; prints one supplied key per line
+  local file="$1" line key
   [[ -r "$file" ]] || return 1
   while IFS= read -r line || [[ -n "$line" ]]; do
     case "$line" in
@@ -125,9 +127,8 @@ env_file_supplies() { # file key
     case "$line" in *=*) ;; *) continue ;; esac
     key="${line%%=*}"
     is_env_key "$key" || continue
-    [[ "$key" == "$want" ]] && return 0
+    printf '%s\n' "$key"
   done < "$file"
-  return 1
 }
 
 # Reject a key this project does not configure, before any value is applied.

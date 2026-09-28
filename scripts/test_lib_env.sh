@@ -198,31 +198,31 @@ check_env_file_keys "$tmp/known.env"
 printf '1BAD=x\nNOEQUALS\n' > "$tmp/known-malformed.env"
 check_env_file_keys "$tmp/known-malformed.env"
 
-# env_file_supplies must agree with the loader line for line, because it is
-# what `run.sh config` reports as a value's source. The failing case is a line
+# env_file_keys must agree with the loader line for line, because it is what
+# `run.sh config` reports as a value's source. The failing case is a line
 # the loader skips: a key with leading whitespace looks like a key to any
 # looser pattern, and crediting the file for it tells the operator their
 # setting is live when the committed default is what actually runs.
 printf '  TELNET_PORT=9000\n#TELNET_PORT=9001\nexport TELNET_PORT=9002\nNOEQUALS\n1BAD=x\n' \
   > "$tmp/supplies.env"
-env_file_supplies "$tmp/supplies.env" TELNET_PORT \
-  || { echo "FAIL: env_file_supplies missed a line the loader applies" >&2; exit 1; }
+[[ "$(env_file_keys "$tmp/supplies.env")" == "TELNET_PORT" ]] || {
+  echo "FAIL: env_file_keys did not report exactly the key the loader applies" >&2; exit 1; }
 # The applied value is the export line's: the first two lines are skipped, so
 # the file supplies 9002 even though 9000 and 9001 also appear in it. The
 # loader runs here rather than in a subshell, so the two answers come from one
 # environment and cannot disagree by construction.
 load_env_file "$tmp/supplies.env" 2>/dev/null
 [[ "${TELNET_PORT:-}" == "9002" ]] || {
-  echo "FAIL: loader and env_file_supplies disagree on which line applies (got '${TELNET_PORT:-}')" >&2; exit 1; }
+  echo "FAIL: loader and env_file_keys disagree on which line applies (got '${TELNET_PORT:-}')" >&2; exit 1; }
 unset TELNET_PORT
 for absent in "" "#comment" "export STEAMCMD_ONLY=0" "NOEQUALS" "1BAD=x" "  TELNET_PORT=9000"; do
   printf '%s\n' "$absent" > "$tmp/absent.env"
-  if env_file_supplies "$tmp/absent.env" TELNET_PORT; then
-    echo "FAIL: env_file_supplies credited a line the loader skips: '$absent'" >&2; exit 1
+  if env_file_keys "$tmp/absent.env" | grep -Fxq TELNET_PORT; then
+    echo "FAIL: env_file_keys credited a line the loader skips: '$absent'" >&2; exit 1
   fi
 done
-if env_file_supplies "$tmp/no-such-file.env" TELNET_PORT; then
-  echo "FAIL: env_file_supplies claimed a missing file supplied a value" >&2; exit 1
+if env_file_keys "$tmp/no-such-file.env" | grep -Fxq TELNET_PORT; then
+  echo "FAIL: env_file_keys claimed a missing file supplied a value" >&2; exit 1
 fi
 # is_env_key is the single shape test behind all three readers, so it must
 # reject exactly what the loader rejects and nothing the loader accepts.

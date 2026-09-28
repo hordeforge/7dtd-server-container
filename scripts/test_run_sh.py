@@ -1207,9 +1207,11 @@ with tempfile.TemporaryDirectory() as tmp:
         check=False,
         timeout=120,
     )
+    # stderr, like every other verify-backup refusal: stdout carries only the
+    # OK lines a recovery counts.
     check(
         "verify-backup calls the same archive un-restorable",
-        verify.returncode != 0 and b"FAIL" in verify.stdout,
+        verify.returncode != 0 and b"FAIL" in verify.stderr,
     )
 
 

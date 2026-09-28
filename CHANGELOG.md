@@ -531,6 +531,22 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   repository's MIT); it is a dev tool the image never copies, so nothing
   shipped is affected. The record makes a license change visible in the diff
   of the bump that causes it.
+- `scripts/test_run_sh.py` read the `verify-backup` refusal for an archive
+  carrying a link member out of `proc.stdout`, where `verify-backup` has never
+  written it: every `FAIL:` line goes to stderr so `verify-backup | grep
+  '^OK:'` lists only the archives a recovery can use, which the neighbouring
+  check pins. The suite was red on a clean tree.
+- The `.env` key walk that `run.sh config` uses to decide a value's source was
+  written twice: once in `scripts/lib-env.sh` as `env_file_supplies`, with a
+  comment and a unit test naming `run.sh config` as its caller, and once
+  inline in `show_config`, which nothing outside the test called. The two had
+  to agree about which lines the loader applies, and only `is_env_key` kept
+  them agreeing. `env_file_keys` is the one walk now: it prints the supplied
+  key set, `show_config` collects it in the single pass it already made, and
+  the lib test pins it against the loader.
+- `BACKUP_KEEP` is documented as a whole number from 1 to 99999 in the README
+  and `.env.example`, where the ceiling has been `BACKUP_KEEP_MAX` (999999999)
+  for some time.
 
 ## [1.1.3] - 2026-09-21
 

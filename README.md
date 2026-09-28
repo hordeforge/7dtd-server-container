@@ -314,7 +314,7 @@ Add players to the admin list via telnet after joining, e.g.
   warns), archives `data/userdata/Saves/` to `backups/7dtd-saves-<UTC stamp>
   .tar.gz` (owner-only, it carries `serveradmin.xml` and the webadmin record),
   and keeps the newest `BACKUP_KEEP` archives (default 7, whole number 1 to
-  99999) by that stamp, which is UTC so the order survives a DST transition or
+  999999999) by that stamp, which is UTC so the order survives a DST transition or
   a host timezone change. `deploy.sh` never
   touches `backups/`. Rollback of code or mods is not automated: redeploy an
   older sibling build; saves are unaffected by deploys.

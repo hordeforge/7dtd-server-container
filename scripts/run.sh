@@ -395,24 +395,15 @@ show_config() { # verdict
   # misconfiguration gets a name instead of a guess.
   local entry key var value source
   # Which keys the .env file actually sets, collected in one pass over the
-  # file. Asking per key with a grep subprocess re-read .env once per config
-  # key and forks once per key, for a report that only ever needs the answer
-  # to the same question eight times.
+  # file: env_file_keys is the loader's own line walk, so this report cannot
+  # credit a line the loader skipped, and one pass answers the same question
+  # for every key below instead of re-reading .env (and forking) per key.
   local -A in_env=()
-  local eline ekey
+  local ekey
   if [[ -f "$ROOT/.env" ]]; then
-    while IFS= read -r eline || [[ -n "$eline" ]]; do
-      # Same shape load_env_file accepts: an optional `export`, then KEY=.
-      # Leading whitespace is not stripped, because the loader does not strip
-      # it either: such a line is an invalid key it warns about and skips, and
-      # crediting it here would report .env as the source of a value that
-      # never took effect. is_env_key is the loader's own key rule.
-      eline="${eline#export }"
-      [[ "$eline" == *=* ]] || continue
-      ekey="${eline%%=*}"
-      is_env_key "$ekey" || continue
+    while IFS= read -r ekey; do
       in_env["$ekey"]=1
-    done < "$ROOT/.env"
+    done < <(env_file_keys "$ROOT/.env")
   fi
   for entry in $CONFIG_KEYS; do
     # Each entry is the config key, plus the variable holding its effective
