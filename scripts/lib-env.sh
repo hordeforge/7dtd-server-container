@@ -244,6 +244,20 @@ request_telnet() { # reply_var command timeout_secs
   return "$rc"
 }
 
+# Container health probe: is the game actually serving its telnet console
+# right now. Exits 0 when the endpoint accepts a connection, nonzero
+# otherwise. Sources its own port from init_telnet_env so a container started
+# with no telnet environment (the quadlet unit pins none) still probes the
+# port the entrypoint defaulted to. telnet_probe only opens a TCP connect, so
+# the password never leaves the container on this path; init_telnet_env's
+# default warning is silenced here because a health check runs every minute
+# and its output is the container log, not an operator-facing report.
+health_check() { # timeout_seconds (default 5)
+  local timeout_secs="${1:-5}"
+  init_telnet_env 2>/dev/null
+  telnet_probe "$TELNET_PORT" "$timeout_secs"
+}
+
 # Render a webadmin password as the base64 MD5 digest the dashboard expects in
 # serveradmin.xml (<user pass="...">). One owner shared by the entrypoint seed
 # path and its test vector, so the two cannot drift apart.

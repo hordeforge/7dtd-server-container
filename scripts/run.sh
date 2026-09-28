@@ -187,6 +187,24 @@ make_common() {
   )
 }
 
+# Health probe command, the same string the quadlet unit carries: it sources
+# the lib the image ships and calls health_check, so the port it probes is the
+# one init_telnet_env owns rather than a second hardcoded number. podman runs
+# the command through sh, hence the single-quoted inner script.
+HEALTH_CMD="bash -c 'source /usr/local/lib/7dtd-lib-env.sh && health_check'"
+# Start period covers the boot the probe cannot judge: a first start
+# steamcmd-installs a multi-GB depot and the game only opens the telnet port
+# once the world is loaded. Three missed probes afterwards mark the container
+# unhealthy in `podman ps` / `systemctl --user status`, which is the signal
+# that a server process is alive but no longer serving. podman never restarts
+# or kills on a health status, so a red status cannot take the server down.
+HEALTH_FLAGS=(
+  --health-cmd "$HEALTH_CMD"
+  --health-interval 60s
+  --health-retries 3
+  --health-start-period 30m
+)
+
 start() {
   # Recreating over a live container must go through the graceful stop first:
   # podman rm -f on a running game kills it with no world save, the exact loss
@@ -198,7 +216,8 @@ start() {
   # --init: catatonit takes PID 1 and reaps orphans/zombies for the game's
   # whole uptime; without it, children the server forks but never waits on
   # accumulate as zombies until the container restarts.
-  podman run -d --name "$NAME" --restart unless-stopped --init "${COMMON[@]}" "$IMAGE"
+  podman run -d --name "$NAME" --restart unless-stopped --init \
+    "${COMMON[@]}" "${HEALTH_FLAGS[@]}" "$IMAGE"
   # Smoke-check the boot: `podman run -d` returns before the entrypoint does
   # anything, so an exec failure or a bad config would otherwise read as the
   # green "started" line. Give the container a few seconds to prove it stays

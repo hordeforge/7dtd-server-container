@@ -220,6 +220,22 @@ with tempfile.TemporaryDirectory() as tmp:
     args = [a for rec in invocations for a in rec]
     check("podman was invoked", bool(invocations))
 
+    # Liveness for a server process that is up but no longer serving (a wedged
+    # world load never exits the game). The probe must go through the lib the
+    # image ships, not a second hardcoded port, and the boot that steamcmd
+    # installs a depot before the game listens must sit inside the start
+    # period.
+    run_args = [a for rec in invocations if rec[:1] == [b"run"] for a in rec]
+    run_args_text = b" ".join(run_args).decode()
+    check(
+        "start passes a health probe that calls the shipped lib",
+        "--health-cmd" in run_args_text and "health_check" in run_args_text,
+    )
+    check(
+        "the health start period covers the depot download",
+        "--health-start-period" in run_args_text,
+    )
+
     envfile_args = envfile_paths(invocations)
     check("podman received --env-file", len(envfile_args) > 0)
     live_envfile = envfile_args[-1] if envfile_args else ""

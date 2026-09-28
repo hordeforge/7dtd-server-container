@@ -39,6 +39,18 @@ Volume=%h/7dtd-server/data/game:/root/7dtd:Z
 Volume=%h/7dtd-server/data/userdata:/root/.local/share/7DaysToDie:Z
 Volume=%h/7dtd-server/mods:/mods:Z
 Volume=%h/7dtd-server/config:/config:ro,Z
+# Liveness for a server process that is up but no longer serving (a wedged
+# world load leaves the container running). Same command scripts/run.sh start
+# passes to podman: the probe sources the lib the image ships, so it checks
+# the port init_telnet_env owns above instead of a second hardcoded number,
+# and it never sends the password. The start period covers a first boot, where
+# steamcmd installs a multi-GB depot before the game opens the port. A health
+# status is reported in `systemctl --user status`; it never restarts or kills
+# the container, so a red status cannot take the server down.
+HealthCmd=bash -c 'source /usr/local/lib/7dtd-lib-env.sh && health_check'
+HealthInterval=60s
+HealthRetries=3
+HealthStartPeriod=30m
 
 [Service]
 Restart=always

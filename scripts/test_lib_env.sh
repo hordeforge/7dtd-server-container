@@ -12,6 +12,8 @@
 #   telnet_probe       bad ports refused, a listening endpoint reported up
 #   telnet_session     real wire bytes against a fake telnet endpoint, and
 #                      self-termination at its timeout against a silent one
+#   health_check       the container health probe: unhealthy on a closed port,
+#                      healthy against a live one, password never on the wire
 # Each block runs in a subshell so a FATAL exit marks only that case failed.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -333,6 +335,23 @@ start_fake_server "$tmp/received.bin"
 if ! telnet_probe "$FAKE_PORT" 3; then
   echo "FAIL: telnet_probe reported unreachable a listening endpoint" >&2; exit 1
 fi
+# health_check is the container health probe: it owns its port, so a container
+# started with no telnet environment (the quadlet unit pins none) still probes
+# the port init_telnet_env defaults to, and it must answer against a live
+# endpoint without ever sending the password.
+if ! ( TELNET_PORT=1 health_check 3 ) >/dev/null 2>&1; then
+  # Nothing listens on the tcpmux port: unhealthy is the right answer.
+  echo "health_check unhealthy on a closed port OK"
+else
+  echo "FAIL: health_check reported healthy with nothing listening on port 1" >&2; exit 1
+fi
+if ! ( unset TELNET_PASSWORD; TELNET_PORT="$FAKE_PORT" health_check 3 ) >/dev/null 2>&1; then
+  echo "FAIL: health_check missed a listening endpoint" >&2; exit 1
+fi
+if [[ -s "$tmp/received.bin" ]]; then
+  echo "FAIL: health_check wrote to the telnet wire (it must only connect)" >&2; exit 1
+fi
+echo "health_check OK"
 out="$(telnet_session "$FAKE_PORT" retest 'apm status' 10)"
 [[ "$out" == *"telnet ok"* ]] || { echo "FAIL: reply not relayed" >&2; exit 1; }
 printf 'retest\napm status\n' > "$tmp/expected.bin"

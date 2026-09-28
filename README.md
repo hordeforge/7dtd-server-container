@@ -87,6 +87,13 @@ cd ~/7dtd-server
 
 Networking is host mode: the server binds directly on the host, no NAT.
 
+`./scripts/run.sh status` shows the podman health status next to the container
+state: the probe opens a TCP connection to the telnet console and sends no
+password, so a server that is running but no longer serving reads `unhealthy`
+(the first 30 minutes after a start are exempt, since a first boot downloads
+the depot before the game opens the port). A health status is reported, never
+acted on: podman does not restart or kill on it.
+
 ## Loading mods
 
 The enabled set is `EfficientServer`, `7dtd-server-apm-bridge` and `BotMod`
@@ -159,7 +166,8 @@ journald retains indefinitely). For the quadlet path, add
 `Environment=WEBADMIN_PASSWORD=...` to `systemd/7dtd-server.container` before
 installing it.
 
-Or keep them in a git-ignored `.env` file in this directory. Values are taken
+Or keep them in a git-ignored `.env` file in this directory; copy
+[`.env.example`](.env.example) as the starting point. Values are taken
 literally (no shell expansion); one matching pair of surrounding quotes is
 stripped. The telnet password is rendered into `serverconfig.xml` at every
 start, so it must avoid backslash, pipe, ampersand, single/double quotes,
@@ -220,3 +228,7 @@ login still matches.
   they were copied in after the last start; restart the container.
 - **Telnet blocked:** a password is set, so the telnet interface listens on
   all interfaces; confirm nothing else uses `TELNET_PORT`.
+- **`(unhealthy)` in `run.sh status`:** the container is up but the telnet
+  console stopped answering, so the game is wedged rather than gone. Read
+  `podman logs --tail 50 7dtd-server` and the game log under
+  `data/userdata/Logs/`, then `./scripts/run.sh restart`.

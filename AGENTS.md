@@ -72,6 +72,7 @@ Workspace root guide: [`hordeforge/.github` AGENTS.md](https://github.com/hordef
 ./scripts/run.sh logs         # follow logs
 ./scripts/run.sh stop         # graceful stop (saves world)
 ./scripts/run.sh install-only # download/validate game then exit (pre-warm; refuses while the server runs)
+./scripts/run.sh status       # container state + health probe (telnet connect, no password)
 ./start.sh / ./stop.sh        # daily start/stop shortcuts (wrap run.sh)
 ```
 

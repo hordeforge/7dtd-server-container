@@ -32,7 +32,14 @@ jobs:
       # so this step installs the binary and nothing else. Same SHA-pin rule as
       # checkout above. (shellcheck and bash come with the runner image and are
       # not pinned; expect minor version drift there.)
+      # enable-cache keys the uv download cache on requirements-lint.txt, the
+      # only manifest this repo resolves from (no uv.lock by design). A
+      # dependency bump rotates the key; the venv itself is still rebuilt from
+      # scratch by make, so a cached wheel never decides what the gate runs.
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: requirements-lint.txt
 
       - name: Lint shell + Python + workflow YAML + Containerfile (make lint)
         # make lint owns every check (bash -n, shellcheck, reference
@@ -62,6 +69,9 @@ jobs:
       # Same SHA pins as the check job above; see the comments there.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: requirements-lint.txt
       # No prebuilt kcov works here: apt has no noble package and the v42
       # tarball links against Ubuntu 22.04's binutils (libopcodes-2.38).
       # Build kcov from source at the release commit of the v43 tag; same

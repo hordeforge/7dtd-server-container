@@ -19,6 +19,10 @@ here:
                   Init=true reaps orphans for the whole uptime, and
                   Network=host is what makes the game/telnet/dashboard ports
                   LAN-reachable at all.
+  liveness        the unit probes the shipped lib (scripts/lib-env.sh
+                  health_check) for a container that is up but no longer
+                  serving, with a start period covering the first-boot depot
+                  download, and never restarts on the status alone.
 
 Each failed check prints a FAIL line; the process exits nonzero if any failed.
 """
@@ -80,6 +84,22 @@ network_lines = re.findall(r"^Network=(.*)$", text, re.MULTILINE)
 check(
     "Network=host (game 26900 / telnet / dashboard ports are LAN-reachable)",
     network_lines == ["host"],
+)
+
+# Liveness: same probe as run.sh start, so a container that is up but no
+# longer serving shows up as unhealthy. The command must reach the port
+# through the lib baked into the image (init_telnet_env owns it), never a
+# port number written a second time here.
+health_cmd = re.findall(r"^HealthCmd=(.*)$", text, re.MULTILINE)
+check(
+    "unit health probe calls the lib shipped in the image",
+    health_cmd == ["bash -c 'source /usr/local/lib/7dtd-lib-env.sh && health_check'"],
+)
+check(
+    "unit carries a health interval and a start period for the first boot",
+    re.findall(r"^HealthInterval=(.*)$", text, re.MULTILINE) == ["60s"]
+    and re.findall(r"^HealthStartPeriod=(.*)$", text, re.MULTILINE) == ["30m"]
+    and re.findall(r"^HealthRetries=(\d+)$", text, re.MULTILINE) != [],
 )
 
 if failed_checks:
