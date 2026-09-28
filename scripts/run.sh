@@ -131,22 +131,6 @@ cleanup_secret_env_file() {
     fi
   done
 }
-trap cleanup_secret_env_file EXIT
-# Bash runs EXIT traps on a normal exit or after a trapped signal only:
-# killed by an untrapped SIGINT/SIGTERM/SIGHUP it dies without cleanup, and
-# an everyday Ctrl-C during the multi-minute podman run would strand the
-# credential-bearing env file. Each handler routes through the EXIT trap and
-# exits with the conventional 128+N status. SIGKILL stays uncovered here;
-# make_common sweeps what it leaves behind.
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
-
-# Reclaim env files stranded by a SIGKILLed previous run. Every command
-# sweeps, not just the ones that start a container: these files carry the
-# telnet and webadmin passwords, so a run that only stops or backs up must not
-# leave one sitting in $TMPDIR for the days before the next start.
-#
 # Secret env files orphaned by a killed previous run (SIGKILL bypasses every
 # trap) would accumulate in $TMPDIR forever: mktemp never reuses a name and
 # each file carries both secrets. The owning PID therefore rides in the file
@@ -166,7 +150,21 @@ sweep_stale_secret_env_files() {
     fi
   done
 }
+trap cleanup_secret_env_file EXIT
+# Bash runs EXIT traps on a normal exit or after a trapped signal only:
+# killed by an untrapped SIGINT/SIGTERM/SIGHUP it dies without cleanup, and
+# an everyday Ctrl-C during the multi-minute podman run would strand the
+# credential-bearing env file. Each handler routes through the EXIT trap and
+# exits with the conventional 128+N status. SIGKILL stays uncovered here;
+# make_common sweeps what it leaves behind.
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
+# Reclaim env files stranded by a SIGKILLed previous run. Every command
+# sweeps, not just the ones that start a container: these files carry the
+# telnet and webadmin passwords, so a run that only stops or backs up must not
+# leave one sitting in $TMPDIR for the days before the next start.
 # Run the sweep for every command, including the ones that never mint a file.
 # Called here, before any command runs, so the sweep outlives the start-path
 # ownership in make_common below.

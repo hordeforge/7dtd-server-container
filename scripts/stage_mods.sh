@@ -27,6 +27,14 @@ SRCS=(
   "$WS/7dtd-server-apm/dist/7dtd-server-apm-bridge"
   "$WS/7dtd-fps-bots/dist/BotMod"
 )
+# The two arrays are read by index, so their lengths are part of the contract:
+# a mod added to one and not the other would stage a sibling's dist under
+# another mod's name instead of failing. Bash expands "${#a[@]}" on an unset or
+# empty array without nounset error, so the check is safe before any staging.
+if (( ${#NAMES[@]} != ${#SRCS[@]} )); then
+  echo "FATAL: ${NAMES[*]} and SRCS must list one entry per mod (${#NAMES[@]} vs ${#SRCS[@]})" >&2
+  exit 1
+fi
 
 usage() {
   cat <<'EOF'

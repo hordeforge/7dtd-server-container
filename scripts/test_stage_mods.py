@@ -25,6 +25,8 @@ unpatched against a sandbox tree with a stub run.sh recording restarts:
               exactly once via `run.sh restart`
   update-none no mods-available/ at all: the restage is skipped, the enabled
               mods stay as they are, and the restart still happens
+  mismatch    a NAMES/SRCS length mismatch is refused before anything is
+              staged
 
 Each failed check prints a FAIL line; the process exits nonzero if any failed.
 """
@@ -229,6 +231,28 @@ with tempfile.TemporaryDirectory() as tmp:
         and (mods / "BotMod" / "Config" / "config.json").read_text(encoding="utf-8") == "live-bot",
     )
     check("a failed enable copy swept its staging dir", litter_gone(mods))
+
+# NAMES and SRCS are read by index: a mod listed in one and not the other would
+# stage a sibling's dist under another mod's name, so the script must refuse
+# before it stages anything.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    root = make_stage_sandbox(tmpdir / "mismatched", NAMES)
+    script = root / "scripts" / "stage_mods.sh"
+    src = script.read_text(encoding="utf-8")
+    short = src.replace('  "$WS/7dtd-fps-bots/dist/BotMod"\n', "")
+    check("the BotMod SRCS line is present to remove", short != src)
+    script.write_text(short, encoding="utf-8")
+
+    proc = run_script(script, cwd=root, env={})
+    err = proc.stderr.decode(errors="replace")
+    check("mismatched NAMES/SRCS exits 1", proc.returncode == 1)
+    check("mismatch names both sides on stderr", "FATAL" in err and "SRCS" in err)
+    mods = root / "mods"
+    check(
+        "the mismatched run staged nothing",
+        not mods.exists() or list(mods.iterdir()) == [],
+    )
 
 # update_mods.sh: server-side restage from mods-available/ plus one restart.
 with tempfile.TemporaryDirectory() as tmp:
