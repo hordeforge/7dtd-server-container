@@ -5,18 +5,22 @@ Methodology: entrypoint.sh only ever executes inside its container image, so
 its failure paths were untestable until now. A sandbox gets a patched copy of
 entrypoint.sh (hardcoded image paths rewritten to sandbox paths), a steamcmd
 stub that just creates the expected server binary, and the real config
-templates plus scripts/lib-env.sh. With STEAMCMD_ONLY=1 the run covers every
-step up to the exec boundary:
+templates plus scripts/lib-env.sh. With STEAMCMD_UPDATE=0 the run walks the
+whole boot path (platform.cfg, render_config, seed_admin_file, sync_mods) up to
+the exec boundary, where a fake server binary stands in for the game:
 
   fresh      render_config + seed_admin_file succeed; serverconfig.xml is
              fully rendered, the minted webadmin credential record matches
-             the digest embedded in serveradmin.xml, and no temp files leak
+             the digest embedded in serveradmin.xml, the rendered files are
+             owner-only, and no temp files leak
   existing   a later boot with WEBADMIN_PASSWORD set skips the seed with a
              visible warning instead of silently dropping the value
   reseed     deleting serveradmin.xml makes the next boot re-seed under an
              operator password and remove the stale minted record
   bad-tmpl   an unrendered placeholder fatal-exits AND leaves neither the
              half-rendered temp file nor any seeded output behind
+  slow-cmd   a steamcmd attempt that hangs past its budget is killed and
+             retried, then the boot fatal-exits naming the budget
   sync-mods  the per-boot Mods sync: what /mods no longer stages is swept,
              stock 0_TFP_Harmony survives, hidden /mods entries still reach
              Mods, an edited staged mod propagates, and a mod whose content
@@ -29,12 +33,12 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import re
 import shutil
 import stat
 import subprocess
 import sys
 import tempfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -58,6 +62,12 @@ def check(name: str, cond: bool) -> bool:
 def digest(pw: str) -> str:
     """The exact md5-base64 form the dashboard expects (see lib-env.sh)."""
     return base64.b64encode(hashlib.md5(pw.encode()).digest()).decode()
+
+
+def webadmin_pass(adm_xml: str) -> str | None:
+    """The pass attribute of the dashboard's admin user, not any pass= text."""
+    users = ET.fromstring(adm_xml).findall("./webusers/user")
+    return users[0].get("pass") if len(users) == 1 else None
 
 
 STEAMCMD_STUB = """#!/bin/sh
@@ -107,18 +117,16 @@ def make_sandbox(tmpdir: Path, drift: str | None) -> tuple[Path, Path, Path]:
         .replace("/config/serverconfig.tmpl.xml", str(conf / "serverconfig.tmpl.xml"))
         .replace("/config/serveradmin_seed.xml", str(conf / "serveradmin_seed.xml"))
     )
-    if drift == "cfg_userdata":
-        patched = patched.replace(
-            '-e "s|@USERDATA_DIR@|${USERDATA_DIR}|g"',
-            "",
-            1,
-        )
-    elif drift == "adm_hash":
-        patched = patched.replace(
-            '"s|@WEBADMIN_PASSWORD_HASH@|${b64}|g"',
-            '"s|@NOPE@|x|g"',
-            1,
-        )
+    if drift is not None:
+        anchor, replacement = {
+            "cfg_userdata": ('-e "s|@USERDATA_DIR@|${USERDATA_DIR}|g"', ""),
+            "adm_hash": ('"s|@WEBADMIN_PASSWORD_HASH@|${b64}|g"', '"s|@NOPE@|x|g"'),
+        }[drift]
+        patched = patched.replace(anchor, replacement, 1)
+        # A drifted entrypoint must produce a different patch, or the scenario
+        # silently degrades into the clean-boot one and passes for the wrong
+        # reason.
+        assert patched != src, f"drift patch anchor missing: {anchor}"
     ep = root / "entrypoint.sh"
     ep.write_text(patched)
     ep.chmod(ep.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
@@ -172,10 +180,29 @@ with tempfile.TemporaryDirectory() as tmp:
     if not check("fresh boot exits 0", proc.returncode == 0):
         print(err, file=sys.stderr)
     else:
-        check("fresh boot warns about the public default telnet password", "WARN" in err)
+        # sync_mods emits its own WARN on the same stream, so the bare "WARN"
+        # would pass even if this boot never fell back to the public default.
+        check(
+            "fresh boot warns about the public default telnet password",
+            "WARN: TELNET_PASSWORD unset" in err and "public lab default" in err,
+        )
         srv_cfg = (game / "serverconfig.xml").read_text(encoding="utf-8")
         check("serverconfig.xml fully rendered", "@" not in srv_cfg)
-        check("serverconfig.xml carries the telnet values", "8087" in srv_cfg)
+        # Read the properties the entrypoint actually owns, not a substring of
+        # a stock template that happens to mention the same digits.
+        props = {
+            p.get("name"): p.get("value")
+            for p in ET.fromstring(srv_cfg).iter("property")
+            if p.get("name") is not None
+        }
+        check(
+            "serverconfig.xml carries the rendered telnet values",
+            props.get("TelnetPort") == "8087" and props.get("TelnetPassword") == "retest",
+        )
+        check(
+            "serverconfig.xml points Saves at the rendered userdata dir",
+            props.get("UserDataFolder") == str(userdata),
+        )
         check(
             "platform.cfg written",
             (game / "platform.cfg").read_text(encoding="utf-8").startswith("platform=Steam"),
@@ -183,14 +210,24 @@ with tempfile.TemporaryDirectory() as tmp:
         adm = userdata / "Saves" / "serveradmin.xml"
         record = userdata / "Saves" / ".webadmin-password"
         adm_text = adm.read_text(encoding="utf-8")
-        got_pass = re.search(r'pass="([^"]+)"', adm_text)
+        got_pass = webadmin_pass(adm_text)
         check("serveradmin.xml rendered with a digest pass attribute", got_pass is not None)
         minted = record.read_text(encoding="utf-8").rstrip("\n")
         check(
             "credential record matches the seeded digest",
-            got_pass is not None and got_pass.group(1) == digest(minted),
+            got_pass is not None and got_pass == digest(minted),
         )
         check("no temp files leaked", no_temp_files(game, userdata / "Saves"))
+        # Both rendered files carry credentials (telnet password, dashboard
+        # digest); render_config/seed_admin_file set umask 077 so they are not
+        # world-readable in the host's data/ tree.
+        modes = {
+            p: stat.S_IMODE(p.stat().st_mode) for p in (game / "serverconfig.xml", adm, record)
+        }
+        check(
+            f"rendered credential files are owner-only (modes: {modes})",
+            all(mode == 0o600 for mode in modes.values()),
+        )
         check(
             "temp files stranded by a killed previous boot were swept",
             not (game / ".serverconfig.xml.tmp").exists()
@@ -217,10 +254,10 @@ with tempfile.TemporaryDirectory() as tmp:
     proc = run_entrypoint(root, {"WEBADMIN_PASSWORD": "operator-pass-1"})
     check("reseed exits 0", proc.returncode == 0)
     adm_text = (userdata / "Saves" / "serveradmin.xml").read_text(encoding="utf-8")
-    got_pass = re.search(r'pass="([^"]+)"', adm_text)
+    got_pass = webadmin_pass(adm_text)
     check(
         "reseed applied the operator password digest",
-        got_pass is not None and got_pass.group(1) == digest("operator-pass-1"),
+        got_pass == digest("operator-pass-1"),
     )
     record_path = userdata / "Saves" / ".webadmin-password"
     check("reseed removed the stale minted record", not record_path.exists())

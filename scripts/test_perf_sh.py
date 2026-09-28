@@ -26,6 +26,7 @@ Each failed check prints a FAIL line; the process exits nonzero if any failed.
 
 from __future__ import annotations
 
+import os
 import shutil
 import socket
 import subprocess
@@ -34,6 +35,27 @@ import tempfile
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parent
+
+
+def resolved_bin_path(*bins: str) -> str:
+    """A PATH carrying the tools the scripts under test shell out to.
+
+    perf.sh runs through /usr/bin/env bash, so PATH must resolve sed, grep,
+    tail, and tr. Resolve those directories from the running host instead of
+    assuming a fixed /usr/bin:/bin, which is not where coreutils lives on
+    NixOS, a brew-only prefix, or a slim test image.
+    """
+    dirs: set[Path] = set()
+    for binary in bins:
+        found = shutil.which(binary)
+        if found is None:
+            print(f"FAIL: required binary not found on PATH: {binary}", file=sys.stderr)
+            sys.exit(1)
+        dirs.add(Path(found).parent)
+    return os.pathsep.join(str(d) for d in sorted(dirs))
+
+
+SANDBOX_PATH = resolved_bin_path("bash", "sed", "grep", "tail", "tr", "ls")
 
 failed_checks: list[str] = []
 
@@ -89,7 +111,7 @@ def run_perf(
         [str(root / "scripts" / "perf.sh"), *args],
         cwd=root,
         env={
-            "PATH": "/usr/bin:/bin",
+            "PATH": SANDBOX_PATH,
             "PERF_STUB_LOG": str(root / "restarts.log"),
             **(extra_env or {}),
         },
@@ -104,7 +126,10 @@ def cfg_path(root: Path) -> Path:
 
 
 def expect(name: str, proc: subprocess.CompletedProcess[bytes], stdout: str, rc: int) -> None:
-    ok = proc.returncode == rc and stdout in proc.stdout.decode()
+    # These commands print exactly one line, so compare the whole stream: a
+    # substring match would accept a duplicated or prefixed line and would not
+    # notice a command that started printing more than it should.
+    ok = proc.returncode == rc and proc.stdout.decode() == f"{stdout}\n"
     check(f"{name} (rc={proc.returncode}, out={proc.stdout.decode(errors='replace')!r})", ok)
 
 
@@ -140,6 +165,10 @@ with tempfile.TemporaryDirectory() as tmp:
     check(
         "on restored the exact original bytes",
         cfg_path(root).read_text(encoding="utf-8") == CONFIG_ON,
+    )
+    check(
+        "on restarted the container once more (one restart per flip)",
+        (root / "restarts.log").read_text(encoding="utf-8") == "restart\nrestart\n",
     )
 
     # Negative: off without a config must refuse loudly instead of restarting
@@ -199,6 +228,10 @@ with tempfile.TemporaryDirectory() as tmp:
         "--help exits 0 on stdout",
         proc.returncode == 0 and b"usage: perf.sh" in proc.stdout and not proc.stderr,
     )
+    check("-h answers the same as --help", run_perf(["-h"], root).stdout == proc.stdout)
+    # No command word at all defaults to status, so a bare `./perf.sh` reports
+    # instead of usage-erroring on the empty word.
+    expect("no command defaults to status", run_perf([], root), "EfficientServer: on", 0)
     proc = run_perf(["frobnicate"], root)
     check(
         "unknown command exits 2 with usage on stderr",

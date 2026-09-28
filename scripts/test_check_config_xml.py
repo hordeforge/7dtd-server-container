@@ -3,8 +3,11 @@
 
 Methodology: pin the CI-gate contract at its failure boundaries.
   no args     usage error, exit 2 (checking nothing must not read as success)
+  --help      exit 0 on stdout, even beside file arguments
   valid file  exit 0 with a "well-formed" line
-  bad XML     exit 1 with a named-file error on stderr
+  bad XML     exit 1 with the script's own "<path>: NOT well-formed" error
+  bad in a    exit 1 at the first bad file, in either batch position
+  batch
   missing/    exit 1 (OSError path: unreadable or absent input)
   unreadable
 Each failed check prints a FAIL line; the process exits nonzero if any failed.
@@ -43,17 +46,37 @@ with tempfile.TemporaryDirectory() as tmp:
 
     r = run()
     check("no args exits 2", r.returncode == 2)
-    check("no args prints usage on stderr", b"usage:" in r.stderr)
+    check(
+        "no args prints usage with the operand list on stderr",
+        b"usage:" in r.stderr and b"FILE [FILE ...]" in r.stderr and r.stdout == b"",
+    )
+
+    r = run("--help")
+    check("help exits 0 on stdout", r.returncode == 0 and b"FILE [FILE ...]" in r.stdout)
+    check("help writes nothing to stderr", r.stderr == b"")
+    # Help wins wherever it appears, so a file argument beside it must not be
+    # parsed (and cannot turn the run into a parse failure).
+    r = run(str(malformed), "--help")
+    check(
+        "help wins over file arguments (no per-file report, no parse failure)",
+        r.returncode == 0 and r.stdout == run("--help").stdout and r.stderr == b"",
+    )
 
     r = run(str(good))
     check("valid file exits 0", r.returncode == 0)
     check("valid file reported well-formed", b"well-formed" in r.stdout)
 
     # The malformed file must be named in the error so an operator can go
-    # straight to it; ParseError detail rides along.
+    # straight to it; ParseError detail rides along. The script's own
+    # "NOT well-formed" wording is the contract: the exception's strerror
+    # alone would also contain the path, so matching only the name would pass
+    # even if the script printed nothing but the exception.
     r = run(str(malformed))
     check("malformed XML exits 1", r.returncode == 1)
-    check("malformed XML names the file", b"bad.xml" in r.stderr)
+    check(
+        "malformed XML names the file in the script's error",
+        f"{malformed}: NOT well-formed".encode() in r.stderr,
+    )
     try:
         ET.parse(malformed)
         parse_raises = False
@@ -63,19 +86,26 @@ with tempfile.TemporaryDirectory() as tmp:
 
     r = run(str(tmpdir / "absent.xml"))
     check("missing file exits 1", r.returncode == 1)
-    check("missing file named in error", b"absent.xml" in r.stderr)
+    check("missing file named in the script's error", b"absent.xml: NOT well-formed" in r.stderr)
 
-    # Multiple files: one bad apple must fail the batch even after a good one,
+    # Multiple files: one bad apple must fail the batch in either position,
     # and name it so the operator goes straight to the culprit.
     r = run(str(good), str(malformed))
     check("one bad file fails the batch", r.returncode == 1)
-    check("batch failure names the bad file", b"bad.xml" in r.stderr)
+    check("batch failure names the bad file", str(malformed).encode() in r.stderr)
+    check("the good file ahead of the bad one was reported", str(good).encode() in r.stdout)
+    r = run(str(malformed), str(good))
+    check("a bad first file fails the batch too", r.returncode == 1)
+    check("the batch stops at the first bad file", str(good).encode() not in r.stdout)
 
     # OSError path beyond a missing file: a directory opens but cannot be
     # parsed (IsADirectoryError); must exit 1 cleanly, not traceback.
     r = run(str(tmpdir))
     check("directory input exits 1", r.returncode == 1)
-    check("directory input named in error", tmpdir.name.encode() in r.stderr)
+    check(
+        "directory input named in the script's error",
+        f"{tmpdir}: NOT well-formed".encode() in r.stderr,
+    )
 
 if failed_checks:
     sys.exit(1)

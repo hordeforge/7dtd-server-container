@@ -18,7 +18,9 @@ system directories, so the probe cannot accidentally see the host's timeout:
   timeout  records argv, then execs the wrapped command so exit codes flow
 
 Scenarios:
-  plain       no --restart: rsync runs once, ssh never does
+  plain       no --restart: staging runs, rsync runs once with the pinned
+              argv (--delete, --timeout, and the data/backups excludes), ssh
+              never does
   supervised  --restart with timeout on PATH: ssh runs under it, bound to
               300s, and the destination reaches ssh via stdin only
   degraded    --restart with neither timeout nor gtimeout: exit 0, WARN
@@ -116,6 +118,37 @@ EXPECTED_SSH_ARGV = [
     REMOTE_CMD.encode(),
 ]
 
+# The whole rsync argv is load-bearing, not just its last word: --delete with a
+# dropped --exclude data/backups would wipe server-owned saves and backup
+# archives, and a dropped --timeout=60 would leave a stalled transfer hanging.
+EXPECTED_RSYNC_ARGV = [
+    b"-a",
+    b"--delete",
+    b"--timeout=60",
+    b"-e",
+    b"ssh -o ConnectTimeout=10",
+    b"--exclude",
+    b".git",
+    b"--exclude",
+    b"data",
+    b"--exclude",
+    b"backups",
+    b"--exclude",
+    b".mypy_cache",
+    b"--exclude",
+    b".ruff_cache",
+    b"--exclude",
+    b".venv",
+    b"--exclude",
+    b"__pycache__",
+    b"--exclude",
+    b"coverage",
+    b"--exclude",
+    b"coverage.cobertura.xml",
+    b"--exclude",
+    b".scratch*",
+]
+
 
 def make_sandbox(
     tmpdir: Path, timeout_name: str | None, with_dists: bool = True
@@ -185,6 +218,15 @@ def fail_stderr(proc: subprocess.CompletedProcess[bytes]) -> None:
     print(proc.stderr.decode(errors="replace"), file=sys.stderr)
 
 
+def expected_rsync_argv(project: Path) -> list[bytes]:
+    """rsync's full argv for this sandbox: pinned flags, source, destination."""
+    return [
+        *EXPECTED_RSYNC_ARGV,
+        f"{project}/".encode(),
+        f"{SSH_USER}@{HOST}:{DEST_DIR}/".encode(),
+    ]
+
+
 # Plain deploy: staging + rsync only; nothing may reach ssh.
 with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
@@ -194,10 +236,14 @@ with tempfile.TemporaryDirectory() as tmp:
     if proc.returncode != 0:
         fail_stderr(proc)
     rsync_calls = invocations(Path(env["DEPLOY_TEST_RSYNC_LOG"]))
-    check("plain deploy stages + rsyncs exactly once", len(rsync_calls) == 1)
+    check("plain deploy rsyncs exactly once", len(rsync_calls) == 1)
     check(
-        "rsync targets the configured host destination",
-        bool(rsync_calls) and rsync_calls[0][-1] == f"{SSH_USER}@{HOST}:{DEST_DIR}/".encode(),
+        "rsync argv pins the transfer flags, the source tree, and the host destination",
+        rsync_calls == [expected_rsync_argv(project)],
+    )
+    check(
+        "plain deploy staged before transferring (both mod dirs exist)",
+        (project / "mods").is_dir() and (project / "mods-available").is_dir(),
     )
     check(
         "plain deploy never opens an ssh session",
@@ -269,13 +315,12 @@ with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
     project, env = make_sandbox(tmpdir, timeout_name=None)
     proc = run_deploy(project, env, "--restart")
-    out = proc.stdout + proc.stderr
     check("--restart without timeout or gtimeout exits 0", proc.returncode == 0)
     if proc.returncode != 0:
         fail_stderr(proc)
     check(
         "stderr names the lost local time bound",
-        b"WARN" in out and b"timeout" in out,
+        b"WARN" in proc.stderr and b"timeout" in proc.stderr,
     )
     ssh_calls = invocations(Path(env["DEPLOY_TEST_SSH_LOG"]))
     check(
@@ -298,23 +343,29 @@ with tempfile.TemporaryDirectory() as tmp:
     project, env = make_sandbox(tmpdir, timeout_name="timeout")
     env["DEPLOY_TEST_SSH_RC"] = "255"
     proc = run_deploy(project, env, "--restart")
-    out = proc.stdout + proc.stderr
-    check("failing remote restart exits nonzero", proc.returncode != 0)
+    # The FATAL is the only message here that may carry the failure: the
+    # pre-restart "deployed ..." line goes to stdout and already names the host,
+    # so a combined-stream match would pass on the success line alone.
+    err = proc.stderr
+    fatal = next((line for line in err.splitlines() if line.startswith(b"FATAL:")), b"")
+    check("failing remote restart exits 1", proc.returncode == 1)
     check(
-        "the failed restart names the phase and host",
-        b"remote restart" in out and HOST.encode() in out,
+        f"the failed restart names the phase and host (stderr: {err!r})",
+        fatal.startswith(b"FATAL: remote restart on ")
+        and f"{SSH_USER}@{HOST}".encode() in fatal
+        and b"failed (exit 255)" in fatal,
     )
     check(
         "the failed restart reports deployed-tree/stale-mods state",
-        b"deployed" in out and b"old mods" in out,
+        b"the tree is deployed" in err and b"old mods" in err,
     )
     check(
         "the failed restart names the recovery command",
-        b"update_mods.sh" in out,
+        b"./scripts/update_mods.sh" in err and b"deploy.sh --restart" in err,
     )
     check(
-        "rsync still ran before the failing restart",
-        len(invocations(Path(env["DEPLOY_TEST_RSYNC_LOG"]))) == 1
+        "rsync still ran before the failing restart, with the pinned argv",
+        invocations(Path(env["DEPLOY_TEST_RSYNC_LOG"])) == [expected_rsync_argv(project)]
         and len(invocations(Path(env["DEPLOY_TEST_SSH_LOG"]))) == 1,
     )
 
@@ -329,7 +380,9 @@ with tempfile.TemporaryDirectory() as tmp:
     check("extra argument exits 2 naming it", proc.returncode == 2 and b"frobnicate" in out)
     check(
         "the refused deploy staged and rsynced nothing",
-        invocations(Path(env["DEPLOY_TEST_RSYNC_LOG"])) == [],
+        invocations(Path(env["DEPLOY_TEST_RSYNC_LOG"])) == []
+        and not (project / "mods").exists()
+        and not (project / "mods-available").exists(),
     )
     proc = run_deploy(project, env, "frobnicate")
     out = proc.stdout + proc.stderr
@@ -339,7 +392,9 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     check(
         "the rejected unknown argument also staged nothing",
-        invocations(Path(env["DEPLOY_TEST_RSYNC_LOG"])) == [],
+        invocations(Path(env["DEPLOY_TEST_RSYNC_LOG"])) == []
+        and not (project / "mods").exists()
+        and not (project / "mods-available").exists(),
     )
 
 if failed_checks:

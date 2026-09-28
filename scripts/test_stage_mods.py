@@ -20,14 +20,18 @@ unpatched against a sandbox tree with a stub run.sh recording restarts:
               instead of wiping it and exiting 0
   update      restage copies mods-available content over every mod already
               enabled in mods/ (marker propagates), leaves a mod that has
-              no mods-available counterpart alone, sweeps litter, and
-              restarts exactly once
+              no mods-available counterpart alone, never enables a mod that
+              is staged but not yet enabled, sweeps litter, and restarts
+              exactly once via `run.sh restart`
+  update-none no mods-available/ at all: the restage is skipped, the enabled
+              mods stay as they are, and the restart still happens
 
 Each failed check prints a FAIL line; the process exits nonzero if any failed.
 """
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -56,6 +60,24 @@ SIBLING_OF = {
 NAMES = list(SIBLING_OF)
 
 WS_LINE = 'WS="$(cd "$ROOT/.." && pwd)"'
+
+
+# The scripts under test run through /usr/bin/env bash, so PATH must resolve
+# the tools they shell out to. Resolve those directories from the running host
+# instead of assuming a fixed /usr/bin:/bin, which is not where coreutils
+# lives on NixOS, brew-only prefixes, or a slim test image.
+def resolved_bin_path(*bins: str) -> str:
+    dirs: set[Path] = set()
+    for binary in bins:
+        found = shutil.which(binary)
+        if found is None:
+            print(f"FAIL: required binary not found on PATH: {binary}", file=sys.stderr)
+            sys.exit(1)
+        dirs.add(Path(found).parent)
+    return os.pathsep.join(str(d) for d in sorted(dirs))
+
+
+SANDBOX_PATH = resolved_bin_path("bash", "cp", "mv", "rm", "ls", "mkdir", "basename", "dirname")
 
 
 def fake_dist(ws: Path, name: str, marker: str) -> Path:
@@ -92,7 +114,7 @@ def run_script(
     return subprocess.run(
         [str(script), *args],
         cwd=cwd,
-        env={"PATH": "/usr/bin:/bin", **env},
+        env={"PATH": SANDBOX_PATH, **env},
         capture_output=True,
         check=False,
         timeout=60,
@@ -230,7 +252,9 @@ with tempfile.TemporaryDirectory() as tmp:
 
     stub_log = root / "restarts.log"
     stub = scripts / "run.sh"
-    stub.write_text("#!/usr/bin/env bash\nprintf 'restart\\n' >> \"$UPD_STUB_LOG\"\n")
+    stub.write_text(
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$UPD_STUB_LOG"\n',
+    )
     stub.chmod(0o755)
 
     # mods-available is the newer truth: both enabled mods carry new markers;
@@ -243,6 +267,9 @@ with tempfile.TemporaryDirectory() as tmp:
     seeded_mod(mods, "EfficientServer", "old-marker")
     seeded_mod(mods, "BotMod", "bot-old")
     seeded_mod(mods, "StaleMod", "keep-me")
+    # Staged but never enabled: update restages what is already enabled in
+    # mods/, so a mods-available-only mod must not sneak in.
+    seeded_mod(mods_available, "NotEnabled", "not-enabled")
     tmp_litter(mods, "BotMod")
 
     proc = run_script(scripts / "update_mods.sh", cwd=root, env={"UPD_STUB_LOG": str(stub_log)})
@@ -265,7 +292,11 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     check("restage swept staging litter", litter_gone(mods))
     check(
-        "update restarted the container exactly once",
+        "a mod staged but not enabled was not enabled by the update",
+        not (mods / "NotEnabled").exists(),
+    )
+    check(
+        "update restarted the container exactly once, with the restart subcommand",
         stub_log.read_text(encoding="utf-8") == "restart\n",
     )
 
@@ -316,6 +347,39 @@ with tempfile.TemporaryDirectory() as tmp:
         stub_log.read_text(encoding="utf-8") == restarts_before,
     )
 
+# No mods-available/ at all (a tree that predates staging, or one where the
+# directory was removed): update must skip the restage instead of erroring,
+# leave the enabled mods as they are, and still restart so the entrypoint
+# re-syncs Mods/.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    root = tmpdir / "srv"
+    scripts = root / "scripts"
+    scripts.mkdir(parents=True)
+    shutil.copy2(SCRIPTS / "lib-env.sh", scripts / "lib-env.sh")
+    shutil.copy2(SCRIPTS / "update_mods.sh", scripts / "update_mods.sh")
+    stub_log = root / "restarts.log"
+    stub = scripts / "run.sh"
+    stub.write_text('#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$UPD_STUB_LOG"\n')
+    stub.chmod(0o755)
+    mods = root / "mods"
+    seeded_mod(mods, "EfficientServer", "untouched")
+
+    proc = run_script(scripts / "update_mods.sh", cwd=root, env={"UPD_STUB_LOG": str(stub_log)})
+    check(
+        f"update without mods-available exits 0 (stderr: {proc.stderr.decode(errors='replace')!r})",
+        proc.returncode == 0,
+    )
+    check(
+        "update without mods-available left the enabled mods alone",
+        (mods / "EfficientServer" / "Config" / "config.json").read_text(encoding="utf-8")
+        == "untouched",
+    )
+    check(
+        "update without mods-available still restarted once",
+        stub_log.read_text(encoding="utf-8") == "restart\n",
+    )
+
 # Usage errors are refused before any staging side effect, and the offending
 # word is named: a silently ignored argument would read as success while the
 # enabled set was rebuilt anyway. Help still wins over extra words, exactly
@@ -345,7 +409,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("second word exits 2 naming it", proc.returncode == 2 and "frobnicate" in err)
     check(
         "no rejected invocation staged anything",
-        not mods.exists() or list(mods.iterdir()) == [],
+        not mods.exists() and not (root / "mods-available").exists(),
     )
 
 if failed_checks:

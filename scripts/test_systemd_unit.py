@@ -66,10 +66,30 @@ check(
     len(timeouts) == 1 and timeouts[0] >= WORST_STOP_SECS,
 )
 
-pinned_env = re.findall(r"^Environment=(TELNET_PASSWORD|TELNET_PORT)=", text, re.MULTILINE)
+
+def environment_names(unit_text: str) -> set[str]:
+    """Every variable named by any Environment= assignment in the unit.
+
+    systemd accepts several forms a line-anchored regex misses: leading
+    indentation, and one line carrying several assignments
+    (`Environment=A=1 TELNET_PORT=9999`). Reading the names, not the lines,
+    is what the "no second default" contract is about.
+    """
+    names: set[str] = set()
+    for line in unit_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        if stripped.startswith("Environment="):
+            for assignment in stripped.removeprefix("Environment=").split():
+                names.add(assignment.partition("=")[0])
+    return names
+
+
+pinned_env = environment_names(text) & {"TELNET_PASSWORD", "TELNET_PORT"}
 check(
     "unit does not hardcode TELNET_PASSWORD/TELNET_PORT (init_telnet_env owns them)",
-    pinned_env == [],
+    not pinned_env,
 )
 
 init_lines = re.findall(r"^Init=(.*)$", text, re.MULTILINE)

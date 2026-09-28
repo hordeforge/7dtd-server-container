@@ -68,6 +68,13 @@ err = io.StringIO()
 with contextlib.redirect_stderr(err):
     usage_rc = coverage_badge.main(["coverage_badge"])
 check("usage error exits 2", usage_rc == 2)
+# len(argv) != 3, so under- and over-long invocations must be refused too: a
+# bare `len(argv) < 3` guard would let a 4-argument call write a badge.
+with contextlib.redirect_stderr(io.StringIO()):
+    too_few = coverage_badge.main(["coverage_badge", "only-one-operand"])
+    too_many = coverage_badge.main(["coverage_badge", "a.xml", "b.svg", "c"])
+check("two operands exit 2", too_few == 2)
+check("four operands exit 2", too_many == 2)
 # The usage line must name both operands so a wrong invocation is diagnosable
 # without opening the script (same contract the check-config-xml tests pin).
 usage = err.getvalue()
@@ -76,17 +83,28 @@ check("usage line names both operands", "COBERTURA_XML" in usage and "OUTPUT.svg
 
 # Failure paths must exit 1 with a message naming the input, never a raw
 # traceback (the badge step runs unattended in CI; the operator needs the
-# culprit file, not a stack).
+# culprit file, not a stack). A failed render must also leave the destination
+# untouched: a stale badge from an earlier run is exactly the false green this
+# script exists to prevent, and a partial write before validation would be
+# indistinguishable from it.
+STALE_BADGE = "<svg>previous run</svg>"
+
+
 def failing(content: str, out_name: str = "badge.svg") -> int:
     with tempfile.TemporaryDirectory() as tmp:
         tmpdir = Path(tmp)
         src = tmpdir / "cobertura.xml"
         dst = tmpdir / out_name
         src.write_text(content)
+        dst.write_text(STALE_BADGE)
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
             rc = coverage_badge.main(["coverage_badge", str(src), str(dst)])
         check(f"failure names the input ({content!r})", "cobertura.xml" in err.getvalue())
+        check(
+            f"failed render left the destination untouched ({content!r})",
+            dst.read_text() == STALE_BADGE,
+        )
         return rc
 
 
@@ -125,9 +143,21 @@ for pct, fill in [
 ]:
     check(f"colour({pct}) == {fill}", coverage_badge.colour(pct) == fill)
 
+# The value rect must be the third one and the one starting at the label
+# width: a bare membership test would pass with the band colour painted on
+# the clip rect, the label rect, or the gradient overlay.
 _, root = render("0.75")
-fills = [r.get("fill") for r in root.iter(f"{NS}rect")]
-check("value rect carries the band colour", "#97ca00" in fills)
+rects = list(root.iter(f"{NS}rect"))
+check("the four rects keep their clip/label/value/overlay order", len(rects) == 4)
+value_rect = rects[2] if len(rects) == 4 else ET.Element("rect")
+check(
+    "value rect carries the band colour at the label boundary "
+    f"(rects: {[r.get('fill') for r in rects]})",
+    value_rect.get("fill") == "#97ca00"
+    and value_rect.get("x") == "64"
+    and value_rect.get("width") == "36"
+    and value_rect.get("height") == "20",
+)
 
 if failed_checks:
     sys.exit(1)
