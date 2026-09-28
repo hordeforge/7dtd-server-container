@@ -77,6 +77,10 @@ check(
     "a missing shellcheck is named before the lint loop",
     "shellcheck not found on PATH" in MAKEFILE,
 )
+check(
+    "a missing kcov is named before the coverage run",
+    "kcov not found on PATH" in MAKEFILE,
+)
 
 # The venv is the interpreter the whole gate runs on, so which Python it gets
 # is a build property, not a contributor's local state. A .python-version bump

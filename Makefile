@@ -119,11 +119,14 @@ lint: $(PYBIN)/ruff
 	echo "Containerfile OK"
 
 test: $(PYBIN)/ruff
+	# Each suite announces itself the way test-one does, so a red run names the
+	# suite that went red instead of leaving it to be guessed from the trace.
+	echo "== scripts/test_lib_env.sh"
 	bash scripts/test_lib_env.sh
 	set -euo pipefail; \
-	for t in $(TESTS); do $(PYBIN)/python "$$t"; done
+	for t in $(TESTS); do echo "== $$t"; $(PYBIN)/python "$$t"; done
 
-# One suite, for the edit-test loop. `make test` runs all twelve in sequence,
+# One suite, for the edit-test loop. `make test` runs every suite in sequence,
 # which is the wrong cost while iterating on a single file. The suite is named
 # bare (SUITE=test_run_sh.py) or by path, several at once are fine, and each
 # runs through the same interpreter and entry point `make test` uses, so a
@@ -152,6 +155,13 @@ test-one: $(PYBIN)/ruff
 check: lint test
 
 coverage:
+	# kcov is the one optional gate tool, and `kcov: command not found` after a
+	# recipe line says nothing about where to get it, so name the dependency
+	# the same way lint names shellcheck.
+	@command -v kcov >/dev/null 2>&1 || { \
+	  echo "FATAL: kcov not found on PATH; 'make coverage' needs it (macOS: brew install kcov, Fedora: dnf install kcov, Debian/Ubuntu 24.04: no package, build v43 from source as the coverage-badge job in .github/workflows/ci.yml does)." >&2; \
+	  exit 1; \
+	}
 	rm -rf coverage
 	# Direct exec (not `bash script`): kcov traces the shebang interpreter;
 	# through an extra bash layer it produces an empty report.
