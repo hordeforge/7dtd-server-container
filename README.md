@@ -41,7 +41,7 @@ host beyond a trusted LAN.
 | `scripts/stage_mods.sh` | Copy built mods from sibling `dist/` into `mods-available/`, recreate the enabled copies |
 | `scripts/deploy.sh` | Stage mods + rsync this project to the server host (`--restart` also restarts the container) |
 | `scripts/update_mods.sh` | Server-side: restage enabled mods + restart container (no image rebuild) |
-| `scripts/run.sh` | Container lifecycle on the server host (build/start/logs/stop/backup/status) |
+| `scripts/run.sh` | Container lifecycle on the server host (build/start/install-only/logs/stop/backup/status/version; `--help` lists them) |
 | `scripts/perf.sh` | EfficientServer toggle (`on`/`off`/`status`) + telnet `apm status` snapshot (`measure`) |
 | `scripts/lib-env.sh` | Shared `.env` loader, telnet value validation, telnet session helper (sourced by the ops scripts) |
 | `start.sh` / `stop.sh` | Top-level daily shortcuts: start / graceful stop (wrap `run.sh`) |
@@ -111,7 +111,10 @@ cd ../7dtd-server-container && ./scripts/deploy.sh
 
 Dropping a mod into `mods/` and restarting is all it takes. Removing it from
 `mods/` and restarting disables it (the entrypoint keeps only the stock
-`0_TFP_Harmony` from the depot).
+`0_TFP_Harmony` from the depot). `scripts/stage_mods.sh` owns the enabled set
+and wipes everything else out of `mods/` on every `deploy.sh`, so removing a
+staged mod only holds until the next deploy; drop its name from `NAMES` in
+`stage_mods.sh` to keep it out.
 
 **Updating a mod never requires rebuilding the container image.** The image is
 static; mods are bind-mounted from `mods/` and re-synced by the entrypoint on

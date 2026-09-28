@@ -81,9 +81,12 @@ which means combat bots spawn as soon as the server boots; remove it from
 
 ```bash
 cd ~/7dtd-server
-rm -rf mods/BotMod                     # disable (re-enable: cp -a mods-available/BotMod mods/BotMod)
+rm -rf mods/BotMod                     # disable for now
 ./start.sh            # or ./scripts/run.sh restart
 ```
+
+BotMod is in the `NAMES` set `stage_mods.sh` owns, so the next `./scripts/deploy.sh`
+stages it back into `mods/`. To keep it out, drop `BotMod` from `NAMES` first.
 
 Key options from `mods/BotMod/Config/botmod.json`:
 

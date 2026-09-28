@@ -4,9 +4,12 @@
 # Methodology: exercise each lib function at its contract boundaries.
 #   load_env_file      literal-value semantics, precedence, malformed lines
 #   reject_unsafe_*    every forbidden character class plus length rules
+#   check_webadmin_password  character rules plus the 8-character minimum
+#   webadmin_password_digest  the md5-base64 form the dashboard expects
 #   init_telnet_env    default fill + validation wiring (host and container)
 #   init_steamcmd_env  default fill + strict {0,1} domain for both switches
 #   check_telnet_port  numeric/range boundaries incl. the octal leading-zero bug
+#   telnet_probe       bad ports refused, a listening endpoint reported up
 #   telnet_session     real wire bytes against a fake telnet endpoint, and
 #                      self-termination at its timeout against a silent one
 # Each block runs in a subshell so a FATAL exit marks only that case failed.

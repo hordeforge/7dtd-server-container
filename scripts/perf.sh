@@ -40,13 +40,12 @@ case "${1:-}" in
     ;;
 esac
 
-# Exactly one command word: a silently ignored second word would make e.g.
-# `perf.sh status --json` read as a supported option while status runs with
-# its plain output (same guard run.sh applies to its commands).
 # Exactly one command word, validated before the .env load and value
-# validation: a typo or stray flag must surface as a usage error even when
-# the environment itself is broken (guards live in scripts/lib-env.sh,
-# shared with the other ops scripts).
+# validation: a silently ignored second word would make e.g.
+# `perf.sh status --json` read as a supported option while status runs with
+# its plain output, and a typo must surface as a usage error even when the
+# environment itself is broken (guards live in scripts/lib-env.sh, shared
+# with the other ops scripts).
 COMMAND="${1:-status}"
 require_argc 1 usage "${2:-}"
 require_command "$COMMAND" 'on|off|status|measure' usage

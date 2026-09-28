@@ -36,6 +36,7 @@ Manage the 7dtd-server podman container; all runtime state lives in ./data
   logs           follow container logs
   status         show container state (default with no command)
   backup         archive world saves into backups/ (keeps the newest 7)
+  version        print the VERSION file (the canonical version home)
 
 Env overrides: TELNET_PASSWORD, TELNET_PORT, WEBADMIN_PASSWORD,
 STEAMCMD_UPDATE, STEAMCMD_ONLY, SEVENDTD_CONTAINER_NAME, SEVENDTD_IMAGE.

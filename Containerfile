@@ -1,4 +1,4 @@
-# 7dtd-server: 7 Days to Die dedicated server (V3.1.0 line) on the official
+# 7dtd-server: 7 Days to Die dedicated server (V3.2.0 line) on the official
 # steamcmd image. The container is stateless: game files, userdata, mods and
 # config are all bind-mounted from the host (see scripts/run.sh and README).
 #

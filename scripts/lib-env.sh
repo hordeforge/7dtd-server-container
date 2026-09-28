@@ -1,6 +1,7 @@
 # shellcheck shell=bash
 # Shared .env loader, telnet env validation, and the telnet session helper
-# for the ops scripts (run.sh, perf.sh).
+# for the ops scripts (run.sh, perf.sh, deploy.sh, stage_mods.sh,
+# update_mods.sh) and, via the copy baked into the image, for entrypoint.sh.
 #
 # Semantics: variables already present in the environment win over the file;
 # KEY=value lines only; values are taken literally (no variable expansion, no

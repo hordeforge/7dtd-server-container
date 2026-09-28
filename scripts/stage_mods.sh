@@ -97,4 +97,4 @@ done
 
 echo "enabled:  $(ls "$ROOT/mods")"
 echo "available: $(ls "$ROOT/mods-available")"
-echo "enable another mod: cp -a mods-available/<Name> mods/<Name>"
+echo "enable another mod persistently: add its name to NAMES in $ROOT/scripts/stage_mods.sh"
