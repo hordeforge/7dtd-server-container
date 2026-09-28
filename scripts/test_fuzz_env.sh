@@ -32,7 +32,7 @@
 #                        carrying a value or echoing a line back
 #   check_env_file_keys  0 iff every well-formed key in the file is documented,
 #                        naming the file and the offending key, never a value
-#   value predicates     ascii_length, printable_ascii_check, check_telnet_port,
+#   value predicates     ascii_length, reject_unsafe_value, check_telnet_port,
 #                        check_steamcmd_env, require_command and require_argc
 #                        each agree with an oracle written independently of the
 #                        lib: right exit code, right stream, and a refusal that
@@ -275,8 +275,30 @@ probe="$FUZZ_PROBE_VALUE"
 if [[ "$(ascii_length "$probe")" != "$FUZZ_LENGTH" ]]; then
   report "ascii_length does not count bytes"
 fi
-if [[ "$(printable_ascii_check "$probe")" != "$FUZZ_REASON" ]]; then
-  report "printable_ascii_check disagrees with its contract"
+# The printable-ASCII rule ships as reject_unsafe_value, which exits rather
+# than printing a reason. Calling it in a subshell turns that exit back into
+# the oracle's verdict: an empty reason must survive, a named one must not,
+# and the refusal has to name the setting it refused without carrying the
+# value.
+unsafe_err="$(scratch)"
+( reject_unsafe_value TELNET_PASSWORD "$probe" ) > /dev/null 2> "$unsafe_err"
+unsafe_rc=$?
+if [[ -n "$FUZZ_REASON" ]]; then
+  if (( unsafe_rc == 0 )); then
+    report "reject_unsafe_value accepted a value the contract refuses"
+  else
+    unsafe_msg="$( < "$unsafe_err" )"
+    case "$unsafe_msg" in
+      *TELNET_PASSWORD*) ;;
+      *) report "a value refusal does not name the setting" ;;
+    esac
+    case "$unsafe_msg" in
+      *Traceback*) report "reject_unsafe_value leaked a traceback" ;;
+    esac
+    no_leak "$unsafe_msg" "a value refusal"
+  fi
+elif (( unsafe_rc != 0 )); then
+  report "reject_unsafe_value refused a value the contract accepts"
 fi
 # A refusal that names the value it refused is the contract; one that leaks a
 # traceback or stays silent is not.

@@ -1584,15 +1584,18 @@ with tempfile.TemporaryDirectory() as tmp:
 # preflight cannot catch: tar -tzf reads every entry, so the archive is
 # accepted and the refusal comes from tar itself part-way through the write.
 # Extraction lands in a staging dir first, so the world must still be in place
-# when it does, and no pre-restore snapshot is spent on a restore that never
-# reached the point of discarding anything.
+# when it does, no pre-restore snapshot is spent on a restore that never
+# reached the point of discarding anything, and the message names the archive
+# that failed and says Saves is unchanged.
 with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
     make_sandbox(tmpdir)
     install_podman_stub(tmpdir, PODMAN_STUB)
-    saves = tmpdir / "data" / "userdata" / "Saves" / "region"
+    userdata = tmpdir / "data" / "userdata"
+    saves = userdata / "Saves" / "region"
     saves.mkdir(parents=True)
-    (saves / "r.0.0.region").write_bytes(b"current-world")
+    world = saves / "r.0.0.region"
+    world.write_bytes(b"current-world")
     backups = tmpdir / "backups"
     backups.mkdir()
     broken = backups / "7dtd-saves-20200101-000000.tar.gz"
@@ -1622,6 +1625,10 @@ with tempfile.TemporaryDirectory() as tmp:
     check(
         "the failed restore spent no pre-restore snapshot",
         not list(backups.glob("7dtd-saves-*-prerestore*.tar.gz")),
+    )
+    check(
+        "the extraction failure names the archive and the unchanged saves",
+        broken.name.encode() in out and b"Saves is unchanged" in out,
     )
     check(
         "the failed restore says the world is unchanged",

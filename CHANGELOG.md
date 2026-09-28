@@ -138,6 +138,18 @@ password character domain, below), so it is a **major** release: 1.1.3 to
 
 ### Changed
 
+- **The ruff rule set covers the groups it had left off.** `TRY`, `ASYNC`,
+  `G`, `T10`, `INT` and `FIX` are on, all clean on this tree, so a swallowed
+  `except`, a long message built outside the exception class, a blocking call
+  in an async def, an f-string in a log call, a leftover `breakpoint`, a
+  gettext-avoiding string helper and a stray `TODO` now fail the gate.
+  flake8-bandit is on rule by rule rather than as a group: the harness calls
+  `subprocess` by contract and starts tools on `PATH`, which are decisions and
+  not findings, while the rules that catch real defects (`eval`/`exec`, pickle,
+  `yaml.load`, a disabled TLS check, an unvalidated URL, a bind on all
+  interfaces, `shell=True`) all run. The five rules still off (S101, S105,
+  S311, S314, S324) are named in `pyproject.toml` so the gap is a list, not an
+  omission.
 - **The dashboard seed no longer commits an individual's platform ids.**
   `config/serveradmin_seed.xml` shipped two hardcoded `<user>` entries
   (a Steam userid and an EOS id) in `<adminTools><users>`, and the same Steam
@@ -216,7 +228,30 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   directory that happens to hold a `.scratch*` entry replaced the pattern with
   that filename and stopped excluding the scratch trees the pattern exists for.
   It is quoted now.
-
+- **The `.env` fuzz harness asserted a predicate the lib no longer has.** The
+  printable-ASCII rule moved into `reject_unsafe_value`, which exits instead of
+  printing a reason, and the harness kept calling the old name. A bash
+  function that does not exist returns nothing, so the assertion only failed
+  for the cases that expected a reason: the seeded run went red on the first
+  non-ASCII payload, and everything else passed without the check running at
+  all. The harness now drives `reject_unsafe_value` itself and asserts the
+  oracle's verdict both ways, that a refusal names the setting and carries
+  neither the value nor a line of the file. Dropping the non-printable test
+  from the lib's charset pattern makes the new assertion fail, which is how
+  it was checked.
+- **`scripts/test_run_sh.py` required a pre-restore snapshot from a failure
+  that no longer discards anything.** Restore extracts into a staging
+  directory beside `Saves/` and moves the result into place, so an archive
+  that fails mid-extraction leaves the world it was serving untouched. The
+  test still asserted the old contract (a snapshot taken, and named in the
+  message) and had been failing. It now asserts the current one: the world is
+  byte for byte what it was, no retention slot is burned on a snapshot for a
+  restore that discarded nothing, no staging tree is left in `data/userdata`,
+  and the message names the archive and says `Saves is unchanged`.
+- **The `run.sh` suite failed `make lint` on a type error.** A loop variable
+  named `padded` reused a name an earlier block had bound to a `list[bytes]`,
+  so mypy reported the loop, its `env=` argument and the `int()` on it as
+  three errors. The loop variable is now `zero_padded`.
 - **The quadlet unit tried to pull an image nobody publishes.** The image is
   built on the server host and is never pushed to a registry, but the unit
   carried no `Pull=`, so quadlet's `missing` default stayed quiet only while
