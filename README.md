@@ -170,9 +170,11 @@ Or keep them in a git-ignored `.env` file in this directory; copy
 [`.env.example`](.env.example) as the starting point. Values are taken
 literally (no shell expansion); one matching pair of surrounding quotes is
 stripped. The telnet password is rendered into `serverconfig.xml` at every
-start, so it must avoid backslash, pipe, ampersand, single/double quotes,
-dollar, backtick, angle brackets, and control characters; the port must be in
-1..65535. Both are checked before the container starts.
+start, so it must be printable ASCII: no backslash, pipe, ampersand,
+single/double quotes, dollar, backtick, angle brackets, control characters, or
+non-ASCII characters; the port must be in 1..65535. Both are checked before the
+container starts, by the same code on the host and inside the container, and
+the check does not depend on the locale either side happens to run under.
 
 Add players to the admin list via telnet after joining, e.g.
 `admin add <name-if-online> 0` or `admin add Steam <steamid64> 0`.

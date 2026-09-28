@@ -181,6 +181,62 @@ b64="$(webadmin_password_digest admin)"
 [[ "$b64" == "ISMvKXpXpadDiUoOSoAfww==" ]] || { echo "FAIL: md5-base64 digest vector" >&2; exit 1; }
 echo "webadmin password rules OK"
 
+# Locale independence of the value policy. `[[:print:]]` and `[[:space:]]` are
+# locale-sensitive, and this lib is deliberately run from two sides with
+# different locales: the host in the operator's UTF-8 session, the container
+# entrypoint with no LANG set (C). The same value must get the same verdict
+# from both, or a value the host accepts fails the boot inside the container.
+# A multibyte character is the input that diverges: é is printable in a UTF-8
+# locale and its two bytes are not printable in C.
+in_locale() { # locale command...; runs the command under that locale only
+  local LC_ALL="$1"
+  shift
+  # Subshell: reject_unsafe_value exits on a rejected value, and a rejection
+  # is this helper's expected answer, not the end of the suite.
+  ( "$@" )
+}
+UTF8_LOCALE=""
+for candidate in en_US.UTF-8 en_US.utf8 C.UTF-8 C.utf8; do
+  if locale -a | grep -qiFx "$candidate"; then
+    UTF8_LOCALE="$candidate"
+    break
+  fi
+done
+if [[ -n "$UTF8_LOCALE" ]]; then
+  for loc in C "$UTF8_LOCALE"; do
+    for value in 'café' 'pässwörd' "$(printf 'a\xf0\x9f\x98\x80b')"; do
+      if in_locale "$loc" reject_unsafe_value TEST "$value" 2>/dev/null; then
+        echo "FAIL: non-ASCII value accepted under LC_ALL=$loc: $value" >&2; exit 1
+      fi
+    done
+    # ASCII values keep passing in every locale, and interior spaces survive.
+    for value in 'abc-123_x' 'pass word 12'; do
+      if ! in_locale "$loc" reject_unsafe_value TEST "$value" 2>/dev/null; then
+        echo "FAIL: ASCII value rejected under LC_ALL=$loc: $value" >&2; exit 1
+      fi
+    done
+  done
+  echo "value policy locale independence OK ($UTF8_LOCALE vs C)"
+else
+  echo "value policy locale independence OK (skipped: no UTF-8 locale on this host)"
+fi
+# The rejection message must name non-ASCII, or an operator who typed an
+# accented character is told only about control characters.
+msg="$( ( reject_unsafe_value TEST 'café' ) 2>&1 || true )"
+[[ "$msg" == *"non-ASCII"* ]] || {
+  echo "FAIL: non-ASCII rejection must name the reason (got '$msg')" >&2; exit 1; }
+# Length unit: the 8-character rule counts characters, not bytes. A
+# 7-character multibyte password is 10 bytes, so a byte count would wave it
+# through in the C locale while a character count rejects it everywhere.
+for loc in C ${UTF8_LOCALE:-C}; do
+  if WEBADMIN_PASSWORD='pässwörd' in_locale "$loc" check_webadmin_password 2>/dev/null; then
+    echo "FAIL: 7-character multibyte WEBADMIN_PASSWORD accepted under LC_ALL=$loc" >&2; exit 1
+  fi
+done
+[[ "$(ascii_length 'pässwörd')" == 10 ]] || {
+  echo "FAIL: ascii_length must count bytes under C (got '$(ascii_length 'pässwörd')')" >&2; exit 1; }
+echo "password length unit OK"
+
 # check_telnet_port boundaries. Leading zeros must not hit bash octal parsing
 # (the documented bug), and both range ends are exercised.
 for good in 8087 1 65535 08087 00001 26902; do

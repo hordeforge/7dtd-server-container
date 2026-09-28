@@ -173,7 +173,7 @@ def make_sandbox(
         stubs[timeout_name] = TIMEOUT_STUB
     for name, text in stubs.items():
         stub = bindir / name
-        stub.write_text(text)
+        stub.write_text(text, encoding="utf-8")
         stub.chmod(0o755)
 
     env = {

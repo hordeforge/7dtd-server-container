@@ -33,9 +33,18 @@ def run(*args: str) -> subprocess.CompletedProcess[bytes]:
 with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
     good = tmpdir / "good.xml"
-    good.write_text("<config><prop name='a'>1</prop></config>")
+    good.write_text("<config><prop name='a'>1</prop></config>", encoding="utf-8")
     malformed = tmpdir / "bad.xml"
-    malformed.write_text("<config><unclosed></config>")
+    malformed.write_text("<config><unclosed></config>", encoding="utf-8")
+    # A declared encoding is the file's own statement about its bytes, and the
+    # parse must follow it: config files carry player and world names, so
+    # non-ASCII text is normal content, not a corrupt file.
+    utf8 = tmpdir / "utf8.xml"
+    utf8.write_text(
+        "<?xml version='1.0' encoding='utf-8'?>\n"
+        "<config><prop name='a'>café \U0001f600</prop></config>",
+        encoding="utf-8",
+    )
 
     r = run()
     check("no args exits 2", r.returncode == 2)
@@ -58,6 +67,15 @@ with tempfile.TemporaryDirectory() as tmp:
     r = run(str(good))
     check("valid file exits 0", r.returncode == 0)
     check("valid file reported well-formed", b"well-formed" in r.stdout)
+
+    r = run(str(utf8))
+    check("UTF-8 declared file exits 0", r.returncode == 0)
+    check("UTF-8 declared file reported well-formed", b"well-formed" in r.stdout)
+    prop = ET.parse(utf8).getroot().find("prop")
+    check(
+        "non-ASCII content survives the parse",
+        prop is not None and prop.text == "café \U0001f600",
+    )
 
     # The malformed file must be named in the error so an operator can go
     # straight to it; ParseError detail rides along. The script's own

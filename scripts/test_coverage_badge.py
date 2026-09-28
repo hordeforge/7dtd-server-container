@@ -37,9 +37,9 @@ def render(line_rate_attr: str | None) -> tuple[int, ET.Element]:
     with tempfile.TemporaryDirectory() as tmp:
         src = Path(tmp) / "cobertura.xml"
         dst = Path(tmp) / "badge.svg"
-        src.write_text(f"<coverage{attr}/>")
+        src.write_text(f"<coverage{attr}/>", encoding="utf-8")
         rc = coverage_badge.main(["coverage_badge", str(src), str(dst)])
-        return rc, ET.fromstring(dst.read_text())
+        return rc, ET.fromstring(dst.read_text(encoding="utf-8"))
 
 
 def svg_texts(root: ET.Element) -> list[str]:
@@ -88,8 +88,8 @@ def failing(content: str, out_name: str = "badge.svg") -> int:
         tmpdir = Path(tmp)
         src = tmpdir / "cobertura.xml"
         dst = tmpdir / out_name
-        src.write_text(content)
-        dst.write_text(STALE_BADGE)
+        src.write_text(content, encoding="utf-8")
+        dst.write_text(STALE_BADGE, encoding="utf-8")
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
             rc = coverage_badge.main(["coverage_badge", str(src), str(dst)])
@@ -114,7 +114,7 @@ check("infinite line-rate exits 1", failing('<coverage line-rate="Infinity"/>') 
 # Unwritable output directory: OSError must surface as exit 1, not a crash.
 with tempfile.TemporaryDirectory() as tmp:
     src = Path(tmp) / "cobertura.xml"
-    src.write_text('<coverage line-rate="0.5"/>')
+    src.write_text('<coverage line-rate="0.5"/>', encoding="utf-8")
     err = io.StringIO()
     with contextlib.redirect_stderr(err):
         rc = coverage_badge.main(

@@ -32,6 +32,27 @@ before 1.1.1 are reconstructed from their GitHub release notes.
   newer save as the oldest. Existing archives keep their names.
 - The `Containerfile` header claimed the V3.1.0 game line; the server and its
   mods target V3.2.0.
+- **Password value checks no longer depend on the locale.** The character
+  rules in `scripts/lib-env.sh` matched with `[[:print:]]` and `[[:space:]]`,
+  which are locale-sensitive, and the same lib runs on both sides of the
+  container boundary: in the operator's UTF-8 session and inside the image
+  with no `LANG` set. A password with an accented character was accepted on
+  the host and rejected at boot in the container. Both tests now run under
+  `LC_ALL=C`, which makes the accepted domain printable ASCII in every
+  locale, and the rejection message names non-ASCII instead of speaking only
+  about control characters.
+- **The 8-character minimum for `WEBADMIN_PASSWORD` counts characters, not
+  bytes.** bash counts characters in a multibyte locale and bytes in C, so a
+  7-character multibyte password passed the rule on a C-locale host. The
+  count goes through `ascii_length` now, which fixes the unit explicitly.
+- Explicit `encoding=` on every `read_text`/`write_text` in the Python
+  helpers and suites. `Path.write_text` without it uses the locale's
+  preferred encoding, which is ASCII under `LANG=C`.
+- The stalled-steamcmd case in `scripts/test_entrypoint_boot.py` used a
+  1-second per-attempt bound, short enough that a loaded machine could land
+  the kill before the stub recorded its attempt and make the test report a
+  missing retry. The bound is 3s now, still far below the real one.
+>
 
 ## [1.1.3] - 2026-09-21
 

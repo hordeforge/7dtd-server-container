@@ -156,32 +156,70 @@ sync_tree() { # src dst
 # container that dies on startup. The entrypoint sources this same file from
 # the image (/usr/local/lib/7dtd-lib-env.sh), so host scripts and container
 # enforce one shared copy of these rules.
-reject_unsafe_value() { # name value
-  local name="$1" value="$2"
+#
+# The accepted domain is printable ASCII (0x20..0x7E), and every character
+# test runs with LC_ALL=C so that domain does not move with the ambient
+# locale. `[[:print:]]` and `[[:space:]]` are locale-sensitive, and the two
+# sides of this copy deliberately run under different locales: the host in
+# the operator's UTF-8 session, the container with no LANG set at all (C).
+# Left locale-sensitive, the same value is accepted on one side and rejected
+# on the other (a UTF-8 session accepts "café" because é is printable, the
+# container rejects it because neither byte of it is), which is precisely the
+# drift the shared copy exists to prevent. Pinning to ASCII also settles the
+# downstream questions for free: the value is valid UTF-8 with one form only
+# (so the MD5 the dashboard stores and the password an operator types agree,
+# with no NFC/NFD pair to normalize), and the rendered XML attribute is
+# well-formed in whatever encoding the game reads it as.
+printable_ascii_check() { # value; prints the rejection reason, or nothing
+  local LC_ALL=C
   # Leading or trailing whitespace would not survive the trip through the
   # podman --env-file renderer in run.sh (its parser trims each line), so the
   # value the container sees would silently differ from the one validated
   # here; reject both edges up front. Interior whitespace is kept.
-  case "$value" in
+  case "$1" in
     [[:space:]]*|*[[:space:]])
-      echo "FATAL: $name must not start or end with whitespace" >&2
-      exit 1
+      printf 'whitespace'
+      return 0
       ;;
   esac
   # The pattern matches each forbidden character literally; the escaped quote
   # inside it is the only way to write a literal single quote in a pattern.
   # shellcheck disable=SC1003  # intentional literal-quote case pattern
-  case "$value" in
+  case "$1" in
     *'\'*|*'|'*|*'&'*|*"'"*|*'"'*|*'$'*|*'`'*|*'<'*|*'>'*|*[![:print:]]*)
-      echo "FATAL: $name must avoid backslash, |, &, ', \", \$, backtick, <, >, and control characters" >&2
+      printf 'charset'
+      return 0
+      ;;
+  esac
+}
+
+reject_unsafe_value() { # name value
+  local name="$1" reason
+  reason="$(printable_ascii_check "$2")"
+  case "$reason" in
+    whitespace)
+      echo "FATAL: $name must not start or end with whitespace" >&2
+      exit 1
+      ;;
+    charset)
+      echo "FATAL: $name must be printable ASCII: no backslash, |, &, ', \", \$, backtick, <, >, control characters, or non-ASCII characters" >&2
       exit 1
       ;;
   esac
 }
 
+# Character count under LC_ALL=C. bash counts characters in a multibyte
+# locale and bytes in C, so the same value can satisfy a length rule in one
+# locale and break it in another ("pässwörd" is 7 characters and 10 bytes);
+# every length limit here states its unit through this helper.
+ascii_length() { # value; prints the count
+  local LC_ALL=C
+  printf '%s' "${#1}"
+}
+
 check_webadmin_password() {
   reject_unsafe_value WEBADMIN_PASSWORD "$WEBADMIN_PASSWORD"
-  if (( ${#WEBADMIN_PASSWORD} < 8 )); then
+  if (( $(ascii_length "$WEBADMIN_PASSWORD") < 8 )); then
     echo "FATAL: WEBADMIN_PASSWORD must be at least 8 characters" >&2
     exit 1
   fi

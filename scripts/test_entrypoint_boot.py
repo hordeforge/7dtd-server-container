@@ -95,7 +95,7 @@ def make_sandbox(tmpdir: Path, drift: str | None) -> tuple[Path, Path, Path]:
         d.mkdir(parents=True)
 
     stub = bindir / "steamcmd"
-    stub.write_text(STEAMCMD_STUB)
+    stub.write_text(STEAMCMD_STUB, encoding="utf-8")
     stub.chmod(stub.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
     src = ENTRYPOINT.read_text(encoding="utf-8")
@@ -117,7 +117,7 @@ def make_sandbox(tmpdir: Path, drift: str | None) -> tuple[Path, Path, Path]:
         # reason.
         assert patched != src, f"drift patch anchor missing: {anchor}"
     ep = root / "entrypoint.sh"
-    ep.write_text(patched)
+    ep.write_text(patched, encoding="utf-8")
     ep.chmod(ep.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
     shutil.copy2(CONFIG / "serverconfig.tmpl.xml", conf / "serverconfig.tmpl.xml")
@@ -279,7 +279,10 @@ with tempfile.TemporaryDirectory() as tmp:
     # a hung entrypoint reads as healthy from the outside). The sandbox shrinks
     # the attempt budget and the retry backoff to keep the scenario fast; the
     # stub hangs past either. Expect: attempt 1 killed at its bound, a real
-    # retry (the marker proves it), then the fatal naming the timeout.
+    # retry (the marker proves it), then the fatal naming the timeout. The
+    # per-attempt bound is 3s, not 1s: the stub records its attempt before it
+    # hangs, and a bound short enough to be mistaken for a fast machine lands
+    # the kill before that record exists, which reads as a missing retry.
     with tempfile.TemporaryDirectory() as slow_tmp:
         tmpdir = Path(slow_tmp)
         root, game, userdata = make_sandbox(tmpdir / "slow-cmd", None)
@@ -287,14 +290,14 @@ with tempfile.TemporaryDirectory() as tmp:
         patched = ep.read_text(encoding="utf-8")
         for old, new in (
             ("max_attempts=3", "max_attempts=2"),
-            ("attempt_timeout=3600", "attempt_timeout=1"),
+            ("attempt_timeout=3600", "attempt_timeout=3"),
             ("sleep $((attempt * 10))", "sleep 0"),
         ):
             assert old in patched, f"patch anchor missing: {old}"
             patched = patched.replace(old, new, 1)
         ep.write_text(patched, encoding="utf-8")
         stub = root / "bin" / "steamcmd"
-        stub.write_text(SLOW_STEAMCMD_STUB)
+        stub.write_text(SLOW_STEAMCMD_STUB, encoding="utf-8")
         stub.chmod(stub.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
         marker = root / "steamcmd-attempts.log"
@@ -310,9 +313,9 @@ with tempfile.TemporaryDirectory() as tmp:
         check("a timed-out attempt was retried before giving up", attempts == 2)
         check(
             "fatal names the per-attempt timeout budget",
-            "timed out after 2 attempts of 1s each" in err,
+            "timed out after 2 attempts of 3s each" in err,
         )
-        check("per-attempt timeout is visible in the log", "hit the 1s timeout" in out)
+        check("per-attempt timeout is visible in the log", "hit the 3s timeout" in out)
         check(
             "boot never reached config render after steamcmd gave up",
             not (game / "serverconfig.xml").exists(),

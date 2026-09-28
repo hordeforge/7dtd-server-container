@@ -84,12 +84,12 @@ def make_sandbox(tmpdir: Path, config: str | None) -> Path:
     shutil.copy2(SCRIPTS / "perf.sh", scripts / "perf.sh")
     shutil.copy2(SCRIPTS / "lib-env.sh", scripts / "lib-env.sh")
     stub = scripts / "run.sh"
-    stub.write_text(RUN_STUB)
+    stub.write_text(RUN_STUB, encoding="utf-8")
     stub.chmod(0o755)
     if config is not None:
         cfg = tmpdir / "mods" / "EfficientServer" / "Config"
         cfg.mkdir(parents=True)
-        (cfg / "efficientserver.json").write_text(config)
+        (cfg / "efficientserver.json").write_text(config, encoding="utf-8")
     return tmpdir
 
 

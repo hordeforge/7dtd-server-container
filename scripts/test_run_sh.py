@@ -82,7 +82,7 @@ def install_podman_stub(root: Path, stub_text: str) -> Path:
     bindir = root / "bin"
     bindir.mkdir()
     stub = bindir / "podman"
-    stub.write_text(stub_text)
+    stub.write_text(stub_text, encoding="utf-8")
     stub.chmod(0o755)
     return bindir
 

@@ -73,7 +73,7 @@ def fake_dist(ws: Path, name: str, marker: str) -> Path:
     """Create <ws>/<sibling>/dist/<name> with one marker file inside."""
     dist = ws / SIBLING_OF[name] / "dist"
     (dist / name / "Config").mkdir(parents=True)
-    (dist / name / "Config" / "config.json").write_text(marker)
+    (dist / name / "Config" / "config.json").write_text(marker, encoding="utf-8")
     return dist / name
 
 
@@ -115,7 +115,7 @@ def tmp_litter(directory: Path, owner: str) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     litter = directory / f".{owner}.tmp.999"
     litter.mkdir()
-    (litter / "half-written").write_text("junk")
+    (litter / "half-written").write_text("junk", encoding="utf-8")
 
 
 def litter_gone(*dirs: Path) -> bool:
@@ -125,7 +125,7 @@ def litter_gone(*dirs: Path) -> bool:
 def seeded_mod(base: Path, name: str, marker: str) -> None:
     mod = base / name / "Config"
     mod.mkdir(parents=True)
-    (mod / "config.json").write_text(marker)
+    (mod / "config.json").write_text(marker, encoding="utf-8")
 
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -242,7 +242,7 @@ with tempfile.TemporaryDirectory() as tmp:
     stub_log = root / "restarts.log"
     stub = scripts / "run.sh"
     stub.write_text(
-        '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$UPD_STUB_LOG"\n',
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$UPD_STUB_LOG"\n', encoding="utf-8"
     )
     stub.chmod(0o755)
 

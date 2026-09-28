@@ -122,7 +122,7 @@ for tmpl_name, expected_tokens in sorted(EXPECTED.items()):
 
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / tmpl_name
-        out.write_text(rendered if rendered is not None else "")
+        out.write_text(rendered if rendered is not None else "", encoding="utf-8")
         r = subprocess.run(
             [sys.executable, str(CHECK_XML), str(out)],
             capture_output=True,
