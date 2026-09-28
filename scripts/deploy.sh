@@ -2,7 +2,8 @@
 # Stage mods, then rsync this project to the server host. Runtime data/ on the
 # server host is never touched (it is created and owned by run.sh there).
 # Env overrides: SEVENDTD_SERVER_HOST (default 192.168.0.100),
-# SEVENDTD_SERVER_USER (default maci), SEVENDTD_SERVER_DIR (default ~/7dtd-server).
+# SEVENDTD_SERVER_USER (default maci), SEVENDTD_SERVER_DIR (default
+# /home/maci/7dtd-server, the remote account's home, not the local ~).
 # Each is shape-checked before staging, because they reach ssh/rsync argv.
 #
 #   ./scripts/deploy.sh            # push project + mods
@@ -115,33 +116,17 @@ if [[ "$RESTART" == "1" ]]; then
   # 133s worst case + start), and a local time bound kills a wedged local ssh
   # instead of pinning the session open forever like every unbounded wait here
   # would; the remote script keeps running to its own bounded completion.
-  # The bound is a capability probe, not an assumption: timeout(1) is GNU
-  # coreutils and absent from stock macOS (coreutils' gtimeout arrives only
-  # via brew), while this script also runs on workstations that are not Linux
-  # (stage_mods.sh targets bash 3.x for exactly those). With neither binary,
-  # warn and continue unsupervised: ConnectTimeout still bounds the connect
-  # and the remote side self-bounds, so only a wedged established connection
-  # now hangs until the operator interrupts it -- a hard failure here would
-  # strand a half-deployed tree instead.
-  TIMEOUT_BIN=""
-  for timeout_candidate in timeout gtimeout; do
-    if command -v "$timeout_candidate" >/dev/null 2>&1; then
-      TIMEOUT_BIN="$timeout_candidate"
-      break
-    fi
-  done
+  # run_bounded (scripts/lib-env.sh) owns the bound and the workstation
+  # fallback: it probes for timeout(1) or coreutils' gtimeout(1), and with
+  # neither it warns and continues unsupervised, because ConnectTimeout still
+  # bounds the connect and the remote side self-bounds, while a hard failure
+  # would strand a half-deployed tree.
   # shellcheck disable=SC2016  # non-expansion is the point: dest_dir belongs to the remote shell
   REMOTE_CMD='read -r dest_dir && cd "$dest_dir" && ./scripts/update_mods.sh'
   SSH_ARGV=(ssh -o ConnectTimeout=10 "${SSH_USER}@${HOST}" "$REMOTE_CMD")
   restart_rc=0
-  if [[ -n "$TIMEOUT_BIN" ]]; then
-    printf '%s\n' "$DEST_DIR" \
-      | "$TIMEOUT_BIN" 300 "${SSH_ARGV[@]}" || restart_rc=$?
-  else
-    echo "WARN: timeout(1) not found; running the remote restart without a local time bound" >&2
-    printf '%s\n' "$DEST_DIR" \
-      | "${SSH_ARGV[@]}" || restart_rc=$?
-  fi
+  printf '%s\n' "$DEST_DIR" \
+    | run_bounded 300 "${SSH_ARGV[@]}" || restart_rc=$?
   # A failed restart must not read as a plain ssh hiccup: rsync already pushed
   # the tree, so the server host now holds code its running container has not
   # picked up. Name the phase and the way out instead of dying with bare ssh

@@ -143,6 +143,18 @@ password character domain, below), so it is a **major** release: 1.1.3 to
 
 ### Fixed
 
+- **The telnet helpers assumed GNU coreutils on every host that runs the ops
+  scripts.** `telnet_session` and `telnet_probe` called `timeout(1)` directly,
+  so on a macOS workstation, where that binary is coreutils-only and ships as
+  `gtimeout(1)`, the probe failed with `command not found`: `run.sh status`
+  reported an unhealthy container and the graceful stop and `backup()` save
+  paths skipped the console and fell through to their fallbacks. The bound now
+  comes from one shared helper (`run_bounded` in `scripts/lib-env.sh`) that
+  probes for either spelling, the same capability probe `deploy.sh` already
+  used for its bounded restart, and with neither binary it runs the command
+  unsupervised after a single warning instead of failing. Pinned by
+  `scripts/test_lib_env.sh` for both the gtimeout-only and the
+  neither-binary host.
 - **A config file with an unusable encoding declaration crashed the XML
   parsers.** `encoding='x-mac-roman'` (an editor that wrote a Mac Roman
   declaration) or `encoding='utf-7'` fails outside `ParseError`: an unknown

@@ -459,6 +459,45 @@ init_steamcmd_env() {
   check_steamcmd_env
 }
 
+# One owner of the local time bound. timeout(1) is GNU coreutils and does not
+# exist on the macOS workstations the ops scripts also run on, where coreutils
+# installs the same binary as gtimeout(1); probe for whichever is present
+# rather than branching on the OS name (same rule md5_hex below follows).
+# Resolved once per process, then reused: command -v per call would repeat the
+# lookup on every probe.
+TIMEOUT_BIN=""
+resolve_timeout_bin() {
+  [[ -n "$TIMEOUT_BIN" ]] && return 0
+  local candidate
+  for candidate in timeout gtimeout; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      TIMEOUT_BIN="$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Run a command under that bound. With neither binary on PATH the command runs
+# unsupervised after one warning: the callers here (the telnet helpers, and
+# deploy.sh's bounded ssh) all have a self-bounded remote side, so a hard
+# failure would strand a half-done operation, while silence would let a wedged
+# local session look like a hang with no explanation. The warning is emitted
+# once per process so a polling caller does not repeat it.
+run_bounded() { # seconds command [args...]
+  local secs="$1"
+  shift
+  if ! resolve_timeout_bin; then
+    if [[ -z "${TIMEOUT_WARNED:-}" ]]; then
+      echo "WARN: neither timeout(1) nor gtimeout(1) found; running '$1' with no local time bound" >&2
+      TIMEOUT_WARNED=1
+    fi
+    "$@"
+    return $?
+  fi
+  "$TIMEOUT_BIN" "$secs" "$@"
+}
+
 # Single owner of the telnet wire exchange: open one /dev/tcp session to
 # 127.0.0.1, send the password, send the payload, print the reply until
 # timeout or EOF. Callers must have run init_telnet_env first (the port is
@@ -480,7 +519,7 @@ telnet_session() { # port password payload timeout_secs
   # shellcheck disable=SC2016  # non-expansion is the point: values reach bash -c through the environment below
   TELNET_SESSION_PORT="$port" TELNET_SESSION_PASSWORD="$password" \
     TELNET_SESSION_PAYLOAD="$payload" \
-    timeout "$timeout_secs" bash -c '
+    run_bounded "$timeout_secs" bash -c '
       exec 3<>/dev/tcp/127.0.0.1/"$TELNET_SESSION_PORT"
       printf "%s\n%b\n" "$TELNET_SESSION_PASSWORD" "$TELNET_SESSION_PAYLOAD" >&3
       cat <&3
@@ -495,7 +534,7 @@ telnet_probe() { # port timeout_seconds
   local port="$1"
   [[ "$port" =~ ^[0-9]+$ ]] || return 1
   # shellcheck disable=SC2016  # non-expansion is the point: port passed as "$1" to bash -c
-  timeout "$2" bash -c 'exec 3<>/dev/tcp/127.0.0.1/$1' telnet_probe "$port"
+  run_bounded "$2" bash -c 'exec 3<>/dev/tcp/127.0.0.1/$1' telnet_probe "$port"
 }
 
 # One best-effort telnet request shared by stop() and backup(): probe, then

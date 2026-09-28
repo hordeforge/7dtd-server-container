@@ -14,6 +14,8 @@
 #                      self-termination at its timeout against a silent one
 #   health_check       the container health probe: unhealthy on a closed port,
 #                      healthy against a live one, password never on the wire
+#   run_bounded        the local time bound: gtimeout counts as timeout, and
+#                      with neither binary the command still runs, warned once
 # Each block runs in a subshell so a FATAL exit marks only that case failed.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -583,3 +585,70 @@ else
   [[ -z "${reply:-}" ]] || { echo "FAIL: silent endpoint produced a reply" >&2; exit 1; }
   echo "telnet_session bounded timeout OK"
 fi
+
+# The local time bound is a capability probe, not an assumption: timeout(1)
+# is GNU coreutils and is absent from stock macOS, where coreutils installs
+# the same binary as gtimeout(1), and the ops scripts also run on those
+# workstations. Two cases pin that: gtimeout alone must serve as the bound,
+# and with neither binary the helpers must still reach a live endpoint
+# (running unsupervised) instead of dying on "command not found", which
+# reads as an unreachable console and skips the world save.
+BASH_BIN="$(command -v bash)"
+for case_dir in "$tmp/gtimeout-only" "$tmp/no-timeout"; do
+  mkdir -p "$case_dir"
+  for needed in bash cat; do
+    ln -sf "$(command -v "$needed")" "$case_dir/$needed"
+  done
+done
+cat > "$tmp/gtimeout-only/gtimeout" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$1" >> "$BOUND_LOG"
+shift
+exec "$@"
+STUB
+chmod +x "$tmp/gtimeout-only/gtimeout"
+: > "$tmp/bound.log"
+start_fake_server "$tmp/received-gtimeout.bin"
+bound_rc=0
+bound_out="$(BOUND_LOG="$tmp/bound.log" PATH="$tmp/gtimeout-only" "$BASH_BIN" -c "
+  set -euo pipefail
+  source '$ROOT/scripts/lib-env.sh'
+  telnet_probe '$FAKE_PORT' 3
+  telnet_session '$FAKE_PORT' retest 'apm status' 10
+" 2>"$tmp/gtimeout.err")" || bound_rc=$?
+[[ "$bound_rc" == 0 ]] || {
+  echo "FAIL: telnet helpers failed with only gtimeout on PATH (rc $bound_rc: $( < "$tmp/gtimeout.err"))" >&2; exit 1; }
+[[ "$bound_out" == *"telnet ok"* ]] || {
+  echo "FAIL: reply not relayed under gtimeout" >&2; exit 1; }
+[[ "$( < "$tmp/bound.log" )" == "3
+10" ]] || {
+  echo "FAIL: gtimeout did not carry the helpers' own bounds (got '$( < "$tmp/bound.log")')" >&2; exit 1; }
+[[ ! -s "$tmp/gtimeout.err" ]] || {
+  echo "FAIL: gtimeout present must not warn about the missing bound (got '$( < "$tmp/gtimeout.err")')" >&2; exit 1; }
+printf 'retest\napm status\n' > "$tmp/expected-gtimeout.bin"
+cmp -s "$tmp/received-gtimeout.bin" "$tmp/expected-gtimeout.bin" || {
+  echo "FAIL: wrong bytes on the wire under gtimeout" >&2; exit 1; }
+echo "telnet time bound via gtimeout OK"
+
+start_fake_server "$tmp/received-unbounded.bin"
+unbounded_rc=0
+unbounded_out="$(PATH="$tmp/no-timeout" "$BASH_BIN" -c "
+  set -euo pipefail
+  source '$ROOT/scripts/lib-env.sh'
+  telnet_probe '$FAKE_PORT' 3
+  telnet_session '$FAKE_PORT' retest 'apm status' 10
+" 2>"$tmp/unbounded.err")" || unbounded_rc=$?
+[[ "$unbounded_rc" == 0 ]] || {
+  echo "FAIL: telnet helpers died with no timeout/gtimeout on PATH (rc $unbounded_rc: $( < "$tmp/unbounded.err"))" >&2; exit 1; }
+[[ "$unbounded_out" == *"telnet ok"* ]] || {
+  echo "FAIL: reply not relayed without any time-bound binary" >&2; exit 1; }
+# The lost bound is a real degradation, so it is reported, and once per
+# process however many helpers run: a caller that polls must not be buried.
+grep -q 'WARN.*timeout' "$tmp/unbounded.err" || {
+  echo "FAIL: a missing time-bound binary must warn (got '$( < "$tmp/unbounded.err")')" >&2; exit 1; }
+[[ "$(grep -c WARN "$tmp/unbounded.err")" == 1 ]] || {
+  echo "FAIL: the lost-bound warning repeated (got '$( < "$tmp/unbounded.err")')" >&2; exit 1; }
+printf 'retest\napm status\n' > "$tmp/expected-unbounded.bin"
+cmp -s "$tmp/received-unbounded.bin" "$tmp/expected-unbounded.bin" || {
+  echo "FAIL: wrong bytes on the wire without any time-bound binary" >&2; exit 1; }
+echo "telnet time bound absent OK"
