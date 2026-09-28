@@ -22,6 +22,13 @@
 #                      with neither binary the command still runs, warned once
 #   deploy defaults    the committed SEVENDTD_SERVER_* values, one home each,
 #                      and the destination directory following the account
+#   file_mtime_epoch   the mtime read: GNU and BSD stat(1) spellings both
+#                      answer, no stat on PATH fails loudly
+#   (final block)      the host-side scripts carry no bash-4-only construct,
+#                      so they still run on the bash 3.2 a macOS workstation
+#                      ships (the same floor the flock/gtimeout fallbacks in
+#                      run.sh assume); entrypoint.sh is exempt, the image
+#                      runs its own bash
 # Each block runs in a subshell so a FATAL exit marks only that case failed.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -363,6 +370,45 @@ case "$digest_err" in
   *) echo "FAIL: missing digest tool is not named on stderr (got '$digest_err')" >&2; exit 1 ;;
 esac
 echo "webadmin password rules OK"
+
+# file_mtime_epoch: stat(1) spells the format flag differently on GNU
+# coreutils and BSD, and each build rejects the other's flag. The mtime
+# feeds verify_backup's staleness verdict, so the BSD branch has to answer a
+# number, not an error. Restricted PATH holding a BSD-shaped stat only.
+echo 1000000000 > "$tmp/mtime.txt"
+BSD_MTIME_EXPECTED=1000000000
+mkdir -p "$tmp/bsdstat"
+cat > "$tmp/bsdstat/stat" <<EOF
+#!$(command -v bash)
+# GNU spelling (-c) is what a macOS/BSD stat refuses outright; the format
+# arg is \$2.
+[[ "\$1" == "-c" ]] && { echo "stat: illegal option -- c" >&2; exit 1; }
+[[ "\$1" == "-f" && "\$2" == "%m" && "\$3" == "$tmp/mtime.txt" ]] || { echo "stub stat: expected -f %m <file>, got \$*" >&2; exit 1; }
+printf '%s\n' "$BSD_MTIME_EXPECTED"
+EOF
+chmod +x "$tmp/bsdstat/stat"
+mtime_bsd="$(PATH="$tmp/bsdstat" "$(command -v bash)" -c 'source "'"$ROOT"'/scripts/lib-env.sh"; file_mtime_epoch "'"$tmp/mtime.txt"'"')"
+[[ "$mtime_bsd" == "$BSD_MTIME_EXPECTED" ]] || { echo "FAIL: BSD stat branch of file_mtime_epoch (got '$mtime_bsd')" >&2; exit 1; }
+# GNU form on this machine returns this file's own mtime as a number, so the
+# first branch is the one that runs on a Linux host.
+mtime_gnu="$(file_mtime_epoch "$tmp/mtime.txt")"
+[[ "$mtime_gnu" =~ ^[0-9]+$ ]] || { echo "FAIL: file_mtime_epoch returned '$mtime_gnu'" >&2; exit 1; }
+# No stat(1) at all must fail loudly: an empty mtime would reach the age
+# arithmetic as 0 and make every archive look infinitely old (or, with the
+# guard dropped, silently stale/fresh on the wrong side of the limit).
+mkdir -p "$tmp/nostat"
+ln -s "$(command -v bash)" "$tmp/nostat/bash"
+mtime_rc=0
+mtime_out="$(PATH="$tmp/nostat" "$tmp/nostat/bash" -c 'source "'"$ROOT"'/scripts/lib-env.sh"; file_mtime_epoch "'"$tmp/mtime.txt"'"' 2>"$tmp/nostat.err")" || mtime_rc=$?
+mtime_err="$(cat "$tmp/nostat.err")"
+if (( mtime_rc == 0 )) || [[ -n "$mtime_out" ]]; then
+  echo "FAIL: file_mtime_epoch answered with no stat on PATH (rc=$mtime_rc, out='$mtime_out')" >&2; exit 1
+fi
+case "$mtime_err" in
+  *"no modification time"*) ;;
+  *) echo "FAIL: missing stat is not named on stderr (got '$mtime_err')" >&2; exit 1 ;;
+esac
+echo "file_mtime_epoch OK"
 
 # Locale independence of the value policy. `[[:print:]]` and `[[:space:]]` are
 # locale-sensitive, and this lib is deliberately run from two sides with
@@ -839,3 +885,25 @@ if [[ "$deploy_defaults" != '192.168.0.100|maci|/home/maci/7dtd-server|/home/ops
   exit 1
 fi
 echo "deploy defaults OK"
+# The host-side scripts run on workstations whose stock bash predates 4.0
+# (macOS ships 3.2), which the flock and gtimeout fallbacks in run.sh already
+# assume. Nothing in the gate runs those, so a bash-4-only construct (declare
+# -A, mapfile, ${var,,}, &>>) would pass CI and then abort the script on the
+# first operator command it reaches. Comments are excluded because the
+# reasoning above quotes the constructs by name, and the alternation stays
+# inside one group: outside it, only the first branch would carry the
+# "not a comment" prefix and the rest would match anywhere in the file.
+bash43_constructs='(declare|local)[[:space:]]+-A|mapfile|readarray|&>>|\$\{[A-Za-z_][A-Za-z0-9_]*(,|\^\^)[A-Za-z0-9_]*\}'
+for host_script in "$ROOT/start.sh" "$ROOT/stop.sh" "$ROOT"/scripts/*.sh; do
+  [[ -f "$host_script" ]] || continue
+  # This suite is one of the scanned scripts, and its own pattern line is not
+  # a use of a construct; drop that line by name.
+  grep -nE "^[^#]*($bash43_constructs)" "$host_script" \
+    | grep -v ':bash43_constructs=' > "$tmp/bash43.hits" || true
+  if [[ -s "$tmp/bash43.hits" ]]; then
+    echo "FAIL: bash-4-only construct in ${host_script#"$ROOT"/} (the host scripts must run on the bash 3.2 a macOS workstation ships):" >&2
+    cat "$tmp/bash43.hits" >&2
+    exit 1
+  fi
+done
+echo "host scripts stay bash 3.2 compatible OK"

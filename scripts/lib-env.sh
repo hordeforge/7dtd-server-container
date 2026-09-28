@@ -704,6 +704,26 @@ md5_hex() {
   fi
 }
 
+# Modification time of a file, in Unix epoch seconds, on stdout. stat(1) has
+# two spellings and each rejects the other's flag: GNU coreutils (Linux, and
+# the container base) takes `-c %Y`, BSD/macOS takes `-f %m`. Probe the GNU
+# form first and fall back to BSD rather than branching on the OS name (same
+# rule md5_hex follows), and validate the answer, so a stat that accepted the
+# flag but printed something else cannot reach an age calculation.
+file_mtime_epoch() { # path
+  local mtime
+  if mtime="$(stat -c %Y "$1" 2>/dev/null)" && [[ "$mtime" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$mtime"
+    return 0
+  fi
+  if mtime="$(stat -f %m "$1" 2>/dev/null)" && [[ "$mtime" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$mtime"
+    return 0
+  fi
+  echo "FATAL: stat(1) reported no modification time for $1" >&2
+  return 1
+}
+
 # Render a webadmin password as the base64 MD5 digest the dashboard expects in
 # serveradmin.xml (<user pass="...">). One owner shared by the entrypoint seed
 # path and its test vector, so the two cannot drift apart.

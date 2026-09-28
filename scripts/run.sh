@@ -215,10 +215,21 @@ ARCHIVE_COLLIDE_SEP='~'
 CONFIG_KEYS="TELNET_PASSWORD WEBADMIN_PASSWORD TELNET_PORT STEAMCMD_UPDATE \
 STEAMCMD_ONLY ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD=ALLOW_PUBLIC_DEFAULT \
 BACKUP_KEEP=KEEP_BACKUPS SEVENDTD_CONTAINER_NAME=NAME SEVENDTD_IMAGE=IMAGE"
-declare -A CONFIG_SOURCE
-for config_key in $CONFIG_KEYS; do
-  config_key="${config_key%%=*}"
-  [[ -n "${!config_key+x}" ]] && CONFIG_SOURCE["$config_key"]='environment'
+# Three arrays parallel to CONFIG_KEYS, all the same length: the report key,
+# the variable holding its effective value, and the provenance of the value as
+# it stood before the .env load below. Indexed, not associative: indexed arrays
+# need only bash 3.x, so the ops scripts also run on workstations whose stock
+# bash predates declare -A (macOS ships 3.2).
+declare -a CONFIG_REPORT_KEYS=() CONFIG_REPORT_VARS=() CONFIG_SOURCE=()
+for config_entry in $CONFIG_KEYS; do
+  config_key="${config_entry%%=*}"
+  CONFIG_REPORT_KEYS+=("$config_key")
+  CONFIG_REPORT_VARS+=("${config_entry#*=}")
+  if [[ -n "${!config_key+x}" ]]; then
+    CONFIG_SOURCE+=('environment')
+  else
+    CONFIG_SOURCE+=("")
+  fi
 done
 
 # Load the git-ignored .env (precedence as documented in the lib header).
@@ -465,24 +476,22 @@ show_config() { # verdict
   # how an operator answers "which telnet port is this host actually using,
   # and where did it come from" without reading three files, and how a
   # misconfiguration gets a name instead of a guess.
-  local entry key var value source
+  local key var value source report_i=0
   # Which keys the .env file actually sets, collected in one pass over the
   # file: env_file_keys is the loader's own line walk, so this report cannot
   # credit a line the loader skipped, and one pass answers the same question
   # for every key below instead of re-reading .env (and forking) per key.
-  local -A in_env=()
-  local ekey
+  # One newline-delimited string, not an associative array (bash 3.2, the
+  # same rule the CONFIG_SOURCE arrays follow); the surrounding newlines are
+  # what make the membership test below a whole-key match, not a substring.
+  local in_env=""
   if [[ -f "$ROOT/.env" ]]; then
-    while IFS= read -r ekey; do
-      in_env["$ekey"]=1
-    done < <(env_file_keys "$ROOT/.env")
+    in_env=$'\n'"$(env_file_keys "$ROOT/.env")"$'\n'
   fi
-  for entry in $CONFIG_KEYS; do
-    # Each entry is the config key, plus the variable holding its effective
-    # value when that differs from the key itself (BACKUP_KEEP is validated
-    # into KEEP_BACKUPS, and the container name/image into NAME/IMAGE).
-    key="${entry%%=*}"
-    var="${entry#*=}"
+  # The report keys in CONFIG_KEYS order, so report_i indexes the same key in
+  # all three parallel arrays built at the top of this file.
+  for key in "${CONFIG_REPORT_KEYS[@]}"; do
+    var="${CONFIG_REPORT_VARS[$report_i]}"
     case "$key" in
       # The two secret keys, named rather than matched as *PASSWORD*: that
       # substring also matches ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD, which is
@@ -511,7 +520,7 @@ show_config() { # verdict
         ;;
       *) value="${!var}" ;;
     esac
-    source="${CONFIG_SOURCE[$key]:-}"
+    source="${CONFIG_SOURCE[$report_i]}"
     if [[ -z "$source" ]]; then
       # Not in the environment: the .env filled it, or a default did. The
       # committed defaults are exactly the values a .env line would carry for
@@ -522,13 +531,14 @@ show_config() { # verdict
       # (leading whitespace before the key, say) is not credited to the file.
       # A grep with a looser pattern reports the committed default as coming
       # from .env, which is the one answer this report must never get wrong.
-      if [[ -n "${in_env[$key]:-}" ]]; then
+      if [[ "$in_env" == *$'\n'"$key"$'\n'* ]]; then
         source='.env'
       else
         source='default'
       fi
     fi
     printf '%-28s %-32s (%s)\n' "$key" "$value" "$source"
+    report_i=$(( report_i + 1 ))
   done
   printf '\n%s\n' "$1"
   echo "Secret values are never printed: read a minted WEBADMIN_PASSWORD from"
@@ -1086,7 +1096,7 @@ verify_backup() { # [archive]
   # and without this the only evidence a backup works is the exit code of the
   # run that wrote it. Runs restore()'s own preflight, so a pass here is the
   # same verdict the restore path would give.
-  local archive="${1:-}" archives=() now age failed=0 newest_age=-1
+  local archive="${1:-}" archives=() now age mtime failed=0 newest_age=-1
   now="$(date -u +%s)"
   if [[ -n "$archive" ]]; then
     archives=("$archive")
@@ -1116,8 +1126,12 @@ verify_backup() { # [archive]
     fi
     # mtime, not the stamp in the name: a hand-placed or rsynced archive
     # carries a name its copy date never earned, and the age of the data is
-    # what the RPO claim rests on.
-    age=$(( now - $(stat -c %Y "$archive") ))
+    # what the RPO claim rests on. file_mtime_epoch owns the stat(1)
+    # spelling (GNU and BSD disagree on the flag), and its own failure must
+    # mark this archive failed rather than compute the age from an empty
+    # value.
+    mtime="$(file_mtime_epoch "$archive")" || { failed=1; continue; }
+    age=$(( now - mtime ))
     (( age < 0 )) && age=0
     echo "OK: $archive ($(du -h "$archive" | cut -f1), written $(format_age "$age") ago)"
     if (( newest_age < 0 || age < newest_age )); then
