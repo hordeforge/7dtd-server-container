@@ -4,7 +4,8 @@ name: release
 # Tag-driven releases (hordeforge/.github REPOSITORY_STANDARDS.md, §8): a
 # vX.Y.Z tag must agree with the version this repository actually ships, so a
 # mistyped or forgotten bump is rejected instead of becoming a release nobody
-# can reproduce.
+# can reproduce. The tag must also have a dated CHANGELOG section, so a release
+# cannot ship with its notes still under Unreleased.
 #
 # The container image is deliberately NOT built or pushed here. It is built on
 # the LAN server host from this tree by `scripts/run.sh build`, against that
@@ -49,3 +50,19 @@ jobs:
             exit 1
           fi
           echo "ok: tag $TAG matches $MANIFEST ($SHIPPED)"
+
+      # A matching VERSION says the tag is the version this tree ships; it
+      # says nothing about whether anyone can tell what changed. Require the
+      # release section too, so a tag cannot ship with an empty or still-
+      # Unreleased changelog.
+      - name: Check the changelog has a section for the tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          if ! grep -Eq "^## \[$VERSION\] - " CHANGELOG.md; then
+            echo "ERROR: CHANGELOG.md has no '## [$VERSION] - <date>' section;" >&2
+            echo "       move the Unreleased entries under it and date it before tagging" >&2
+            exit 1
+          fi
+          echo "ok: CHANGELOG.md has a section for $VERSION"

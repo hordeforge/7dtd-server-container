@@ -44,8 +44,8 @@ usage: stage_mods.sh
 Stage the sibling repos' built mods into mods-available/ and (re)create the
 enabled set (EfficientServer, 7dtd-server-apm-bridge, BotMod) as real
 copies in mods/. Takes no arguments; everything in mods/ outside the
-enabled set is wiped on every run. To enable another mod persistently, add
-its name to NAMES in this script.
+enabled set is wiped on every successful run. To enable another mod
+persistently, add its name to NAMES in this script.
 EOF
 }
 

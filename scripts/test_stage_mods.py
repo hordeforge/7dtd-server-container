@@ -196,10 +196,13 @@ with tempfile.TemporaryDirectory() as tmp:
 
     # A copy that fails mid-rebuild: the swap happens only after every copy
     # succeeded, so the previous set (including the not-yet-copied mods) stays.
+    # Nothing writes into mods/ before the swap, so a mod the loop never
+    # reached keeps its old content and a mod enabled by hand is not swept.
     root = make_stage_sandbox(tmpdir / "failing", NAMES)
     mods = root / "mods"
     seeded_mod(mods, "EfficientServer", "live-efficient")
     seeded_mod(mods, "BotMod", "live-bot")
+    seeded_mod(mods, "OldMod", "stale")
     script = root / "scripts" / "stage_mods.sh"
     enable_step = 'sync_tree "$ROOT/mods-available/$name" "$enabled_staging/$name"'
     src = script.read_text(encoding="utf-8")
@@ -222,7 +225,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("a failed enable copy names the mod", "FATAL" in err and "BotMod" in err)
     check(
         "a failed enable copy kept the previous enabled set",
-        sorted(p.name for p in mods.iterdir()) == ["BotMod", "EfficientServer"],
+        sorted(p.name for p in mods.iterdir()) == ["BotMod", "EfficientServer", "OldMod"],
     )
     check(
         "a failed enable copy left the old mod content in place",

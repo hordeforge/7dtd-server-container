@@ -23,7 +23,7 @@ Workspace root guide: [`hordeforge/.github` AGENTS.md](https://github.com/hordef
 | Threat model (entry points, boundaries, controls, ranked gaps) | `docs/THREAT_MODEL.md` |
 | Rootless systemd service unit | `systemd/7dtd-server.container` |
 | Daily save-backup schedule | `systemd/7dtd-backup.service`, `systemd/7dtd-backup.timer` (runs `run.sh backup`) |
-| Version (canonical home) + changelog + tag gate | `VERSION` (`run.sh version`), `CHANGELOG.md`, `.github/workflows/release.yml`; the image's `org.opencontainers.image.version` label copies it and `scripts/test_containerfile.py` fails the gate when they drift |
+| Version (canonical home) + changelog + tag gate | `VERSION` (`run.sh version`), `CHANGELOG.md`, `.github/workflows/release.yml` (tag must match `VERSION` *and* have a dated `## [X.Y.Z]` section); the image's `org.opencontainers.image.version` label copies it and `scripts/test_containerfile.py` fails the gate when they drift |
 
 ## Does not own
 
