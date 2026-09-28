@@ -82,8 +82,11 @@ import sys
 import tarfile
 import tempfile
 import time
-from collections.abc import Iterator
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 from harness import ROOT, SCRIPTS, check, exit_status
 
@@ -108,9 +111,7 @@ def stub_invocations(log: Path) -> list[list[bytes]]:
 def parse_backup_stamp(name: str) -> datetime.datetime | None:
     """An archive name's stamp as UTC, or None when the name is not one."""
     with contextlib.suppress(ValueError):
-        return datetime.datetime.strptime(name, "%Y%m%d-%H%M%S").replace(
-            tzinfo=datetime.timezone.utc
-        )
+        return datetime.datetime.strptime(name, "%Y%m%d-%H%M%S").replace(tzinfo=datetime.UTC)
     return None
 
 
@@ -675,7 +676,7 @@ with tempfile.TemporaryDirectory() as tmp:
     install_podman_stub(tmpdir, PODMAN_STUB)
     (tmpdir / "data" / "userdata" / "Saves" / "region").mkdir(parents=True)
     (tmpdir / "data" / "userdata" / "Saves" / "region" / "r.0.0.region").write_bytes(b"chunkdata")
-    before = datetime.datetime.now(datetime.timezone.utc)
+    before = datetime.datetime.now(datetime.UTC)
     env = stub_env(tmpdir, TZ="Europe/Warsaw")
     proc = subprocess.run(
         [str(tmpdir / "scripts" / "run.sh"), "backup"],

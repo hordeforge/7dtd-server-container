@@ -191,6 +191,12 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   copy already enabled in mods/`. A mod that was never enabled is still not
   enabled by the run.
 
+- **The lint gate reads one interpreter version.** `pyproject.toml` checked
+  ruff and mypy against Python 3.10 while `.python-version` pinned the
+  interpreter every gate command actually runs on to 3.14, so modernization
+  rules and stdlib typing were decided against a version the gate never used.
+  Both now read 3.14, and the `TC` and `BLE` groups are on, clean on this tree
+  apart from the four fuzz-harness catches that carry a scoped `noqa`.
 - **Player data on the host is owner-only.** The world saves (names,
   positions, inventories), `serveradmin.xml` (platform userids, ban list) and
   the game log (join and leave lines with client addresses) were written at the

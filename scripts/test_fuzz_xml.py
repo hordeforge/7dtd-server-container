@@ -42,10 +42,13 @@ import random
 import sys
 import time
 import xml.etree.ElementTree as ET
-from collections.abc import Callable
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING
 from xml.sax.saxutils import quoteattr
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 from harness import ROOT, SCRIPTS, check, exit_status
 
@@ -267,7 +270,7 @@ def case_check(tmp: Path, payload: bytes) -> bool:
     try:
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             verdict = check_one(str(target))
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001  # any escape from check() is the finding
         require(False, "check() raised", f"{type(exc).__name__}: {exc} | {show(payload)}")
         return False
     require(isinstance(verdict, bool), "check() returned a non-bool", repr(verdict))
@@ -294,7 +297,7 @@ def case_check(tmp: Path, payload: bytes) -> bool:
     try:
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             rc = check_main(["check-config-xml.py", str(good), str(target), str(good)])
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001  # any escape from main() is the finding
         require(False, "main() raised", f"{type(exc).__name__}: {exc} | {show(payload)}")
         return verdict
     require(rc == (0 if verdict else 1), "batch exit code disagrees", f"{rc} | {show(payload)}")
@@ -306,12 +309,14 @@ def case_check(tmp: Path, payload: bytes) -> bool:
     # declaration expat accepts and a fromstring byte string need not agree on
     # every codec), but it must fail the way the entry points are contracted
     # to fail: ParseError for markup, LookupError or ValueError for a
-    # declaration that names no usable text encoding.
+    # declaration that names no usable text encoding. The unparenthesized
+    # handler list is the formatter's output at the .python-version target,
+    # not a typo: this suite is the one place the parens would be dropped.
     try:
         ET.fromstring(target.read_bytes())
-    except (ET.ParseError, LookupError, ValueError):
+    except ET.ParseError, LookupError, ValueError:
         pass
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001  # any other escape is a finding too
         require(False, "re-parse raised", f"{type(exc).__name__}: {exc} | {show(payload)}")
     return verdict
 
@@ -329,7 +334,7 @@ def case_badge(tmp: Path, rng: random.Random) -> None:
         try:
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
                 rc = coverage_badge.main(["coverage_badge.py", str(src), str(dst)])
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001  # any escape from the renderer is the finding
             require(False, "badge main() raised", f"{type(exc).__name__}: {exc} rate={rate!r}")
             return
         require(rc in (0, 1), "badge exit code", f"{rc} rate={rate!r}")

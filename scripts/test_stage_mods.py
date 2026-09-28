@@ -14,7 +14,8 @@ unpatched against a sandbox tree with a stub run.sh recording restarts:
               stale enabled mods wiped, hidden staging litter swept from
               both directories
   stage-miss  a missing dist warns on stderr, stages nothing for that mod,
-              and still stages the rest
+              and still stages the rest; a mod already enabled whose staged
+              source is gone is kept with its own bytes, not dropped
   stage-wipe  a run that stages none of the owned mods, and a run whose enable
               copy fails, both leave the previously enabled set untouched
               instead of wiping it and exiting 0
@@ -230,8 +231,10 @@ with tempfile.TemporaryDirectory() as tmp:
     err = proc.stderr.decode(errors="replace")
     check("stage with an unstaged enabled mod exits 0", proc.returncode == 0)
     check(
-        "the unstaged enabled mod is named on stderr",
-        "WARN" in err and "enabled mod BotMod not staged" in err,
+        "the unstaged enabled mod is named on stderr as kept",
+        "WARN" in err
+        and "enabled mod BotMod not staged" in err
+        and "keeping the copy already enabled" in err,
     )
     check(
         "the warning says the enabled copy is kept, not dropped",
