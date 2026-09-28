@@ -162,6 +162,19 @@ password character domain, below), so it is a **major** release: 1.1.3 to
 
 ### Changed
 
+- **Player data on the host is owner-only.** The world saves (names,
+  positions, inventories), `serveradmin.xml` (platform userids, ban list) and
+  the game log (join and leave lines with client addresses) were written at the
+  default modes: the entrypoint's credential renders were 0600, but the game it
+  execs inherited umask 022, so `data/userdata/Logs/output.log` and every world
+  save landed 0644 inside host directories created 0755, readable by any other
+  account on the server host. The entrypoint now sets `umask 077` once for
+  itself and the game, and `run.sh` creates `data/game`, `data/userdata` and
+  `backups/` 0700 on every command, tightening a tree an earlier run opened and
+  failing loudly when a directory cannot be restricted rather than writing into
+  it. README "Player data on the host" records what is kept, where, for how
+  long, and how to erase it.
+
 - **The ruff rule set covers the groups it had left off.** `TRY`, `ASYNC`,
   `G`, `T10`, `INT` and `FIX` are on, all clean on this tree, so a swallowed
   `except`, a long message built outside the exception class, a blocking call

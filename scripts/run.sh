@@ -457,6 +457,26 @@ show_config() { # verdict
   echo "data/userdata/Saves/.webadmin-password on the server host."
 }
 
+# data/userdata holds the players' own records: the Saves/ world (names,
+# positions, inventories), serveradmin.xml (platform userids, ban list) and the
+# game log's join and leave lines with client addresses. data/game is the depot
+# beside it, mounted and written by the same container. Podman maps the
+# container's root to this host user, so a directory left at the default 0755 is
+# readable by every other account on the host. backups/ gets the same treatment
+# for the archives that copy that data. An existing tree is tightened in place,
+# so upgrading run.sh closes a tree an earlier run opened.
+ensure_private_dir() { # dir
+  local dir="$1"
+  mkdir -p "$dir" || {
+    echo "FATAL: cannot create $dir" >&2
+    exit 1
+  }
+  chmod 700 "$dir" || {
+    echo "FATAL: cannot keep $dir owner-only (it holds player names, platform ids, world saves and join logs); fix its mode by hand" >&2
+    exit 1
+  }
+}
+
 if [[ "$COMMAND" == config ]]; then
   # A diagnostic has to survive the misconfiguration it diagnoses, so the value
   # rules run in a subshell and their verdict becomes a line of the report
@@ -472,7 +492,9 @@ fi
 
 check_env_values
 
-mkdir -p "$GAME_DIR" "$USERDATA_DIR" "$ROOT/mods" "$ROOT/config"
+ensure_private_dir "$GAME_DIR"
+ensure_private_dir "$USERDATA_DIR"
+mkdir -p "$ROOT/mods" "$ROOT/config"
 
 # One exclusive lock over the commands that mutate host state (data/,
 # backups/, the container). These commands are not mutually excluded by
@@ -758,9 +780,13 @@ archive_saves() {
   # reversible), which is why the live-save telnet request lives in backup().
   # The one argument names the kind: a pre-restore snapshot carries the
   # PRERESTORE_SUFFIX marker so restore()'s newest-by-default pick can skip it.
-  mkdir -p "$BACKUP_DIR"
-  # The archive carries serveradmin.xml and the .webadmin-password record from
-  # Saves/, so it gets the entrypoint's credential-file treatment: owner-only.
+  # The directory itself is owner-only, not just the archives in it: the
+  # archive names carry the backup schedule, and the dir is the one a stale
+  # world-readable mode would keep open.
+  ensure_private_dir "$BACKUP_DIR"
+  # The archive carries the world saves (player names, positions, inventories)
+  # alongside serveradmin.xml and the .webadmin-password record, so it gets
+  # the entrypoint's credential-file treatment: owner-only.
   umask 077
   local stamp stem archive tar_rc=0 n=0
   # UTC, because the prune below reads the stamp as the age sort key. A local

@@ -319,6 +319,48 @@ Add players to the admin list via telnet after joining, e.g.
   touches `backups/`. Rollback of code or mods is not automated: redeploy an
   older sibling build; saves are unaffected by deploys.
 
+## Player data on the host
+
+The server keeps records about the people who play on it, and every one of
+them is a file on the host. There is no database and no external service:
+
+| What | Where | Why |
+|---|---|---|
+| World saves: player names, positions, inventories, bases, ban list, admin platform ids (`serveradmin.xml`) | `data/userdata/Saves/` (0700) | running the world and enforcing bans |
+| Game log: join and leave lines with platform ids, names and client addresses | `data/userdata/Logs/` (0600 files) | the boot and gameplay record `./scripts/run.sh logs` and the dashboard read |
+| Copies of both, plus the dashboard credential | `backups/7dtd-saves-*.tar.gz` (0700 dir, 0600 archives) | restore a world after a bad deploy or a deleted save |
+
+`data/game/` and `data/userdata/` are created 0700 and every file the
+container writes into them is 0600, because under rootless podman the
+container's root is the host user and the default modes would hand all of it
+to every other account on the host. `run.sh` re-applies the directory modes on
+every command, so a tree an earlier version opened is closed on the next run.
+
+What this repo does not do, and neither should you assume it does:
+
+- Nothing is sent anywhere. There is no analytics, no telemetry, no crash
+  reporting and no third-party script. The game install is the only thing
+  fetched off-host, from Steam. The staged mods (APM bridge, bots) are built
+  in the sibling repos and are where any outbound reporting they do lives.
+- No retention job prunes the game log; it grows until you delete it.
+  `backups/` keeps the newest `BACKUP_KEEP` archives and prunes the rest on
+  every `backup`.
+- There is no per-player export, correction or deletion command: the game
+  offers none to a server operator. The practical answers are the files
+  themselves: a player's records are the save chunks, an access export is a
+  backup archive, and erasure is deleting them.
+
+To erase everything a departing player left behind, with the server stopped:
+
+```bash
+rm -rf data/userdata/Saves data/userdata/Logs backups/*
+# admin, whitelist and ban entries live in Saves/serveradmin.xml, so removing
+# Saves/ clears those too; the next start re-seeds the dashboard webuser.
+```
+
+Removing `backups/*` is the part people forget, and it is where a deleted
+player's name survives longest.
+
 ## Recovering state
 
 `backups/` sits on the same host as the saves it protects, so it survives a

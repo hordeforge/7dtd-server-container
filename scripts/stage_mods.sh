@@ -122,6 +122,14 @@ for name in "${NAMES[@]}"; do
       echo "FATAL: failed to enable $name (copy into $enabled_staging failed); $ROOT/mods left unchanged" >&2
       exit 1
     fi
+  elif [[ -d "$ROOT/mods/$name" ]]; then
+    # Enabled from an earlier run whose sibling dist is now gone (an unbuilt or
+    # moved sibling repo). Kept, like an unchanged mod: dropping a working mod
+    # because its source vanished is not what a staging run decides, and the
+    # swap below would otherwise wipe it as outside the new set.
+    kept+=("$name")
+    echo "WARN: enabled mod $name not staged (missing in mods-available/); keeping the copy already enabled in mods/" >&2
+    continue
   else
     echo "WARN: enabled mod $name not staged (missing in mods-available/); server will start without it" >&2
     continue

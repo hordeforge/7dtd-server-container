@@ -32,6 +32,17 @@ fatal() {
   exit 1
 }
 
+# Every file this boot and the game it starts write lands in the host-mounted
+# data/ tree, and that tree holds two kinds of private data: the rendered
+# credentials (serverconfig.xml, serveradmin.xml, the minted webadmin record)
+# and the players' own records (serveradmin.xml's platform userids and ban
+# list, the Saves/ world data with names, positions and inventories, and the
+# game log's join/leave lines with platform ids and client addresses). Under
+# rootless podman this user is the host user, so the default 022 would hand all
+# of it to every other account on the host. One umask here covers the entrypoint
+# and the game it execs, which inherits it.
+umask 077
+
 # The base image exists to put steamcmd on PATH; this entrypoint otherwise
 # only runs inside that image (it sources the lib and templates copied in by
 # the Containerfile), so a PATH lookup is the one supported resolution.
@@ -113,10 +124,9 @@ EOF
 render_config() {
   log "render serverconfig.xml (telnet port $TELNET_PORT)"
   # These renders embed credentials (TelnetPassword here, MD5 digests in
-  # serveradmin.xml); 077 keeps both off the world-readable default so other
-  # host accounts cannot read them out of data/. The game runs as this same
-  # user inside the container, so restrictive modes break nothing.
-  umask 077
+  # serveradmin.xml); the process-wide umask above keeps both off the
+  # world-readable default so other host accounts cannot read them out of
+  # data/.
   # Render to a sibling temp file and rename: a sed killed midway must never
   # leave a truncated serverconfig.xml for the game to choke on at boot. The
   # EXIT trap removes the temp file when any step below fails (sed error,
@@ -141,8 +151,6 @@ render_config() {
 }
 
 seed_admin_file() {
-  # Credential-bearing output (see render_config for the umask rationale).
-  umask 077
   # The game creates Saves/ on its own first run, but this seed happens
   # before that; without it a fresh host crashes here writing serveradmin.xml.
   mkdir -p "$USERDATA_DIR/Saves"
@@ -196,7 +204,7 @@ seed_admin_file() {
     /config/serveradmin_seed.xml > "$out" \
     || { fatal "seed_admin_file: sed failed on /config/serveradmin_seed.xml"; }
   assert_rendered "$out" '@WEBADMIN_PASSWORD_HASH@'
-  # The credential record lives under the umask-077 scope above, so both the
+  # The credential record lives under the process-wide 077 umask, so both the
   # temp write and the renamed record land 0600. The record must land BEFORE
   # the seeded admin file: the seed is skipped whenever serveradmin.xml exists,
   # so writing the record after the rename would let a crash in between strand

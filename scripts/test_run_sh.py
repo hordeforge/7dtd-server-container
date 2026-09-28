@@ -597,6 +597,17 @@ with tempfile.TemporaryDirectory() as tmp:
             "the fresh archive contains the planted save",
             "Saves/region/r.0.0.region" in names,
         )
+    # The archives are owner-only files, but the directory holding them, and the
+    # data/ trees the archives copy from, are what another local account can
+    # still traverse and read.
+    dir_modes = {
+        p: oct(p.stat().st_mode & 0o777)
+        for p in (backups, tmpdir / "data" / "userdata", tmpdir / "data" / "game")
+    }
+    check(
+        f"data/ and backups/ are owner-only (modes: {dir_modes})",
+        all(mode == "0o700" for mode in dir_modes.values()),
+    )
     oldest = [
         backups / "7dtd-saves-20200100-000000.tar.gz",
         backups / "7dtd-saves-20200101-000000.tar.gz",
@@ -1669,42 +1680,97 @@ with tempfile.TemporaryDirectory() as tmp:
     )
 
 
-# A backup directory no archive can be claimed in (unwritable here; a full
-# disk or a filesystem that refuses the create behaves the same way) must
-# fail with the cause named. The claim loop used to retry suffixes with no
-# bound, so the run spun forever instead of reporting the one failure no
-# further suffix can fix, and the daily timer never came back.
+# Personal data lives in data/ and in the archives backup copies out of it, so
+# both trees are kept owner-only. A chmod that cannot complete (the directory is
+# not the caller's to restrict) must fail the run rather than proceed and leave
+# player names, platform ids, world saves and join logs world-readable.
+CHMOD_FAILING_STUB = """#!/bin/sh
+echo "chmod: changing permissions: Operation not permitted" >&2
+exit 1
+"""
 with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
     make_sandbox(tmpdir)
     install_podman_stub(tmpdir, PODMAN_STUB)
+    (tmpdir / "bin" / "chmod").write_text(CHMOD_FAILING_STUB, encoding="utf-8")
+    (tmpdir / "bin" / "chmod").chmod(0o755)
+    saves = tmpdir / "data" / "userdata" / "Saves" / "region"
+    saves.mkdir(parents=True)
+    (saves / "r.0.0.region").write_bytes(b"chunkdata")
+    env = stub_env(tmpdir)
+    proc = subprocess.run(
+        [str(tmpdir / "scripts" / "run.sh"), "backup"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=60,
+    )
+    out = proc.stdout + proc.stderr
+    check(
+        "a data/ tree that cannot be made owner-only fails the run",
+        proc.returncode == 1 and b"cannot keep" in out and b"owner-only" in out,
+    )
+    check("the failed run named the directory it would not restrict", b"data/" in out)
+    check("the failed run wrote no archive", not list((tmpdir / "backups").glob("*")))
+
+
+# The archive name is claimed with an exclusive create, and a name it cannot
+# claim (a full disk, a filesystem that refuses the create) used to send the
+# loop around suffixes with no bound, so the run spun forever instead of
+# reporting the one failure no further suffix can fix and the daily timer never
+# came back. The clock is stubbed so the planted collisions are the exact names
+# this second's claim walks, which is the only way to reach the bound without a
+# real full disk.
+DATE_STUB = """#!/bin/sh
+if [ "$1" = "-u" ] && [ "$2" = "+%Y%m%d-%H%M%S" ]; then
+  echo "${STUB_STAMP:?}"
+  exit 0
+fi
+exec /bin/date "$@"
+"""
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    make_sandbox(tmpdir)
+    install_podman_stub(tmpdir, PODMAN_STUB)
+    date_stub = tmpdir / "bin" / "date"
+    date_stub.write_text(DATE_STUB, encoding="utf-8")
+    date_stub.chmod(0o755)
     saves = tmpdir / "data" / "userdata" / "Saves" / "region"
     saves.mkdir(parents=True)
     (saves / "r.0.0.region").write_bytes(b"chunkdata")
     backups = tmpdir / "backups"
     backups.mkdir()
-    backups.chmod(0o500)
-    env = stub_env(tmpdir)
+    # Every name ARCHIVE_CLAIM_TRIES suffixes reaches, plus the plain one.
+    stem = "7dtd-saves-20200101-000000"
+    for name in [f"{stem}.tar.gz", *(f"{stem}~{n:02d}.tar.gz" for n in range(1, 101))]:
+        (backups / name).write_bytes(b"planted")
+    env = stub_env(tmpdir, STUB_STAMP="20200101-000000")
+    claim: subprocess.CompletedProcess[bytes] | None = None
     try:
-        proc = subprocess.run(
+        claim = subprocess.run(
             [str(tmpdir / "scripts" / "run.sh"), "backup"],
             env=env,
             capture_output=True,
             check=False,
-            timeout=60,
+            timeout=120,
         )
-    finally:
-        backups.chmod(0o700)
-    out = proc.stdout + proc.stderr
+    except subprocess.TimeoutExpired:
+        claim = None
+    check("a backups/ where no name can be claimed fails instead of spinning", claim is not None)
+    if claim is not None:
+        out = claim.stdout + claim.stderr
+        check(
+            "the failed claim names the directory and the cause",
+            claim.returncode == 1 and b"cannot create a backup archive" in out,
+        )
+        check(
+            "the failed claim says nothing was archived",
+            b"backups" in out and b"nothing was archived" in out,
+        )
     check(
-        "backup into an unclaimable backups/ fails instead of spinning",
-        proc.returncode == 1 and b"cannot create a backup archive" in out,
+        "the failed claim left every planted archive in place",
+        len(list(backups.glob("*.tar.gz"))) == 101,
     )
-    check(
-        "the failed claim names the directory and the cause",
-        b"backups" in out and b"nothing was archived" in out,
-    )
-    check("the failed backup wrote no archive", not list(backups.glob("*.tar.gz")))
 
 
 # A corrupt archive fails restore's preflight. tar's own diagnostic has to

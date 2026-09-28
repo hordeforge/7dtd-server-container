@@ -64,7 +64,21 @@ def webadmin_pass(adm_xml: str) -> str | None:
 STEAMCMD_STUB = """#!/bin/sh
 shift  # drop +force_install_dir
 mkdir -p "$1"
-printf '#!/bin/sh\\nexit 0\\n' > "$1/7DaysToDieServer.x86_64"
+cat > "$1/7DaysToDieServer.x86_64" <<'SERVER'
+#!/bin/sh
+# Stands in for the game: it takes the entrypoint's -logfile the way the real
+# server does and writes there, so the tests can read the mode the game logs
+# inherit (the game's own lines carry player names, platform ids and client
+# addresses).
+log=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "-logfile" ]; then log="$arg"; fi
+  prev="$arg"
+done
+if [ -n "$log" ]; then printf 'fake server log line\\n' > "$log"; fi
+exit 0
+SERVER
 chmod +x "$1/7DaysToDieServer.x86_64"
 """
 
@@ -269,14 +283,18 @@ with tempfile.TemporaryDirectory() as tmp:
         )
         check("no temp files leaked", no_temp_files(game, userdata / "Saves"))
         # Both rendered files carry credentials (telnet password, dashboard
-        # digest); render_config/seed_admin_file set umask 077 so they are not
-        # world-readable in the host's data/ tree.
+        # digest) and the game's own log carries the players' join and leave
+        # lines with platform ids and client addresses. The process-wide umask
+        # covers the entrypoint's renders and the game it execs, so none of
+        # them is world-readable in the host's data/ tree.
+        game_log = userdata / "Logs" / "output.log"
         modes = {
-            p: stat.S_IMODE(p.stat().st_mode) for p in (game / "serverconfig.xml", adm, record)
+            p: stat.S_IMODE(p.stat().st_mode)
+            for p in (game / "serverconfig.xml", adm, record, game_log)
         }
         check(
-            f"rendered credential files are owner-only (modes: {modes})",
-            all(mode == 0o600 for mode in modes.values()),
+            f"rendered credential files and the game log are owner-only (modes: {modes})",
+            game_log.exists() and all(mode == 0o600 for mode in modes.values()),
         )
     # Existing seed + operator password: skip visibly, keep the old record.
     # Stranding the two Saves temps again here is the load-bearing half of
