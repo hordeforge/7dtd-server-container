@@ -34,6 +34,11 @@ def phony_targets(text: str) -> set[str]:
     return set(match.group(1).split()) if match else set()
 
 
+def py_paths(text: str) -> list[str]:
+    """The scripts/*.py files a recipe names, sorted so order is not compared."""
+    return sorted(set(re.findall(r"scripts/[\w.-]+\.py", text)))
+
+
 phony = phony_targets(MAKEFILE)
 check("the Makefile declares its phony targets", bool(phony))
 check(
@@ -67,6 +72,24 @@ check_text = dry_run("check")
 check(
     "the full local check runs lint and test, the two CI steps",
     "shellcheck" in check_text and "scripts/test_lib_env.sh" in check_text,
+)
+
+# lint gates the Python in check mode only, so a red ruff report has to have
+# a target that rewrites the files: `format` has to reach the same venv and the
+# same file list, or the fix a contributor is told to run either formats a
+# different set than the one that failed or lands on a different toolchain.
+lint_text = dry_run("lint")
+format_text = dry_run("format")
+check(
+    "the format target applies the ruff gates lint only reports",
+    "ruff format " in format_text
+    and "ruff check --fix" in format_text
+    and "--check" not in format_text
+    and "ruff format --check" in lint_text,
+)
+check(
+    "format rewrites the same Python files lint checks",
+    py_paths(lint_text) == py_paths(format_text) and bool(py_paths(lint_text)),
 )
 
 check(

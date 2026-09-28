@@ -34,7 +34,7 @@ PYBIN := $(VENV)/bin
 PYVER := $(strip $(shell cat .python-version))
 
 .DEFAULT_GOAL := help
-.PHONY: help lint test test-one check coverage venv
+.PHONY: help lint format test test-one check coverage venv
 
 # The task list, so a contributor never has to read this file to find a
 # command. `make` alone lands here; `make test` is the gate, not a greeting.
@@ -43,6 +43,7 @@ help:
 	@echo 'make test                   every suite: the two bash ones, then scripts/test_*.py'
 	@echo 'make test-one SUITE=<name>  one suite, e.g. SUITE=test_run_sh.py (test_lib_env.sh works too)'
 	@echo 'make lint                   bash -n, shellcheck, script references, ruff, mypy, yamllint, Containerfile'
+	@echo 'make format                 rewrite the Python in place: ruff format, then ruff check --fix'
 	@echo 'make check                  lint then test: everything .github/workflows/ci.yml runs'
 	@echo 'make coverage               line coverage for scripts/lib-env.sh (needs kcov on PATH)'
 
@@ -118,6 +119,15 @@ lint: $(PYBIN)/ruff
 	  esac; \
 	done < <(awk '/^[A-Z]+[[:space:]]/ {print $$1}' Containerfile | sort -u); \
 	echo "Containerfile OK"
+
+# The apply side of the two ruff gates in lint. lint runs both in check mode
+# (`ruff check`, `ruff format --check`), so a red one is a report and not a fix;
+# without a target that rewrites the files, a contributor's way out is to
+# remember a venv-relative command nobody documented. Same venv, same file
+# list, so what this writes is what lint then accepts.
+format: $(PYBIN)/ruff
+	$(PYBIN)/ruff format $(PY)
+	$(PYBIN)/ruff check --fix $(PY)
 
 test: $(PYBIN)/ruff
 	# Each suite announces itself the way test-one does, so a red run names the

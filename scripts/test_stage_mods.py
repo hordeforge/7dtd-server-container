@@ -213,13 +213,13 @@ with tempfile.TemporaryDirectory() as tmp:
         sorted(p.name for p in (root / "mods").iterdir()) == ["EfficientServer"],
     )
 
-    # An enabled mod whose sibling dist is gone: the run warns, drops that mod
-    # from the enabled set, and still succeeds on the rest. A tree carried over
-    # from an earlier run would be stale bytes shipped to the server under the
-    # name of a mod that no longer builds, so the warning says the server
-    # starts without it and the swap honors that. The missing-dist case above
-    # starts from an empty mods/, so nothing is enabled yet and this branch is
-    # unreachable there.
+    # An enabled mod whose sibling dist is gone: the run warns, keeps the copy
+    # already enabled under that name, and still succeeds on the rest. A mod
+    # inside NAMES is the enabled set, and an unbuilt or moved sibling repo is
+    # not a staging run's decision to act on, so the copy survives the swap
+    # exactly like an unchanged mod does. A mod that was never enabled is still
+    # not enabled here: the missing-dist case above starts from an empty mods/,
+    # so nothing is enabled yet and that branch is unreachable there.
     root = make_stage_sandbox(tmpdir / "unstaged", ["EfficientServer"])
     seeded_mod(root / "mods", "BotMod", "live-bot")
     proc = run_script(root / "scripts" / "stage_mods.sh", cwd=root, env={})
@@ -230,8 +230,14 @@ with tempfile.TemporaryDirectory() as tmp:
         "WARN" in err and "enabled mod BotMod not staged" in err,
     )
     check(
-        "the unstaged mod is dropped rather than carried over stale",
-        sorted(p.name for p in (root / "mods").iterdir()) == ["EfficientServer"],
+        "the unstageable enabled mod keeps its live copy",
+        sorted(p.name for p in (root / "mods").iterdir()) == ["BotMod", "EfficientServer"]
+        and (root / "mods" / "BotMod" / "Config" / "config.json").read_text(encoding="utf-8")
+        == "live-bot",
+    )
+    check(
+        "the unstageable mod is not staged into mods-available/",
+        not (root / "mods-available" / "BotMod").exists(),
     )
     check(
         "the restaged mod is still enabled",

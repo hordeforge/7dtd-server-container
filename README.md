@@ -78,6 +78,7 @@ make venv       # build .venv from the hash-pinned requirements-lint.txt
 make test       # every suite
 make lint       # every static check
 make check      # lint then test: everything CI runs
+make format     # rewrite the Python in place: ruff format, then ruff check --fix
 ```
 
 `make lint` and `make test` build `.venv` themselves, so `make check` on a

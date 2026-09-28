@@ -162,6 +162,15 @@ password character domain, below), so it is a **major** release: 1.1.3 to
 
 ### Changed
 
+- **A staging run keeps an enabled mod whose sibling dist is gone.** An
+  unbuilt or moved sibling repo left the mod in `NAMES` but absent from
+  `mods-available/`, and the swap treated it as outside the new set and deleted
+  the copy already running on the server, so a staging run turned an unbuilt
+  repository into a removed mod. It is now kept, like an unchanged mod, with
+  `WARN: enabled mod <name> not staged (missing in mods-available/); keeping the
+  copy already enabled in mods/`. A mod that was never enabled is still not
+  enabled by the run.
+
 - **Player data on the host is owner-only.** The world saves (names,
   positions, inventories), `serveradmin.xml` (platform userids, ban list) and
   the game log (join and leave lines with client addresses) were written at the

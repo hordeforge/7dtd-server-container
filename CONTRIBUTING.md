@@ -21,6 +21,8 @@ make check    # lint then test, the same two commands CI runs
 ```
 
 `make test-one SUITE=test_run_sh.py` runs a single suite while you iterate.
+A red `ruff rules` or `ruff format` line from `make lint` is fixed with
+`make format`, which runs the same two tools over the same files in place.
 Full details of what each target covers: the README "Development" section.
 
 ## Branches and commits
