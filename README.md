@@ -49,7 +49,7 @@ exposing this host beyond a trusted LAN.
 | `Makefile` | `make test`, `make lint` (bash -n + shellcheck + reference check over every shell script; ruff rules/format, mypy strict, yamllint over Python and CI YAML; Containerfile structure check). Needs [`uv`](https://docs.astral.sh/uv/) on PATH: both targets build `.venv` from `requirements-lint.txt` themselves |
 | `pyproject.toml`, `.yamllint.yaml`, `requirements-lint.txt` | Static analysis config (ruff rules + 100-col format, mypy strict, yamllint) and the hash-pinned analyzer closure; enforced by `make lint` locally and in CI from the same recipe |
 | `.github/workflows/ci.yml` | CI: lint, tests, Containerfile and config-template validation; publishes the coverage badge on main |
-| `scripts/test_lib_env.sh`, `scripts/test_coverage_badge.py`, `scripts/test_check_config_xml.py`, `scripts/test_config_templates.py`, `scripts/test_deploy_sh.py`, `scripts/test_entrypoint_boot.py`, `scripts/test_systemd_unit.py`, `scripts/test_containerfile.py`, `scripts/test_run_sh.py`, `scripts/test_perf_sh.py`, `scripts/test_stage_mods.py` | Tests behind `make test`; `fake-telnet-server.py` is their fake telnet endpoint fixture |
+| `scripts/test_lib_env.sh`, `scripts/test_coverage_badge.py`, `scripts/test_check_config_xml.py`, `scripts/test_config_templates.py`, `scripts/test_deploy_sh.py`, `scripts/test_entrypoint_boot.py`, `scripts/test_systemd_unit.py`, `scripts/test_containerfile.py`, `scripts/test_run_sh.py`, `scripts/test_perf_sh.py`, `scripts/test_stage_mods.py`, `scripts/test_makefile.py` | Tests behind `make test`; `fake-telnet-server.py` is their fake telnet endpoint fixture |
 | `scripts/check-config-xml.py`, `scripts/coverage_badge.py`, `scripts/harness.py` | CI helpers: config XML well-formedness check, coverage badge renderer, shared check reporter for the suites above |
 | `systemd/7dtd-server.container` | Quadlet for a durable rootless user service |
 | `docs/THREAT_MODEL.md` | Attack surface of this harness: entry points, trust boundaries, existing controls, ranked gaps |
@@ -62,6 +62,43 @@ rebuilt in their sibling repos, data is host state.
 
 **Mods on this server (enabled tweaks, APM panel, bot options): see
 [`MODS.md`](MODS.md).**
+
+## Development
+
+Everything the gate needs is resolved by the Makefile; the only system
+packages are `bash`, `make`, [`uv`](https://docs.astral.sh/uv/) and
+`shellcheck` (Debian/Ubuntu `apt install shellcheck`, Fedora
+`dnf install ShellCheck`, macOS `brew install shellcheck`). `kcov` is needed
+for `make coverage` only, and podman plus rsync for the ops scripts.
+
+```bash
+make            # the task list
+make venv       # build .venv from the hash-pinned requirements-lint.txt
+make test       # every suite
+make lint       # every static check
+make check      # lint then test: everything CI runs
+```
+
+`make lint` and `make test` build `.venv` themselves, so `make check` on a
+clean clone is the whole setup. Both run the same commands CI does, from the
+same recipe, with the same pinned tool versions: a green `make check` is the
+push condition, not an approximation of it.
+
+While iterating, run the one suite you changed instead of the whole gate:
+
+```bash
+make test-one SUITE=test_run_sh.py     # scripts/test_*.py
+make test-one SUITE=test_lib_env.sh    # the bash suite
+```
+
+A Python suite is a plain script: `.venv/bin/python scripts/test_run_sh.py`
+works the same way, and each prints one `OK:` line per pinned behavior and
+exits nonzero on the first failed expectation. Adding a suite means dropping a
+new `scripts/test_*.py` (or `test_*.sh` in `scripts/test_lib_env.sh`): the
+Makefile picks it up by wildcard, so nothing needs listing in two places.
+
+Commit and PR conventions live in [`CONTRIBUTING.md`](CONTRIBUTING.md) and
+[`AGENTS.md`](AGENTS.md).
 
 ## Quick start
 

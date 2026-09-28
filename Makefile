@@ -27,10 +27,27 @@ TESTS := $(sort $(wildcard scripts/test_*.py))
 VENV := .venv
 PYBIN := $(VENV)/bin
 
-.DEFAULT_GOAL := test
-.PHONY: lint test coverage venv
+.DEFAULT_GOAL := help
+.PHONY: help lint test test-one check coverage venv
+
+# The task list, so a contributor never has to read this file to find a
+# command. `make` alone lands here; `make test` is the gate, not a greeting.
+help:
+	@echo 'make venv                  the pinned analyzer venv (.venv), nothing else'
+	@echo 'make test                   every suite: scripts/test_lib_env.sh, then scripts/test_*.py'
+	@echo 'make test-one SUITE=<name>  one suite, e.g. SUITE=test_run_sh.py (test_lib_env.sh works too)'
+	@echo 'make lint                   bash -n, shellcheck, script references, ruff, mypy, yamllint, Containerfile'
+	@echo 'make check                  lint then test: everything .github/workflows/ci.yml runs'
+	@echo 'make coverage               line coverage for scripts/lib-env.sh (needs kcov on PATH)'
 
 $(PYBIN)/ruff: requirements-lint.txt
+	# Named failure beats "uv: command not found" from make: uv is the only
+	# Python toolchain this repo resolves anything through, and a contributor
+	# arriving without it has nothing else to fall back on.
+	@command -v uv >/dev/null 2>&1 || { \
+	  echo "FATAL: uv not found on PATH. It is the only Python toolchain here; install it from https://docs.astral.sh/uv/ (or 'curl -LsSf https://astral.sh/uv/install.sh | sh')." >&2; \
+	  exit 1; \
+	}
 	# --clear, not reuse: when the pinned closure changes the venv is rebuilt
 	# from scratch, so a package dropped from requirements-lint.txt cannot
 	# linger and keep satisfying an import the gate should have failed on.
@@ -46,6 +63,15 @@ $(PYBIN)/ruff: requirements-lint.txt
 venv: $(PYBIN)/ruff
 
 lint: $(PYBIN)/ruff
+	# shellcheck is the one gate tool that is not a Python package, so it is
+	# the one a clean machine can be missing. Name it before the loop, where
+	# the raw "command not found" would otherwise be buried under the
+	# bash -n output.
+	set -euo pipefail; \
+	command -v shellcheck >/dev/null 2>&1 || { \
+	  echo "FATAL: shellcheck not found on PATH; 'make lint' needs it (Debian/Ubuntu: apt install shellcheck, Fedora: dnf install ShellCheck, macOS: brew install shellcheck)." >&2; \
+	  exit 1; \
+	}
 	set -euo pipefail; \
 	# The analyzer call stands alone in the loop body, never as the left side
 	# of `&&`: `cmd && echo` is a command list, and set -e ignores a failure
@@ -88,6 +114,34 @@ test: $(PYBIN)/ruff
 	bash scripts/test_lib_env.sh
 	set -euo pipefail; \
 	for t in $(TESTS); do $(PYBIN)/python "$$t"; done
+
+# One suite, for the edit-test loop. `make test` runs all twelve in sequence,
+# which is the wrong cost while iterating on a single file. The suite is named
+# bare (SUITE=test_run_sh.py) or by path, several at once are fine, and each
+# runs through the same interpreter and entry point `make test` uses, so a
+# suite that passes here passes in the gate.
+test-one: $(PYBIN)/ruff
+	@test -n "$(SUITE)" || { \
+	  echo "usage: make test-one SUITE=<name>   (e.g. SUITE=test_run_sh.py, SUITE=test_lib_env.sh)" >&2; \
+	  exit 2; \
+	}
+	set -euo pipefail; \
+	for s in $(SUITE); do \
+	  case "$$s" in \
+	    */*) suite="$$s" ;; \
+	    *) suite="scripts/$$s" ;; \
+	  esac; \
+	  test -f "$$suite" || { echo "no such suite: $$suite (see 'make help')" >&2; exit 1; }; \
+	  case "$$suite" in \
+	    *.sh) echo "== $$suite"; bash "$$suite" ;; \
+	    *) echo "== $$suite"; $(PYBIN)/python "$$suite" ;; \
+	  esac; \
+	done
+
+# Everything .github/workflows/ci.yml runs, in the order it runs it, so the
+# full local verification is one command rather than the pair a contributor has
+# to know about.
+check: lint test
 
 coverage:
 	rm -rf coverage

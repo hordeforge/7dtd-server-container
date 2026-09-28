@@ -18,6 +18,14 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# The fake telnet endpoint runs under the same pinned interpreter the Python
+# suites use (make builds .venv before either runs), so the wire-level cases
+# cannot pass or fail on whatever python3 the workstation happens to carry.
+# Standalone runs (make coverage, before .venv exists) fall back to the system
+# interpreter.
+PYTHON="${PYTHON:-$ROOT/.venv/bin/python}"
+[[ -x "$PYTHON" ]] || PYTHON=python3
+
 tmp="$(mktemp -d)"
 server_pid=
 stop_fake_server() {
@@ -481,7 +489,7 @@ start_fake_server() { # received_bytes_path [fake-server args...]
   # open, and only the newest pid is registered with the EXIT hook, so
   # restarts would otherwise accumulate a live process per case.
   stop_fake_server
-  python3 "$ROOT/scripts/fake-telnet-server.py" 0 "$@" >"$port_file" &
+  "$PYTHON" "$ROOT/scripts/fake-telnet-server.py" 0 "$@" >"$port_file" &
   # shellcheck disable=SC2031  # false positive: this runs in the function body,
   # not a subshell, so the EXIT hook in the parent reaps the pid
   server_pid=$!

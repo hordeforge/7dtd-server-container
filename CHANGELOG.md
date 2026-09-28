@@ -41,6 +41,12 @@ password character domain, below), so it is a **major** release: 1.1.3 to
 
 ### Added
 
+- **A discoverable local loop.** `make` prints the task list, `make test-one
+  SUITE=<name>` runs a single suite instead of all twelve, and `make check`
+  runs lint and test in CI's order. A missing `uv` or `shellcheck` now fails
+  with the install hint instead of a `command not found` buried in gate
+  output. The contributor path is documented in the README "Development"
+  section and [`CONTRIBUTING.md`](CONTRIBUTING.md).
 - **The release gate checks the changelog, not just `VERSION`.** A `vX.Y.Z` tag
   whose version matched the file could still be pushed with its notes left
   under `Unreleased`, so the release shipped without a changelog section.
@@ -150,7 +156,6 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   the script's own comment, the other two batch cases, and the shipped
   behavior all contradict: every file in a batch is checked so one run
   surfaces every breakage. The stale assertion now pins the real contract.
-
 - **A failed staging run no longer wipes the enabled mods.** `stage_mods.sh`
   pruned `mods/` down to the owned set before the replacement set was built,
   so a run that then failed (no sibling dist staged, or a failed enable copy)

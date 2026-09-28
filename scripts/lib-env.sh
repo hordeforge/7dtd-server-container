@@ -406,6 +406,7 @@ check_telnet_env() {
     exit 1
   fi
   TELNET_PASSWORD="${TELNET_PASSWORD:-$DEFAULT_TELNET_PASSWORD}"
+  TELNET_PORT="${TELNET_PORT:-$DEFAULT_TELNET_PORT}"
   reject_unsafe_value TELNET_PASSWORD "$TELNET_PASSWORD"
   check_telnet_port
 }
