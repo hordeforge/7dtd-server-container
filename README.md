@@ -125,6 +125,9 @@ tree can be diffed against the first instead of trusted:
 SOURCE_DATE_EPOCH=1700000000 ./scripts/run.sh build
 ```
 
+The value is seconds, the unit podman reads, so a millisecond stamp is
+refused rather than quietly pinning every layer to a date in the year 55000.
+
 The base image is a build arg, so a build that must be repeatable from
 upstream's side pins it to a digest without editing the `Containerfile`:
 

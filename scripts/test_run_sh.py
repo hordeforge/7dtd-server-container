@@ -841,6 +841,43 @@ with tempfile.TemporaryDirectory() as tmp:
     )
 
 
+# Two backups inside one second cannot share a name, so the loser of the
+# exclusive create takes a counter suffix, and both the prune and the bare
+# restore read the name as the age order. That order has to survive the
+# caller's locale, which a glob's own collation does not: en_US.UTF-8 puts
+# the plain '…-000000.tar.gz' after the '…-000000~01.tar.gz' written after it.
+# The non-default locale is the point, since the C order it falls back on is
+# the one the fixed-width stamp and the zero-padded counter are built for.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    make_sandbox(tmpdir)
+    install_podman_stub(tmpdir, PODMAN_STUB)
+    saves = tmpdir / "data" / "userdata" / "Saves" / "region"
+    saves.mkdir(parents=True)
+    (saves / "r.0.0.region").write_bytes(b"current-world")
+    backups = tmpdir / "backups"
+    collided = "7dtd-saves-20200101-000000"
+    plant_archive(backups / f"{collided}.tar.gz", b"plain-world")
+    plant_archive(backups / f"{collided}~01.tar.gz", b"first-collider")
+    plant_archive(backups / f"{collided}~10.tar.gz", b"newest-world")
+    env = stub_env(tmpdir, LC_ALL="en_US.UTF-8")
+    proc = subprocess.run(
+        [str(tmpdir / "scripts" / "run.sh"), "restore"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    out = proc.stdout + proc.stderr
+    check("restore over a collided second exits 0", proc.returncode == 0)
+    if proc.returncode != 0:
+        print(out.decode(errors="replace"), file=sys.stderr)
+    check(
+        "the bare restore picks the newest of one second's colliding archives",
+        (saves / "r.0.0.region").read_bytes() == b"newest-world",
+    )
+
+
 # restore run twice is the operation a retry produces, and it must land on the
 # same world as one run: the pre-restore snapshot the first run leaves behind
 # is the newest archive, so a bare restore that treated it as a target would
@@ -1247,6 +1284,30 @@ with tempfile.TemporaryDirectory() as tmp:
         rc != 0 and b"FATAL" in err and b"not-a-number" in err,
     )
     check("a malformed SOURCE_DATE_EPOCH never reaches podman", b"--timestamp" not in malformed)
+    # podman reads --timestamp as seconds, so the millisecond stamp a JS or Go
+    # caller hands out is a digits-only value that pins the build to a date in
+    # the year 55000. It has to be refused, not stamped.
+    for wrong_unit, label in (
+        ("1700000000000", "milliseconds"),
+        ("1700000000000000", "microseconds"),
+    ):
+        rc, err, unit = run_build(wrong_unit, expect_build=False)
+        check(
+            f"a SOURCE_DATE_EPOCH in {label} fails loudly instead of building",
+            rc != 0 and b"FATAL" in err and wrong_unit.encode() in err,
+        )
+        check(f"a SOURCE_DATE_EPOCH in {label} never reaches podman", b"--timestamp" not in unit)
+    # 2**64 and up wrap int64 arithmetic back to 0, so a length cap is what
+    # keeps them from reading as a valid seconds stamp.
+    rc, _, wrapped = run_build("18446744073709551616", expect_build=False)
+    check("a SOURCE_DATE_EPOCH past int64 never reaches podman", b"--timestamp" not in wrapped)
+    check("a SOURCE_DATE_EPOCH past int64 fails loudly", rc != 0)
+    # Zero padding is a decimal stamp, not octal (00001000 is 512 bare).
+    rc, _, padded = run_build("00001700000")
+    check(
+        "a zero-padded SOURCE_DATE_EPOCH is read as decimal",
+        b"--timestamp" in padded and padded[padded.index(b"--timestamp") + 1] == b"00001700000",
+    )
 
     env = stub_env(tmpdir)
     # A .env that fills exactly one value: everything else must be reported as

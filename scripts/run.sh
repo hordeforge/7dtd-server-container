@@ -147,6 +147,14 @@ ARCHIVE_CLAIM_TRIES=100
 # it when a later extraction fails, so the operator is handed the path of the
 # saves the failed restore replaced instead of having to look for it.
 ARCHIVE_PATH=""
+# Separator for the counter archive_saves appends when several backups land in
+# one second. backup_archives reads the names as an age order, and the counter
+# was the part of the name that did not fit that order: a '-' sorts before the
+# '.', so '…-000000-01.tar.gz' came out older than the '…-000000.tar.gz' it
+# was written after, and one digit short '-10' came out older than '-2'.
+# '~' is the last printable ASCII byte, so it sorts after the '.' that opens
+# the extension, and the counter is zero-padded: byte order is creation order.
+ARCHIVE_COLLIDE_SEP='~'
 
 # The keys `config` reports, and which of them were already in the
 # environment before the .env load below. The snapshot has to happen here:
@@ -511,6 +519,24 @@ stop() {
   fi
 }
 
+# Every archive in $BACKUP_DIR, one path per line, oldest first. The glob on
+# its own sorts in the caller's locale, and locales disagree about
+# punctuation: under en_US.UTF-8 the plain `…-000000.tar.gz` sorts after the
+# `…-000000~01.tar.gz` a second-long collision produced, so the newer archive
+# of that second would be the first one pruned and the last one a bare restore
+# considers, which is exactly the archive a recovery must reach. LC_ALL=C pins
+# the byte order the fixed-width stamp and the zero-padded collision counter
+# are built for; every name shares the 7dtd-saves- prefix and differs only in
+# its digits and separator, so byte order is age order.
+backup_archives() {
+  local f
+  shopt -s nullglob
+  for f in "$BACKUP_DIR"/7dtd-saves-*.tar.gz; do
+    printf '%s\n' "$f"
+  done | LC_ALL=C sort
+  shopt -u nullglob
+}
+
 archive_saves() {
   # Tar data/userdata/Saves into a fresh owner-only archive and prune the
   # oldest beyond KEEP_BACKUPS. Shared by backup() (the operator's own
@@ -560,7 +586,9 @@ archive_saves() {
       exit 1
     fi
     n=$(( n + 1 ))
-    archive="$BACKUP_DIR/$stem-$n.tar.gz"
+    # Zero-padded, because the prune and the bare restore below both read these
+    # names as an age order and '~10' sorts before '~2'.
+    archive="$BACKUP_DIR/$stem${ARCHIVE_COLLIDE_SEP}$(printf '%02d' "$n").tar.gz"
   done
   # GNU tar exits 1 for warnings alone (a file changed as it was read, which
   # happens when the game writes during a live backup): keep that archive and
@@ -574,12 +602,14 @@ archive_saves() {
   if (( tar_rc == 1 )); then
     echo "WARN: files changed while archiving (server running?); the archive may mix save states" >&2
   fi
-  # UTC stamps sort lexicographically, so glob order is age order: prune the
-  # oldest beyond KEEP_BACKUPS so a scheduled backup cannot fill the disk.
-  local archives=() excess i
-  shopt -s nullglob
-  archives=("$BACKUP_DIR"/7dtd-saves-*.tar.gz)
-  shopt -u nullglob
+  # backup_archives is age order (see its comment), and the collision suffix
+  # sorts after the plain name (ARCHIVE_COLLIDE_SEP), so that holds between two
+  # archives of the same second too: prune the oldest beyond KEEP_BACKUPS so a
+  # scheduled backup cannot fill the disk.
+  local archives=() excess i path
+  while IFS= read -r path; do
+    archives+=("$path")
+  done < <(backup_archives)
   excess=$(( ${#archives[@]} - KEEP_BACKUPS ))
   for (( i = 0; i < excess; i++ )); do
     # Pruning is housekeeping, not the backup: a failed removal must not abort
@@ -631,24 +661,23 @@ restore() {
   local archive="${1:-}"
   if [[ -z "$archive" ]]; then
     local candidates=() c
-    shopt -s nullglob
-    for c in "$BACKUP_DIR"/7dtd-saves-*.tar.gz; do
+    while IFS= read -r c; do
       # A pre-restore snapshot holds the state a restore discarded, never a
       # recovery target for a bare restore: picking it (it is the newest
       # archive the first restore left behind) makes a second `restore` revert
       # the first. The prune still counts these, so they age out with the rest.
       case "${c##*/}" in
-        *-"$PRERESTORE_SUFFIX".tar.gz|*-"$PRERESTORE_SUFFIX"-*.tar.gz) continue ;;
+        *-"$PRERESTORE_SUFFIX".tar.gz|*-"$PRERESTORE_SUFFIX"$ARCHIVE_COLLIDE_SEP*.tar.gz) continue ;;
       esac
       candidates+=("$c")
-    done
-    shopt -u nullglob
+    done < <(backup_archives)
     if (( ${#candidates[@]} == 0 )); then
       echo "FATAL: no backup archive in $BACKUP_DIR to restore (a pre-restore snapshot is not a target; name one explicitly to undo a restore)" >&2
       exit 1
     fi
-    # UTC stamps sort lexicographically, so glob order is age order: the last
-    # entry is the newest, matching the prune's key in archive_saves().
+    # backup_archives is age order (see its comment) and the collision suffix
+    # sorts after the plain name (ARCHIVE_COLLIDE_SEP), so the last entry is
+    # the newest: the same key the prune uses in archive_saves().
     archive="${candidates[${#candidates[@]} - 1]}"
   fi
   if [[ ! -f "$archive" ]]; then
@@ -733,13 +762,27 @@ restore() {
 # exports it (a release cut, a rebuild of a reported digest) gets an image
 # whose mtimes all carry that second, so a rebuild can be diffed against the
 # original instead of trusted. Unset, the build keeps its current behavior.
+#
+# The value is seconds, and podman reads --timestamp as seconds, so a caller
+# who reaches for the millisecond stamp a JS or Go program hands out
+# (Date.now(), time.Now().UnixMilli()) would otherwise pass a digits-only
+# check and pin every layer to the year 55000-something: a build that claims
+# to be reproducible and reproduces nothing. The bound below refuses any
+# number too large to be a seconds stamp. 99999999999 is 5138-11-16, so
+# nothing a real caller means by "the moment this was cut" is refused.
+MAX_SOURCE_DATE_EPOCH=99999999999
 build_image() {
   if [[ -z "${SOURCE_DATE_EPOCH:-}" ]]; then
     podman build -t "$IMAGE" "$ROOT"
     return
   fi
-  if [[ ! "$SOURCE_DATE_EPOCH" =~ ^[0-9]+$ ]]; then
-    echo "FATAL: SOURCE_DATE_EPOCH must be whole seconds since the epoch, got '$SOURCE_DATE_EPOCH'" >&2
+  # 10# so a zero-padded value is read as decimal rather than as an octal
+  # literal (00001000 is 512 to a bare (( )) and would pin the build to
+  # 1970). The 11-digit cap is what keeps the comparison below in int64
+  # range: arithmetic on a longer number wraps, and 2**64 wraps to 0.
+  if [[ ! "$SOURCE_DATE_EPOCH" =~ ^[0-9]{1,11}$ ]] ||
+     (( 10#$SOURCE_DATE_EPOCH > MAX_SOURCE_DATE_EPOCH )); then
+    echo "FATAL: SOURCE_DATE_EPOCH must be whole seconds since the epoch (0 to $MAX_SOURCE_DATE_EPOCH), got '$SOURCE_DATE_EPOCH'; a millisecond or microsecond stamp does not belong here" >&2
     exit 1
   fi
   podman build --timestamp "$SOURCE_DATE_EPOCH" -t "$IMAGE" "$ROOT"

@@ -215,6 +215,24 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   the operator as a bare `deploy.sh` exit, unlike the rsync and restart
   phases, so it now names its phase and reports that nothing was pushed.
 
+- **A recovery could restore the older of two backups taken in the same
+  second, and prune the newer one.** Two backups landing inside one second
+  cannot share a name, so the second takes a `-<n>` counter, and both the
+  prune and a bare `restore` read the archive list as an age order. That
+  order did not hold: the counter was unpadded, so `-10` came out older than
+  `-2`, and the list came from a glob, which sorts in the caller's locale, so
+  under `en_US.UTF-8` the plain `…-000000.tar.gz` sorted after the
+  `…-000000-01.tar.gz` written seconds later. The counter is now zero-padded
+  behind a separator that sorts after the extension dot, and the list is read
+  through `backup_archives`, which pins `LC_ALL=C` byte order, so age order
+  holds on any host. Archives already in `backups/` keep their names.
+- **`SOURCE_DATE_EPOCH` in the wrong unit built a timestamped image anyway.**
+  The value reached `podman build --timestamp`, which reads seconds, after a
+  digits-only check, so a millisecond stamp (`Date.now()`,
+  `UnixMilli()`) pinned every layer to a date in the year 55000: a build that
+  claims to be reproducible and reproduces nothing. A value too large to be a
+  seconds stamp is now refused before podman runs, and a zero-padded one is
+  read as decimal rather than as octal.
 - **A config file with an unusable encoding declaration crashed the XML
   parsers.** `encoding='x-mac-roman'` (an editor that wrote a Mac Roman
   declaration) or `encoding='utf-7'` fails outside `ParseError`: an unknown
