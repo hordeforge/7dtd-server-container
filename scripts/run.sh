@@ -154,20 +154,12 @@ fi
 # Backup retention varies per host (disk size, how far back an operator wants
 # to reach), so it is a validated config value with a committed default rather
 # than a constant. Same boundary treatment as the steamcmd switches: a
-# non-numeric or below-minimum value fails here instead of reaching the
+# non-numeric or below-minimum value is refused instead of reaching the
 # arithmetic in archive_saves, where "abc" compares as 0 (prune every archive)
-# and a 0 would delete the archive just written.
+# and a 0 would delete the archive just written. The rule itself lives in
+# check_backup_keep, called from check_env_values, so the `config` report
+# survives a rejected value the way it does for every other key it reports.
 KEEP_BACKUPS="${BACKUP_KEEP:-7}"
-case "$KEEP_BACKUPS" in
-  ''|*[!0-9]*)
-    echo "FATAL: BACKUP_KEEP must be numeric (got '$KEEP_BACKUPS')" >&2
-    exit 1
-    ;;
-esac
-if (( KEEP_BACKUPS < 1 )); then
-  echo "FATAL: BACKUP_KEEP must be at least 1 (got '$KEEP_BACKUPS')" >&2
-  exit 1
-fi
 
 NAME="${SEVENDTD_CONTAINER_NAME:-7dtd-server}"
 IMAGE="${SEVENDTD_IMAGE:-localhost/7dtd-server:latest}"
@@ -235,9 +227,23 @@ apply_steamcmd_defaults
 # STEAMCMD_UPDATE=true must fail here instead of silently disabling the per-boot
 # depot validation, and an unsafe or missing password must fail on the host,
 # before a container starts.
+check_backup_keep() {
+  case "$KEEP_BACKUPS" in
+    ''|*[!0-9]*)
+      echo "FATAL: BACKUP_KEEP must be numeric (got '$KEEP_BACKUPS')" >&2
+      exit 1
+      ;;
+  esac
+  if (( KEEP_BACKUPS < 1 )); then
+    echo "FATAL: BACKUP_KEEP must be at least 1 (got '$KEEP_BACKUPS')" >&2
+    exit 1
+  fi
+}
+
 check_env_values() {
   check_telnet_env
   check_steamcmd_env
+  check_backup_keep
   # Optional dashboard webuser password: when provided it is validated here so
   # a bad value fails on the host instead of mid-boot in the container. When
   # unset, the entrypoint mints a random one at seed time (see
@@ -623,12 +629,18 @@ restore() {
     exit 1
   fi
   while IFS= read -r entry; do
+    # Escape first, payload second. A case takes the first pattern that
+    # matches, and every escaping path under the payload root also matches
+    # Saves/*: with the order reversed, `Saves/../../escape` and `Saves/..`
+    # were counted as payload and never reached the rejection, so an archive
+    # whose only Saves/ entries climb out of the tree was accepted and
+    # extracted.
     case "$entry" in
-      Saves|Saves/*) has_saves=1 ;;
       /*|../*|*/../*|*/..)
         echo "FATAL: $archive holds an entry outside the archive root ('$entry'); refusing to extract" >&2
         exit 1
         ;;
+      Saves|Saves/*) has_saves=1 ;;
     esac
   done <<<"$listing"
   if (( has_saves == 0 )); then

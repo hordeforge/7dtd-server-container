@@ -1042,6 +1042,43 @@ with tempfile.TemporaryDirectory() as tmp:
     )
 
 
+# An entry that climbs out of the tree is refused even when it starts inside
+# Saves/: a case matches the first pattern that fits, and Saves/../../escape
+# also matches Saves/*, so the escape check has to be tested first or the
+# guard silently accepts the very shape it exists to reject.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    make_sandbox(tmpdir)
+    install_podman_stub(tmpdir, PODMAN_STUB)
+    saves = tmpdir / "data" / "userdata" / "Saves" / "region"
+    saves.mkdir(parents=True)
+    (saves / "r.0.0.region").write_bytes(b"current-world")
+    (tmpdir / "backups").mkdir(parents=True)
+    crafted = tmpdir / "backups" / "7dtd-saves-20200101-000000.tar.gz"
+    with tarfile.open(crafted, "w:gz") as tf:
+        for name in ("Saves", "Saves/world", "Saves/../../escape", "Saves/.."):
+            info = tarfile.TarInfo(name)
+            info.size = 0
+            tf.addfile(info)
+    env = stub_env(tmpdir)
+    proc = subprocess.run(
+        [str(tmpdir / "scripts" / "run.sh"), "restore"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    out = proc.stdout + proc.stderr
+    check(
+        "restore of an archive escaping through Saves/ refuses",
+        proc.returncode != 0 and b"outside the archive root" in out,
+    )
+    check(
+        "the escaping restore left the saves alone",
+        (saves / "r.0.0.region").read_bytes() == b"current-world",
+    )
+
+
 # CLI surface: --help answers without any setup side effect, and a bad
 # invocation must be distinguishable from a failed operation by scripts
 # consuming this CLI, so usage errors exit 2 (not 1 like real failures).
@@ -1302,6 +1339,21 @@ with tempfile.TemporaryDirectory() as tmp:
         timeout=30,
     )
     check("an empty BACKUP_KEEP falls back to the default", proc.returncode == 0)
+    # config exists to diagnose a broken value, so a rejected BACKUP_KEEP must
+    # reach the report as a "values rejected:" line like every other key it
+    # prints, not abort the run before a single line is written.
+    proc = subprocess.run(
+        [str(run_sh), "config"],
+        env={**env, "BACKUP_KEEP": "abc"},
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    check(
+        "config reports a rejected BACKUP_KEEP instead of dying on it",
+        proc.returncode == 0
+        and b"values rejected: FATAL: BACKUP_KEEP must be numeric" in proc.stdout,
+    )
 
 exit_status()
 print("run.sh secret-transport and build contract OK")
