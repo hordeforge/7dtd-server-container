@@ -284,6 +284,14 @@ def main(argv: list[str]) -> int:
     if len(argv) == 2:
         Path(argv[1]).write_text(text, encoding="utf-8")
     else:
+        # The document is UTF-8 whatever the caller's locale is: the pins,
+        # markers and license expressions it carries come out of UTF-8 METADATA
+        # and the file writer above already says so. Left to itself sys.stdout
+        # encodes with locale.getpreferredencoding(), so a non-ASCII component
+        # raises UnicodeEncodeError on a single-byte-locale host, and the run
+        # that writes the file (the one a release cuts from) would differ from
+        # the run that prints it.
+        sys.stdout.reconfigure(encoding="utf-8")
         sys.stdout.write(text)
     return 0
 
