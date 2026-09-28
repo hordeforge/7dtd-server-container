@@ -307,7 +307,8 @@ apply_steamcmd_defaults
 # depot validation, and an unsafe or missing password must fail on the host,
 # before a container starts.
 check_backup_keep() {
-  case "$KEEP_BACKUPS" in
+  local digits="$KEEP_BACKUPS"
+  case "$digits" in
     ''|*[!0-9]*)
       echo "FATAL: BACKUP_KEEP must be numeric (got '$KEEP_BACKUPS')" >&2
       exit 1

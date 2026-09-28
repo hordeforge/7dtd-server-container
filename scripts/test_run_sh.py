@@ -1447,6 +1447,31 @@ with tempfile.TemporaryDirectory() as tmp:
             )
             is not None,
         )
+    # The upper bound is enforced on the digit string, not on bash's
+    # evaluation of it. A value wider than 2^64 wraps in bash's arithmetic
+    # rather than failing, so the first case below is the one that separates
+    # the two: 18446744073709551616 + 1 evaluates to exactly 1 and would sail
+    # through a numeric range check, while the documented maximum must still
+    # be accepted, so the bound cannot be enforced by refusing anything long.
+    # `config` exits 0 on a rejected value by design (it exists to diagnose
+    # one), so the verdict line, not the return code, carries the answer.
+    for wrapped, accepted in (
+        ("18446744073709551617", False),
+        ("999999999", True),
+        ("1000000000", False),
+    ):
+        proc = subprocess.run(
+            [str(run_sh), "config"],
+            env={**env, "BACKUP_KEEP": wrapped},
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+        check(
+            f"BACKUP_KEEP={wrapped!r} is {'accepted' if accepted else 'refused'} at the bound",
+            proc.returncode == 0
+            and (b"values rejected: FATAL: BACKUP_KEEP" in proc.stdout) is not accepted,
+        )
     proc = subprocess.run(
         [str(run_sh), "config"],
         env={**env, "BACKUP_KEEP": "3"},
