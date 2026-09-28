@@ -50,6 +50,17 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   archived log back with `--keep-newer-files`, so a restore recovers a log file
   that was deleted without rolling back the entries written since the backup.
   Archives written before this hold the world only, and still restore.
+- **A dependency inventory for the analyzer closure.** The only third-party
+  code in the tree is the hash-pinned lint and typecheck toolchain, and
+  nothing recorded what a release was resolved against, so a consumer or a
+  vulnerability scanner had no way to answer that from the repository.
+  `make sbom` writes a CycloneDX 1.6 document to `dist/sbom.cdx.json`: one
+  component per pin with its sha256 hashes and the license the installed
+  metadata declares, a root component carrying `VERSION`, and a property
+  stating that the closure is dev-only and reaches no image. The release
+  workflow records the document in the run summary for each tag. The output
+  is generated, not committed, and carries no timestamp, so the same manifest
+  regenerates it byte for byte.
 - **A scheduled readability check on the save archives.** A backup that exited
   0 is a claim about the file it wrote that day, not proof the file is still
   good; a truncated off-host copy, a dropped tail or an archive nobody pruned

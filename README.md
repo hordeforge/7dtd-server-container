@@ -47,10 +47,11 @@ exposing this host beyond a trusted LAN.
 | `scripts/perf.sh` | EfficientServer toggle (`on`/`off`/`status`) + telnet `apm status` snapshot (`measure`) |
 | `scripts/lib-env.sh` | Shared `.env` loader, telnet value validation, telnet session helper (sourced by the ops scripts) |
 | `start.sh` / `stop.sh` | Top-level daily shortcuts: start / graceful stop (wrap `run.sh`) |
-| `Makefile` | `make test`, `make lint` (bash -n + shellcheck + reference check over every shell script; ruff rules/format, mypy strict, yamllint over Python and CI YAML; Containerfile structure check). Needs [`uv`](https://docs.astral.sh/uv/) on PATH: both targets build `.venv` from `requirements-lint.txt` themselves |
+| `Makefile` | `make test`, `make lint` (bash -n + shellcheck + reference check over every shell script; ruff rules/format, mypy strict, yamllint over Python and CI YAML; Containerfile structure check), `make sbom`. Needs [`uv`](https://docs.astral.sh/uv/) on PATH: these targets build `.venv` from `requirements-lint.txt` themselves |
 | `pyproject.toml`, `.yamllint.yaml`, `requirements-lint.txt` | Static analysis config (ruff rules + 100-col format, mypy strict, yamllint) and the hash-pinned analyzer closure; enforced by `make lint` locally and in CI from the same recipe |
 | `.github/workflows/ci.yml` | CI: lint, tests, Containerfile and config-template validation; publishes the coverage badge on main |
-| `scripts/test_lib_env.sh`, `scripts/test_fuzz_env.sh`, `scripts/test_coverage_badge.py`, `scripts/test_check_config_xml.py`, `scripts/test_config_templates.py`, `scripts/test_deploy_sh.py`, `scripts/test_entrypoint_boot.py`, `scripts/test_systemd_unit.py`, `scripts/test_containerfile.py`, `scripts/test_fuzz_xml.py`, `scripts/test_run_sh.py`, `scripts/test_perf_sh.py`, `scripts/test_stage_mods.py`, `scripts/test_makefile.py` | Tests behind `make test`; `fake-telnet-server.py` is their fake telnet endpoint fixture |
+| `scripts/sbom.py` | CycloneDX 1.6 inventory of the pinned analyzer closure (pins, sha256 hashes, licenses read from the venv METADATA); `make sbom` writes `dist/sbom.cdx.json`, the release workflow records it in the run summary |
+| `scripts/test_lib_env.sh`, `scripts/test_fuzz_env.sh`, `scripts/test_coverage_badge.py`, `scripts/test_check_config_xml.py`, `scripts/test_config_templates.py`, `scripts/test_deploy_sh.py`, `scripts/test_entrypoint_boot.py`, `scripts/test_systemd_unit.py`, `scripts/test_containerfile.py`, `scripts/test_fuzz_xml.py`, `scripts/test_run_sh.py`, `scripts/test_perf_sh.py`, `scripts/test_stage_mods.py`, `scripts/test_makefile.py`, `scripts/test_sbom.py` | Tests behind `make test`; `fake-telnet-server.py` is their fake telnet endpoint fixture |
 | `scripts/check-config-xml.py`, `scripts/coverage_badge.py`, `scripts/harness.py` | CI helpers: config XML well-formedness check, coverage badge renderer, shared check reporter and sandbox PATH builder for the suites above |
 | `systemd/7dtd-server.container` | Quadlet for a durable rootless user service |
 | `docs/THREAT_MODEL.md` | Attack surface of this harness: entry points, trust boundaries, existing controls, ranked gaps |
@@ -79,7 +80,15 @@ make test       # every suite
 make lint       # every static check
 make check      # lint then test: everything CI runs
 make format     # rewrite the Python in place: ruff format, then ruff check --fix
+make sbom       # CycloneDX inventory of the pinned closure -> dist/sbom.cdx.json
 ```
+
+`make sbom` writes the CycloneDX inventory of that closure to
+`dist/sbom.cdx.json`: every pin with its sha256 hashes and the license the
+installed metadata declares, plus a property saying the whole closure is
+dev-only and reaches no image. The document is a pure function of the
+manifest, so it is generated rather than committed, and the release
+workflow records it in the run summary for each tag.
 
 `make lint` and `make test` build `.venv` themselves, so `make check` on a
 clean clone is the whole setup. Both run the same commands CI does, from the

@@ -29,6 +29,16 @@ jobs:
       # would otherwise run unreviewed code here with the workflow token.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
+      # Same action SHA and same uv binary as the ci workflow's check job: the
+      # inventory step below reads licenses out of the venv, and `make sbom`
+      # builds that venv from requirements-lint.txt with the interpreter pin in
+      # .python-version.
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          version: "0.12.14"
+          enable-cache: true
+          cache-dependency-glob: "{requirements-lint.txt,.python-version}"
+
       - name: Check the tag matches VERSION
         shell: bash
         run: |
@@ -50,6 +60,26 @@ jobs:
             exit 1
           fi
           echo "ok: tag $TAG matches $MANIFEST ($SHIPPED)"
+
+      # What this release was resolved against. The analyzer closure is the
+      # only third-party code in the tree, and it never reaches the image, so
+      # the inventory is the record of a release's dev-time supply chain. It
+      # goes in the run summary rather than a committed file: the document is
+      # a pure function of requirements-lint.txt, so anyone can reproduce it
+      # with `make sbom` at the tag, and a copy in the tree would only be a
+      # second thing to forget to regenerate.
+      - name: Record the dependency inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          make sbom
+          {
+            echo "## Dependency inventory ($TAG)"
+            echo
+            echo '```json'
+            cat dist/sbom.cdx.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # A matching VERSION says the tag is the version this tree ships; it
       # says nothing about whether anyone can tell what changed. Require the

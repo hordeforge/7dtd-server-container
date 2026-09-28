@@ -10,6 +10,10 @@ mods/
 .env
 coverage/
 coverage.cobertura.xml
+# Generated dependency inventory (make sbom); reproducible from
+# requirements-lint.txt plus the venv, so committing it would only add a
+# second thing to forget to regenerate.
+dist/
 # Python bytecode from importing coverage_badge in its unit tests.
 scripts/__pycache__/
 # Analyzer caches (mypy, ruff); regenerable, never commit.

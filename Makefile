@@ -34,7 +34,7 @@ PYBIN := $(VENV)/bin
 PYVER := $(strip $(shell cat .python-version))
 
 .DEFAULT_GOAL := help
-.PHONY: help lint format test test-one check coverage venv
+.PHONY: help lint format test test-one check coverage sbom venv
 
 # The task list, so a contributor never has to read this file to find a
 # command. `make` alone lands here; `make test` is the gate, not a greeting.
@@ -45,6 +45,7 @@ help:
 	@echo 'make lint                   bash -n, shellcheck, script references, ruff, mypy, yamllint, Containerfile'
 	@echo 'make format                 rewrite the Python in place: ruff format, then ruff check --fix'
 	@echo 'make check                  lint then test: everything .github/workflows/ci.yml runs'
+	@echo 'make sbom                   CycloneDX inventory of the pinned analyzer closure (dist/sbom.cdx.json)'
 	@echo 'make coverage               line coverage for scripts/lib-env.sh (needs kcov on PATH)'
 
 $(PYBIN)/ruff: requirements-lint.txt .python-version
@@ -165,6 +166,18 @@ test-one: $(PYBIN)/ruff
 # full local verification is one command rather than the pair a contributor has
 # to know about.
 check: lint test
+
+# The dependency inventory a consumer or a vuln scanner needs to know what a
+# release was resolved against. It is generated, never committed: the file is
+# reproducible from requirements-lint.txt, so a checked-in copy would only be
+# a second thing to forget to regenerate. Reads the manifest for pins and
+# hashes and the venv for licenses, so it depends on the venv like the gates do.
+SBOM := dist/sbom.cdx.json
+sbom: $(PYBIN)/ruff
+	@mkdir -p $(dir $(SBOM))
+	set -euo pipefail; \
+	$(PYBIN)/python scripts/sbom.py $(SBOM); \
+	echo "wrote $(SBOM)"
 
 coverage:
 	# kcov is the one optional gate tool, and `kcov: command not found` after a
