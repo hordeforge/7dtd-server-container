@@ -169,7 +169,9 @@ load_env_file() {
     echo "FATAL: cannot read env file '$1'" >&2
     exit 1
   fi
+  local lineno=0
   while IFS= read -r line || [[ -n "$line" ]]; do
+    lineno=$(( lineno + 1 ))
     case "$line" in
       ''|'#'*) continue ;;
       'export '*) line="${line#'export '}" ;;
@@ -177,17 +179,21 @@ load_env_file() {
     case "$line" in
       *=*) ;;
       *)
-        # No '=' means no value ever reached this line, naming it verbatim
-        # cannot leak one.
-        echo "WARN: $1: ignoring line without '=': $line" >&2
+        # Named by line number, never by content: a line the operator wrote
+        # as 'TELNET_PASSWORD hunter2' carries the secret in full and reaches
+        # this branch, so echoing the line would put the password in the log
+        # of every script that loads the file.
+        echo "WARN: $1: line $lineno: ignoring line without '='" >&2
         continue
         ;;
     esac
     key="${line%%=*}"
     if ! is_env_key "$key"; then
-      # Name the key side only ('key' stops at the first '='): a malformed
-      # line can still carry a secret value that must stay out of the log.
-      echo "WARN: $1: ignoring line with invalid key '$key'" >&2
+      # Name the first word of the key side only (the key side stops at the
+      # first '='), plus the line number: 'TELNET_PASSWORD hunter2=x' is an
+      # invalid key whose key side still carries the secret, so neither the
+      # whole key side nor the line can go to the log.
+      echo "WARN: $1: line $lineno: ignoring line with invalid key '${key%% *}'" >&2
       continue
     fi
     if [[ -n "${!key+x}" ]]; then

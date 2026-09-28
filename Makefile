@@ -15,7 +15,8 @@ PY := $(sort $(wildcard scripts/*.py))
 YAML := $(sort $(wildcard .github/workflows/*.yml) $(wildcard .github/workflows/*.yaml)) .yamllint.yaml .github/dependabot.yml
 # Same single-owner rule for the suites `test` runs: a new scripts/test_*.py
 # is executed by the gate as soon as it exists, not when someone remembers to
-# list it here. test_lib_env.sh is bash and runs separately below.
+# list it here. The two bash suites run separately below: the lib-env unit
+# tests and the .env parser fuzz harness.
 TESTS := $(sort $(wildcard scripts/test_*.py))
 
 # Analyzer toolchain: one uv-managed venv built from the hash-pinned closure
@@ -39,7 +40,7 @@ PYVER := $(strip $(shell cat .python-version))
 # command. `make` alone lands here; `make test` is the gate, not a greeting.
 help:
 	@echo 'make venv                  the pinned analyzer venv (.venv), nothing else'
-	@echo 'make test                   every suite: scripts/test_lib_env.sh, then scripts/test_*.py'
+	@echo 'make test                   every suite: the two bash ones, then scripts/test_*.py'
 	@echo 'make test-one SUITE=<name>  one suite, e.g. SUITE=test_run_sh.py (test_lib_env.sh works too)'
 	@echo 'make lint                   bash -n, shellcheck, script references, ruff, mypy, yamllint, Containerfile'
 	@echo 'make check                  lint then test: everything .github/workflows/ci.yml runs'
@@ -123,6 +124,7 @@ test: $(PYBIN)/ruff
 	# suite that went red instead of leaving it to be guessed from the trace.
 	echo "== scripts/test_lib_env.sh"
 	bash scripts/test_lib_env.sh
+	bash scripts/test_fuzz_env.sh
 	set -euo pipefail; \
 	for t in $(TESTS); do echo "== $$t"; $(PYBIN)/python "$$t"; done
 
@@ -166,4 +168,5 @@ coverage:
 	# Direct exec (not `bash script`): kcov traces the shebang interpreter;
 	# through an extra bash layer it produces an empty report.
 	kcov --clean --include-pattern=lib-env.sh coverage ./scripts/test_lib_env.sh
+	kcov --clean --include-pattern=lib-env.sh coverage ./scripts/test_fuzz_env.sh
 	find coverage -name cobertura.xml | head -1 | xargs -I{} cp {} coverage.cobertura.xml

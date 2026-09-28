@@ -66,6 +66,27 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   bounded case count keep the gate deterministic; Atheris is not a dependency
   of this repo and the analyzer closure stays hash-pinned.
 
+- **`scripts/test_fuzz_env.sh`, a seeded fuzz harness for the `.env` loader**,
+  run by `make test` beside `scripts/test_lib_env.sh`. It assembles `.env`
+  cases from line kinds (documented keys, near-miss key spellings, quoted and
+  unquoted values, values shaped like command substitution, CRLF, a BOM, a
+  NUL, a missing final newline, a duplicated key, a preset environment
+  variable, a 4 KB value) and drives `load_env_file`, `check_env_file_keys`,
+  `require_command` and the value, port and switch rules through the same
+  entry points the ops scripts use. The expectations come from the generator's
+  intent, not from a second copy of the parser, and they assert: the intended
+  keys and values and nothing else, a variable the environment already carried
+  is not overwritten, no warning or refusal carries a value or echoes a line
+  back, and each value predicate agrees with an oracle written independently of
+  `lib-env.sh`. It found the leak below.
+- **A `.env` warning no longer echoes the line it is warning about.** The
+  "ignoring line without '='" message printed the whole line, so the typo
+  `TELNET_PASSWORD hunter2` (a forgotten `=`) put the password into the log of
+  every script that loads the file, and the invalid-key message printed the
+  whole key side, which carries the value in `TELNET_PASSWORD hunter2=x`. Both
+  now name the file and the line number, and the invalid-key message names the
+  key's first word only.
+
 
 - OCI labels on the image (title, description, source, license, version) so
   `podman inspect` reports what it ships. The version label copies `VERSION`,

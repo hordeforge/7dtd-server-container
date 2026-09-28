@@ -56,9 +56,10 @@ jobs:
 
       - name: Test suites (.env loader, render contracts, lifecycle scripts)
         # Each suite pins its own contract; scripts/test_lib_env.sh covers the
-        # .env loader, password rules, and telnet_session (make coverage reruns
-        # that one under kcov). Running everything via make test keeps CI from
-        # drifting from dev.
+        # .env loader, password rules, and telnet_session;
+        # scripts/test_fuzz_env.sh fuzzes that loader over seeded .env files
+        # (make coverage reruns both under kcov).
+        # Running everything via make test keeps CI from drifting from dev.
         # Raw + rendered template validation lives only in make test
         # (scripts/test_config_templates.py pins the token contract); no inline
         # copy here, same single-owner rule as lint above.

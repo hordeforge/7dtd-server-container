@@ -126,8 +126,10 @@ printf 'DUP=first\nDUP=second\nEMPTYQ=""\nHASH=a#b\nCRVAL=abc\r\n' > "$tmp/corne
 )
 # Malformed lines are skipped, but every skip must be visible: a typo'd key
 # (e.g. TELNET_PASSWD=) would otherwise fall back to the shared default with
-# no trace of why the operator's line had no effect. Warnings name the key
-# side only; a malformed line can still carry a secret value.
+# no trace of why the operator's line had no effect. Warnings name the key's
+# first word and the line number, never the line: a malformed line can carry a
+# secret value in full ('TELNET_PASSWORD hunter2'), so echoing it would put the
+# password in the log of every script that loads the file.
 printf 'GOOD=kept\n1BAD=x\nBAD-KEY=y\nNOEQUALS\n' > "$tmp/malformed.env"
 (
   cd "$tmp"
@@ -144,8 +146,15 @@ printf 'GOOD=kept\n1BAD=x\nBAD-KEY=y\nNOEQUALS\n' > "$tmp/malformed.env"
     echo "FAIL: skipping malformed lines must warn on stderr (got '$warns')" >&2; exit 1; }
   [[ "$warns" == *"invalid key '1BAD'"* && "$warns" == *"invalid key 'BAD-KEY'"* ]] || {
     echo "FAIL: invalid-key warnings must name the key side (got '$warns')" >&2; exit 1; }
-  [[ "$warns" == *"without '=': NOEQUALS"* ]] || {
-    echo "FAIL: no-'=' warning must name the offending line (got '$warns')" >&2; exit 1; }
+  [[ "$warns" == *"line 4: ignoring line without '='"* ]] || {
+    echo "FAIL: no-'=' warning must name the offending line by number (got '$warns')" >&2; exit 1; }
+  printf 'TELNET_PASSWORD hunter2\nTELNET_PASSWORD hunter2=x\n' > "$tmp/leaky.env"
+  load_env_file leaky.env 2>>"$warn_file"
+  if grep -qF hunter2 "$warn_file"; then
+    echo "FAIL: a malformed line leaked its value to stderr" >&2; exit 1
+  fi
+  [[ "$( < "$warn_file" )" == *"leaky.env: line 2: ignoring line with invalid key 'TELNET_PASSWORD'"* ]] || {
+    echo "FAIL: invalid-key warning must name the key's first word and the line (got '$( < "$warn_file" )')" >&2; exit 1; }
   printf 'SECRET-KEY=hunter2\n' > leak.env
   if load_env_file leak.env 2>>"$warn_file"; grep -qF hunter2 "$warn_file"; then
     echo "FAIL: warning leaked a malformed line's value to stderr" >&2; exit 1
