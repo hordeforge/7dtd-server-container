@@ -568,5 +568,70 @@ else:
             not (dst / "stale-on-host.sh").exists(),
         )
 
+# The three deploy keys are part of the loader's key set (ENV_FILE_KEYS) and
+# .env.example documents them, so a target set in .env has to reach the rsync
+# destination. deploy.sh used to read the environment only, so an operator who
+# put the host in the file the rest of the project configures through got a
+# push to the committed default host and no word about it. Precedence is the
+# shared one: the environment still wins over the file.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    project, env = make_sandbox(tmpdir, timeout_name=None)
+    for var in ("SEVENDTD_SERVER_HOST", "SEVENDTD_SERVER_USER", "SEVENDTD_SERVER_DIR"):
+        del env[var]
+    env_file = project / ".env"
+    env_file.write_text(
+        "SEVENDTD_SERVER_HOST=10.0.0.9\nSEVENDTD_SERVER_USER=ops\nSEVENDTD_SERVER_DIR=/srv/7dtd\n",
+        encoding="utf-8",
+    )
+    rsync_log = Path(env["DEPLOY_TEST_RSYNC_LOG"])
+
+    proc = run_deploy(project, env)
+    check("a .env deploy target exits 0", proc.returncode == 0)
+    if proc.returncode != 0:
+        fail_stderr(proc)
+    check(
+        "the .env target is the rsync destination",
+        invocations(rsync_log)
+        == [[*EXPECTED_RSYNC_ARGV, f"{project}/".encode(), b"ops@10.0.0.9:/srv/7dtd/"]],
+    )
+
+    # The environment still wins, key by key, so an override of one value does
+    # not discard the other two the file supplies.
+    rsync_log.unlink()
+    env["SEVENDTD_SERVER_HOST"] = HOST
+    proc = run_deploy(project, env)
+    check("the environment still beats .env", proc.returncode == 0)
+    check(
+        "the environment overrides one key and the file keeps the rest",
+        invocations(rsync_log)
+        == [
+            [
+                *EXPECTED_RSYNC_ARGV,
+                f"{project}/".encode(),
+                f"ops@{HOST}:/srv/7dtd/".encode(),
+            ]
+        ],
+    )
+
+    # An unknown key is refused before any value applies, the same verdict
+    # run.sh gives, rather than deploying with a typo'd target half read.
+    rsync_log.unlink()
+    with env_file.open("a", encoding="utf-8") as handle:
+        handle.write("SEVENDTD_SERVER_HOSTT=10.0.0.9\n")
+    proc = run_deploy(project, env)
+    err = proc.stderr.decode(errors="replace")
+    check("a typo'd .env key refuses the deploy", proc.returncode == 1)
+    check("the refusal names the key it does not know", "SEVENDTD_SERVER_HOSTT" in err)
+    check("the refused deploy transferred nothing", invocations(rsync_log) == [])
+
+    # Help answers before the load, so a broken .env cannot stop it.
+    proc = run_deploy(project, env, "--help")
+    check("--help answers with a .env present", proc.returncode == 0 and b"usage:" in proc.stdout)
+    check(
+        "--help printed the committed default, not the .env value",
+        b"192.168.0.100" in proc.stdout and b"10.0.0.9" not in proc.stdout,
+    )
+
 exit_status()
 print("deploy.sh remote-restart contract OK")

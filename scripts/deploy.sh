@@ -4,7 +4,10 @@
 # Env overrides: SEVENDTD_SERVER_HOST (default 192.168.0.100),
 # SEVENDTD_SERVER_USER (default maci), SEVENDTD_SERVER_DIR (default
 # /home/maci/7dtd-server, the remote account's home, not the local ~).
-# Each is shape-checked before staging, because they reach ssh/rsync argv.
+# Same precedence as run.sh and perf.sh: the environment wins, the git-ignored
+# .env in this directory fills what the environment left unset, and the
+# committed defaults come last. Each value is shape-checked before staging,
+# because they reach ssh/rsync argv.
 #
 #   ./scripts/deploy.sh            # push project + mods
 #   ./scripts/deploy.sh --restart  # push, then restart the container so the
@@ -13,9 +16,11 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$ROOT/scripts/lib-env.sh"
-HOST="${SEVENDTD_SERVER_HOST:-192.168.0.100}"
-SSH_USER="${SEVENDTD_SERVER_USER:-maci}"
-DEST_DIR="${SEVENDTD_SERVER_DIR:-/home/${SSH_USER}/7dtd-server}"
+# The committed defaults first, so usage() can print a target before (and
+# without) the .env load below, the way every script here answers --help.
+HOST="$DEFAULT_SEVENDTD_SERVER_HOST"
+SSH_USER="$DEFAULT_SEVENDTD_SERVER_USER"
+DEST_DIR="$(default_sevendtd_server_dir "$SSH_USER")"
 
 usage() {
   cat <<EOF
@@ -27,12 +32,40 @@ Stage mods, then rsync this project to ${SSH_USER}@${HOST}:${DEST_DIR}/.
 
 Env overrides: SEVENDTD_SERVER_HOST (default ${HOST}),
 SEVENDTD_SERVER_USER (default ${SSH_USER}),
-SEVENDTD_SERVER_DIR (default ${DEST_DIR}).
+SEVENDTD_SERVER_DIR (default ${DEST_DIR}). The environment wins, the
+git-ignored .env in this directory fills what it left unset, and the
+committed defaults come last; an unknown key in .env is refused.
 
 Exit codes: 0 success, 2 usage error (bad flag or rejected target value),
 1 a failed deploy or restart step.
 EOF
 }
+
+# Help answers before the .env load and before the value checks: asking for
+# help must never fail on an unrelated broken value in the file, the same rule
+# run.sh and perf.sh follow. help wins over a stray second word, so
+# `deploy.sh --help --restart` prints the usage and stops.
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+esac
+
+# The git-ignored .env, read with the shared loader and the same key check
+# run.sh applies: a typo'd key is refused rather than leaving the committed
+# default in place. These three keys are in the loader's set (ENV_FILE_KEYS)
+# and documented in .env.example, so a target set there has to be read here
+# too; a .env naming a different host that deploy.sh ignores is a deploy that
+# goes to the default one without a word about it. Precedence is the shared
+# one: the values loaded here only fill what the environment left unset.
+if [[ -f "$ROOT/.env" ]]; then
+  check_env_file_keys "$ROOT/.env"
+  load_env_file "$ROOT/.env"
+fi
+HOST="${SEVENDTD_SERVER_HOST:-$HOST}"
+SSH_USER="${SEVENDTD_SERVER_USER:-$SSH_USER}"
+DEST_DIR="${SEVENDTD_SERVER_DIR:-$(default_sevendtd_server_dir "$SSH_USER")}"
 
 # At most one flag: a silently ignored second word would make e.g.
 # `deploy.sh --restart dry-run` read as a supported option while the full
@@ -44,10 +77,6 @@ require_argc 1 usage "${2:-}"
 RESTART=0
 case "${1:-}" in
   "") ;;
-  -h|--help)
-    usage
-    exit 0
-    ;;
   --restart) RESTART=1 ;;
   *)
     # Name the offender before the usage dump (same shape as run.sh).

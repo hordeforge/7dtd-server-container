@@ -20,6 +20,8 @@
 #                      healthy against a live one, password never on the wire
 #   run_bounded        the local time bound: gtimeout counts as timeout, and
 #                      with neither binary the command still runs, warned once
+#   deploy defaults    the committed SEVENDTD_SERVER_* values, one home each,
+#                      and the destination directory following the account
 # Each block runs in a subshell so a FATAL exit marks only that case failed.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -768,3 +770,19 @@ printf 'retest\napm status\n' > "$tmp/expected-unbounded.bin"
 cmp -s "$tmp/received-unbounded.bin" "$tmp/expected-unbounded.bin" || {
   echo "FAIL: wrong bytes on the wire without any time-bound binary" >&2; exit 1; }
 echo "telnet time bound absent OK"
+
+# The committed deploy defaults live here, beside the telnet ones, and the
+# destination directory is derived from the account rather than hardcoded:
+# deploy.sh reads both, and a second copy of either is how a deploy ends up
+# pointing somewhere the other half of the project does not expect.
+deploy_defaults="$("$BASH_BIN" -c "
+  set -euo pipefail
+  source '$ROOT/scripts/lib-env.sh'
+  printf '%s|%s|%s|%s' \"\$DEFAULT_SEVENDTD_SERVER_HOST\" \"\$DEFAULT_SEVENDTD_SERVER_USER\" \\
+    \"\$(default_sevendtd_server_dir)\" \"\$(default_sevendtd_server_dir ops)\"
+")"
+if [[ "$deploy_defaults" != '192.168.0.100|maci|/home/maci/7dtd-server|/home/ops/7dtd-server' ]]; then
+  echo "FAIL: deploy defaults moved or the directory stopped following the user (got '$deploy_defaults')" >&2
+  exit 1
+fi
+echo "deploy defaults OK"

@@ -1662,7 +1662,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check(
         "config reports a rejected container name instead of dying on it",
         proc.returncode == 0
-        and b"values rejected: FATAL: SEVENDTD_CONTAINER_NAME must match" in proc.stdout,
+        and b"values rejected:\n  FATAL: SEVENDTD_CONTAINER_NAME must match" in proc.stdout,
     )
     # The opt-in that authorizes the committed public telnet password is a
     # config value like any other, so the report has to carry it.
@@ -1740,7 +1740,7 @@ with tempfile.TemporaryDirectory() as tmp:
         check(
             f"BACKUP_KEEP={wide!r} is {'accepted' if accepted else 'refused'} at the bound",
             proc.returncode == 0
-            and (b"values rejected: FATAL: BACKUP_KEEP" in proc.stdout) is not accepted,
+            and (b"values rejected:\n  FATAL: BACKUP_KEEP" in proc.stdout) is not accepted,
         )
     proc = subprocess.run(
         [str(run_sh), "config"],
@@ -1776,7 +1776,49 @@ with tempfile.TemporaryDirectory() as tmp:
     check(
         "config reports a rejected BACKUP_KEEP instead of dying on it",
         proc.returncode == 0
-        and b"values rejected: FATAL: BACKUP_KEEP must be numeric" in proc.stdout,
+        and b"values rejected:\n  FATAL: BACKUP_KEEP must be numeric" in proc.stdout,
+    )
+
+    # One rejected value must not hide the next: a host with no telnet
+    # password (the common fresh host) used to get that one FATAL and nothing
+    # about the BACKUP_KEEP or the steamcmd switch beside it, so the operator
+    # fixed the password, re-ran, and met the same report.
+    no_password_env = {k: v for k, v in env.items() if k != "TELNET_PASSWORD"}
+    proc = subprocess.run(
+        [str(run_sh), "config"],
+        env={**no_password_env, "BACKUP_KEEP": "abc", "STEAMCMD_UPDATE": "true"},
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    check(
+        "config reports every rejected value, not just the first",
+        proc.returncode == 0
+        and b"FATAL: TELNET_PASSWORD unset" in proc.stdout
+        and b"FATAL: STEAMCMD_UPDATE must be 0 or 1" in proc.stdout
+        and b"FATAL: BACKUP_KEEP must be numeric" in proc.stdout,
+    )
+    check(
+        "the second and third rejections sit under the same heading",
+        proc.stdout.count(b"values rejected:") == 1,
+    )
+
+    # An empty secret is no secret: the entrypoint's own test is -z, so a
+    # cleared WEBADMIN_PASSWORD mints one at first seed. Reporting it as
+    # "(set, redacted)" sends the operator to a record that was never written.
+    proc = subprocess.run(
+        [str(run_sh), "config"],
+        env={**env, "WEBADMIN_PASSWORD": ""},
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    report = proc.stdout.decode()
+    check(
+        "an empty webadmin password is reported as unset, not as set",
+        proc.returncode == 0
+        and re.search(r"^WEBADMIN_PASSWORD\s+\(unset: minted at first seed\)", report, re.MULTILINE)
+        is not None,
     )
 
 

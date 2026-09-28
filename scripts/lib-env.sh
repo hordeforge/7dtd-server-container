@@ -27,6 +27,21 @@
 # the probe cannot drift from the port init_telnet_env owns.
 DEFAULT_TELNET_PORT=8087
 DEFAULT_TELNET_PASSWORD=retest
+
+# Committed deploy target, one home each (scripts/deploy.sh, which reaches
+# ssh/rsync with them). The keys stay the SEVENDTD_SERVER_* ones .env.example
+# documents, and the file is read for them like every other key: a target set
+# in .env that deploy.sh ignored was a deploy that silently went to the
+# default host. The destination directory follows the account (the remote
+# user's home, never the local one), which is why it is a function and not a
+# constant: SEVENDTD_SERVER_USER can move it.
+# shellcheck disable=SC2034  # read by deploy.sh, which sources this file
+DEFAULT_SEVENDTD_SERVER_HOST=192.168.0.100
+DEFAULT_SEVENDTD_SERVER_USER=maci
+default_sevendtd_server_dir() { # [user]; the default destination directory
+  printf '/home/%s/7dtd-server' "${1:-$DEFAULT_SEVENDTD_SERVER_USER}"
+}
+
 require_argc() { # max_args usage_fn extra_argv
   local max="$1" usage_fn="$2" extra="$3"
   if [[ -n "$extra" ]]; then

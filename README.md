@@ -264,7 +264,8 @@ where each value came from (environment, `.env`, or the committed default),
 and whether the value rules accept it. Secret values are never printed; it
 reports them as set or unset. `ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD` is in
 that report too, so "is this host opted in to the public telnet password" has
-an answer without reading the environment by hand.
+an answer without reading the environment by hand. It reports every rejected
+value, not just the first, so one bad key does not hide the next.
 
 Every key above is checked before a command uses it, and `run.sh config`
 reports a rejected value instead of dying on it. `SEVENDTD_CONTAINER_NAME`
@@ -272,6 +273,12 @@ and `SEVENDTD_IMAGE` are no exceptions: both reach podman's argv and the
 container name is the body of the anchored `podman ps --filter` regex
 `status` matches on, so a value carrying regex or option syntax is refused
 rather than producing a `status` that reports a container nobody started.
+
+`deploy.sh` adds three keys of its own, `SEVENDTD_SERVER_HOST`,
+`SEVENDTD_SERVER_USER` and `SEVENDTD_SERVER_DIR` (defaults `192.168.0.100`,
+`maci`, and that account's home). It reads them from the environment and from
+`.env` with the precedence above, because they are in the same key set
+(`.env.example` is the complete list, and an unknown key in it is refused).
 
 `TELNET_PASSWORD` is required. The committed lab default (`retest`) is public
 and a set telnet password makes the game listen on every interface, so a boot

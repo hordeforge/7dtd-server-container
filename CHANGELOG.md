@@ -295,6 +295,37 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   replaying the flags deploy.sh passes through a real rsync against a local
   `--delete` pair.
 
+- **The mod-staging suite asserted the pre-`kept` behavior.** `stage_mods.sh`
+  keeps an enabled mod whose sibling `dist/` is gone (it is named in `NAMES`,
+  so the swap would otherwise drop a working mod off the server because a
+  sibling repo was not built), and says so in its warning. The check still
+  expected the mod to disappear, so the suite failed against the behavior the
+  script documents. It now asserts the keep, the warning that names it, and
+  that the kept tree keeps the bytes the server is running.
+- **`deploy.sh` ignored the deploy target in `.env`.** `SEVENDTD_SERVER_HOST`,
+  `SEVENDTD_SERVER_USER` and `SEVENDTD_SERVER_DIR` are in the loader's key set
+  and documented in `.env.example`, so they passed the unknown-key check, but
+  deploy.sh read the environment only: a target set in the file every other
+  script configures through was silently dropped and the push went to the
+  committed default host. It now reads them from `.env` with the same
+  precedence as `run.sh` and `perf.sh` (environment wins, the file fills the
+  rest, the committed defaults come last), and the defaults live in
+  `scripts/lib-env.sh` beside the telnet ones instead of in the script header.
+- **`run.sh config` reported one rejected value and hid the rest.** The value
+  rules ran in order and the first refusal ended the report, so on any host
+  without a telnet password (every fresh host) the report said only that, and
+  a bad `BACKUP_KEEP` or a bad `STEAMCMD_UPDATE` beside it stayed invisible
+  until it was fixed. Every rule now runs and every rejection is a line under
+  one heading.
+- **An empty `WEBADMIN_PASSWORD` was reported as set.** The entrypoint tests
+  the value with `-z`, so a cleared one mints a new dashboard password at first
+  seed; the report's `${!key+x}` test called that "set, redacted" and pointed
+  the operator at a record file that was never written. It reports as unset
+  now, which is what the seed does with it.
+- **A `BACKUP_KEEP` wider than the machine word printed a bash arithmetic
+  error before the line that names the fix.** The digit-width test ran after
+  the range comparison, so `(( 10#... ))` on a 20-digit value reported "value
+  too great for base" ahead of the `FATAL`. The width test runs first now.
 - **A host with no MD5 tool rendered an empty dashboard password digest.**
   `webadmin_password_digest` ran `md5_hex` in a command substitution and
   discarded its status, so the "no MD5 digest tool" guard never reached the

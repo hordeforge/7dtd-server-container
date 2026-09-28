@@ -219,9 +219,11 @@ with tempfile.TemporaryDirectory() as tmp:
     # not a staging run's decision to act on, so the copy survives the swap
     # exactly like an unchanged mod does (the swap would otherwise wipe it as
     # outside the new set). The warning names the mod so the operator sees what
-    # is running unbuilt. A mod that was never enabled is still not enabled
-    # here: the missing-dist case above starts from an empty mods/, so nothing
-    # is enabled yet and that branch is unreachable there.
+    # is running unbuilt. The warning says which of the two it is: kept when
+    # there is a tree, dropped when there is not. A mod that was never enabled
+    # is still not enabled here: the missing-dist case above starts from an
+    # empty mods/, so nothing is enabled yet and that branch is unreachable
+    # there.
     root = make_stage_sandbox(tmpdir / "unstaged", ["EfficientServer"])
     seeded_mod(root / "mods", "BotMod", "live-bot")
     proc = run_script(root / "scripts" / "stage_mods.sh", cwd=root, env={})
@@ -232,9 +234,16 @@ with tempfile.TemporaryDirectory() as tmp:
         "WARN" in err and "enabled mod BotMod not staged" in err,
     )
     check(
-        "the unstageable enabled mod keeps its live copy",
-        sorted(p.name for p in (root / "mods").iterdir()) == ["BotMod", "EfficientServer"]
-        and (root / "mods" / "BotMod" / "Config" / "config.json").read_text(encoding="utf-8")
+        "the warning says the enabled copy is kept, not dropped",
+        "enabled mod BotMod not staged (missing in mods-available/); keeping the copy" in err,
+    )
+    check(
+        "the unstageable mod stays enabled and the staged one joins it",
+        sorted(p.name for p in (root / "mods").iterdir()) == ["BotMod", "EfficientServer"],
+    )
+    check(
+        "the kept mod keeps the bytes the server is already running",
+        (root / "mods" / "BotMod" / "Config" / "config.json").read_text(encoding="utf-8")
         == "live-bot",
     )
     check(

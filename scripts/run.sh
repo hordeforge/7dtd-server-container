@@ -67,7 +67,8 @@ SEVENDTD_IMAGE. SOURCE_DATE_EPOCH pins the image mtimes for a reproducible
 `build`. A git-ignored .env in this directory fills unset variables;
 variables already present in the environment win over it, defaults come last.
 An unknown key in .env is refused. deploy.sh reads SEVENDTD_SERVER_HOST,
-SEVENDTD_SERVER_USER and SEVENDTD_SERVER_DIR from the environment.
+SEVENDTD_SERVER_USER and SEVENDTD_SERVER_DIR from the environment and .env
+alike, with the same precedence.
 
 Every command that writes data/, backups/ or the container (start, run,
 restart, install-only, stop, backup, restore) takes one exclusive lock on
@@ -358,13 +359,16 @@ check_backup_keep() {
   # aborting the whole run on the overflow error a value past the machine word
   # ("99999999999999999999") raises, which reads as a failed backup rather
   # than a rejected value. Equal-or-fewer digits than the ceiling itself means
-  # both sides fit a machine word.
-  if (( 10#$KEEP_BACKUPS < BACKUP_KEEP_MIN )); then
-    echo "FATAL: BACKUP_KEEP must be at least $BACKUP_KEEP_MIN (got '$KEEP_BACKUPS')" >&2
-    exit 1
-  fi
+  # both sides fit a machine word. Width first, and the arithmetic second: the
+  # two tests in the other order print bash's own "value too great for base"
+  # diagnostic ahead of the FATAL, so the operator sees an arithmetic error
+  # from a config value before the line that names the fix.
   if (( ${#KEEP_BACKUPS} > ${#BACKUP_KEEP_MAX} )); then
     echo "FATAL: BACKUP_KEEP must be at most $BACKUP_KEEP_MAX (got '$KEEP_BACKUPS')" >&2
+    exit 1
+  fi
+  if (( 10#$KEEP_BACKUPS < BACKUP_KEEP_MIN )); then
+    echo "FATAL: BACKUP_KEEP must be at least $BACKUP_KEEP_MIN (got '$KEEP_BACKUPS')" >&2
     exit 1
   fi
 }
@@ -387,18 +391,69 @@ check_podman_values() {
   fi
 }
 
-check_env_values() {
-  check_telnet_env
-  check_steamcmd_env
-  check_backup_keep
-  check_podman_values
+# Every value rule, and whether the caller wants one verdict or all of them.
+# A rule refuses by printing a FATAL and exiting 1, so each one runs in its own
+# subshell and only its output is kept. Run as a whole it answers "may this
+# run touch the host?", and it names the one rule that refused; run per rule
+# (env_value_verdicts) it answers "which of my values are wrong?", because a
+# single verdict hides every other rejected key behind the first refusal, and
+# the most common of them (no TELNET_PASSWORD, on any host that has not set
+# one) is exactly the verdict that hides the rest.
+#
+# The rules only read, so running them in a subshell loses nothing: the
+# defaults every rule depends on were filled above (apply_telnet_defaults,
+# apply_steamcmd_defaults, the KEEP_BACKUPS/NAME/IMAGE fallbacks).
+env_value_rules() { # check_telnet_env check_steamcmd_env check_backup_keep check_podman_values
+  local rule
+  for rule in "$@"; do
+    "$rule" || exit 1
+  done
+}
+
+# One line per rejected value, empty output and 0 when every value is accepted.
+# Prints the rules' own FATAL lines, so the text an operator reads here is the
+# same one a refusing command would die with. Every rule runs, so a report
+# never leaves a second bad value hidden behind the first refusal; 1 is
+# returned as soon as one of them refused.
+env_value_verdicts() { # rule...
+  local rule out rc=0
+  for rule in "$@"; do
+    if out="$("$rule" 2>&1)"; then
+      continue
+    fi
+    rc=1
+    if [[ -n "$out" ]]; then
+      printf '%s\n' "$out"
+    else
+      # A rule that fails without saying why is a bug in the rule, not a
+      # configuration value; name it rather than reporting a blank verdict.
+      printf 'FATAL: %s rejected a value without naming it\n' "$rule"
+    fi
+  done
+  return "$rc"
+}
+
+# The value rules, one owner: `config` and every other command read the same
+# list, so a key the report skips is a key nothing else checks either.
+env_value_rule_list() { # prints one rule name per line
+  printf '%s\n' check_telnet_env check_steamcmd_env check_backup_keep check_podman_values
   # Optional dashboard webuser password: when provided it is validated here so
   # a bad value fails on the host instead of mid-boot in the container. When
   # unset, the entrypoint mints a random one at seed time (see
-  # seed_admin_file); the empty pass-through below keeps that behavior.
+  # seed_admin_file), so there is no value to refuse.
   if [[ -n "${WEBADMIN_PASSWORD:-}" ]]; then
-    check_webadmin_password
+    printf '%s\n' check_webadmin_password
   fi
+}
+
+check_env_values() {
+  # Unquoted on purpose: the list is rule names, none of which carries a
+  # space, and shell arrays of a computed list need bash 4 (mapfile/readarray),
+  # which the macOS workstations this script also runs on do not have.
+  local rules
+  rules="$(env_value_rule_list)"
+  # shellcheck disable=SC2086  # word splitting is how the list becomes arguments
+  env_value_rules $rules
 }
 
 show_config() { # verdict
@@ -432,7 +487,13 @@ show_config() { # verdict
       # hid the one value that says whether this host runs on the committed
       # public telnet password, which is exactly what the report exists for.
       TELNET_PASSWORD|WEBADMIN_PASSWORD)
-        if [[ -z "${!key+x}" ]]; then
+        # Empty counts as unset, which is the test the entrypoint itself
+        # applies: a .env line reading `WEBADMIN_PASSWORD=` (or a value cleared
+        # by an empty environment variable) supplies no password, so the seed
+        # mints one. Reporting that as "(set, redacted)" would credit the host
+        # with a dashboard password it does not have and send the operator to
+        # a file that was never written.
+        if [[ -z "${!key:-}" ]]; then
           # An unset WEBADMIN_PASSWORD is not a missing value: the entrypoint
           # mints one at first seed. Say which, or the operator reads a
           # required-looking key as broken.
@@ -493,12 +554,26 @@ ensure_private_dir() { # dir
 
 if [[ "$COMMAND" == config ]]; then
   # A diagnostic has to survive the misconfiguration it diagnoses, so the value
-  # rules run in a subshell and their verdict becomes a line of the report
-  # instead of the end of it. Every other command still refuses to run on a
-  # rejected value.
-  config_verdict='values rejected: none'
-  if ! verdict="$(check_env_values 2>&1)"; then
-    config_verdict="values rejected: ${verdict}"
+  # rules run in subshells and their verdicts become lines of the report
+  # instead of the end of it. Every rule runs, so one bad value does not hide
+  # the next: an operator who set a bad BACKUP_KEEP on a host that has not
+  # pinned a telnet password used to be told only about the password, fixed
+  # it, and came back to the same report for the value they set first. Every
+  # other command still refuses to run on any rejected value.
+  config_verdicts=''
+  config_verdict=''
+  config_rules="$(env_value_rule_list)"
+  # shellcheck disable=SC2086  # word splitting is how the list becomes arguments
+  config_verdicts="$(env_value_verdicts $config_rules 2>&1)" || true
+  if [[ -z "$config_verdicts" ]]; then
+    config_verdict='values rejected: none'
+  else
+    # One indented line per rejection, so a report with several bad values
+    # reads as a list under one heading rather than as one run-on sentence.
+    config_verdict='values rejected:'
+    while IFS= read -r config_line; do
+      config_verdict+=$'\n'"  ${config_line}"
+    done <<<"$config_verdicts"
   fi
   show_config "$config_verdict"
   exit 0
