@@ -1,0 +1,24 @@
+# Schedule for 7dtd-backup.service. Enabled on the server host, this is what
+# bounds the RPO: without it the world is only as safe as the last time an
+# operator remembered ./scripts/run.sh backup.
+#
+#   cp systemd/7dtd-backup.{service,timer} ~/.config/containers/systemd/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now 7dtd-backup.timer
+[Unit]
+Description=Daily 7 Days to Die save backup
+
+[Timer]
+# Off the hour on purpose: every other timer on the host fires at :00, and a
+# backup that queues behind them is a backup that can be missed.
+OnCalendar=*-*-* 04:17:00
+# A host that was asleep or off at 04:17 runs the backup on the next boot
+# instead of silently skipping the day, which is the whole RPO claim.
+Persistent=true
+# Spread the start a little so restarts of the whole host do not pile every
+# job onto the same second.
+RandomizedDelaySec=600
+Unit=7dtd-backup.service
+
+[Install]
+WantedBy=timers.target

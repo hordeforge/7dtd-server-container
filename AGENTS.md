@@ -22,6 +22,7 @@ Workspace root guide: [`hordeforge/.github` AGENTS.md](https://github.com/hordef
 | Static analysis config (ruff + ruff format, mypy strict, yamllint) | `pyproject.toml`, `.yamllint.yaml` (enforced via `make lint` locally and in CI, versions pinned in `requirements-lint.txt`) |
 | Threat model (entry points, boundaries, controls, ranked gaps) | `docs/THREAT_MODEL.md` |
 | Rootless systemd service unit | `systemd/7dtd-server.container` |
+| Daily save-backup schedule | `systemd/7dtd-backup.service`, `systemd/7dtd-backup.timer` (runs `run.sh backup`) |
 | Version (canonical home) + changelog + tag gate | `VERSION` (`run.sh version`), `CHANGELOG.md`, `.github/workflows/release.yml`; the image's `org.opencontainers.image.version` label copies it and `scripts/test_containerfile.py` fails the gate when they drift |
 
 ## Does not own
@@ -76,10 +77,15 @@ Workspace root guide: [`hordeforge/.github` AGENTS.md](https://github.com/hordef
 ./scripts/run.sh stop         # graceful stop (saves world)
 ./scripts/run.sh install-only # download/validate game then exit (pre-warm; refuses while the server runs)
 ./scripts/run.sh status       # container state + health probe (telnet connect, no password)
+./scripts/run.sh backup       # archive data/userdata/Saves into backups/ (keeps the newest 7)
+./scripts/run.sh restore      # put an archive back (no arg = newest); archives the replaced saves first
 ./start.sh / ./stop.sh        # daily start/stop shortcuts (wrap run.sh)
 ```
 
-Durable service: quadlet in `systemd/` (see its header). Load a mod: copy the
+Durable service: quadlet in `systemd/` (see its header). The save backup
+runs daily from `systemd/7dtd-backup.timer`; `backups/` stays on this
+host, so copy it off-host if losing the host must not cost the world
+(README "Recovering state" states the RPO/RTO). Load a mod: copy the
 mod dir into `mods/` (real copies, not symlinks: `mods/` is bind-mounted and
 must be self-contained), then restart the container.
 

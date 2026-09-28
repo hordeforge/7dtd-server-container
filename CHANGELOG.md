@@ -16,6 +16,19 @@ before 1.1.1 are reconstructed from their GitHub release notes.
   `podman inspect` reports what it ships. The version label copies `VERSION`,
   and `scripts/test_containerfile.py` fails the gate on a release bump that
   forgets it.
+- **`run.sh restore`.** Puts a save backup back into
+  `data/userdata/Saves`: no argument restores the newest archive in
+  `backups/`, an argument names one. The archive is verified first
+  (readable gzip/tar, carries a `Saves/` payload, no entry escaping the
+  archive root), a running server is refused, and the saves the restore
+  replaces are archived first, so the operation is reversible. Recovery
+  steps, RPO and RTO are in the README's "Recovering state" section.
+- **Daily save backup (`systemd/7dtd-backup.{service,timer}`).** A user
+  timer runs `run.sh backup` once a day (04:17, up to 10 minutes of jitter)
+  and catches up a missed day at the next boot, so the RPO is bounded instead
+  of "however long since anyone remembered". A failed run exits nonzero and
+  leaves the unit failed where systemd can see it. Install it next to the
+  quadlet (commands in the README).
 
 ### Changed
 

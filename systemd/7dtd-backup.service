@@ -1,0 +1,26 @@
+# Daily save backup, so recovery does not depend on remembering to run it.
+# Installed next to 7dtd-server.container:
+#
+#   cp systemd/7dtd-backup.{service,timer} ~/.config/containers/systemd/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now 7dtd-backup.timer
+#
+# The archives are the only copy of the world, and a missed run is silent
+# unless something runs on schedule. The service exits nonzero when the
+# backup failed, so systemd's unit state and journal are the alarm.
+[Unit]
+Description=7 Days to Die save backup (scripts/run.sh backup)
+Documentation=man:systemd.timer(5)
+
+[Service]
+Type=oneshot
+# The same command the operator runs by hand, so the scheduled and the ad-hoc
+# path cannot drift: it asks the running server to saveworld over telnet,
+# archives data/userdata/Saves into backups/ and prunes to the newest 7.
+# backups/ is on the same host as the saves; copy it off-host if losing this
+# host matters (see the README's "Recovering state").
+ExecStart=%h/7dtd-server/scripts/run.sh backup
+# A telnet saveworld request plus a 5s settle and the tar; the world is not
+# large, and systemd killing the job mid-archive would leave the partial file
+# for the next prune to remove.
+TimeoutStartSec=300

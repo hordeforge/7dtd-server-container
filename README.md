@@ -17,18 +17,19 @@ and disposable.
 Running in production on the LAN host. Working: image build, steamcmd
 install/validate with bounded retries, config render and admin seed, mod
 staging and per-boot sync, graceful stop that saves the world first, save
-backups with retention, and the quadlet service. `make lint` and `make test`
-gate every push.
+backups with retention and a verified restore path, and the quadlet service.
+`make lint` and `make test` gate every push.
 
 Partial: coverage is measured for `scripts/lib-env.sh` only, so the badge
 covers the shared library rather than the whole tree. Rollback of code or mods
 is manual (redeploy an older sibling build).
 
 Deliberately not built: no firewall or ACL in front of the listeners, no
-signature check on the staged mods, no credential rotation procedure, and no
-`SECURITY.md`. Each is a ranked gap with its reasoning in
-[`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md); read that before exposing this
-host beyond a trusted LAN.
+signature check on the staged mods, no credential rotation procedure, no
+off-host copy of the save archives (the recovery section below states what
+losing the host costs), and no `SECURITY.md`. Each is a ranked gap with its
+reasoning in [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md); read that before
+exposing this host beyond a trusted LAN.
 
 ## Layout
 
@@ -41,7 +42,7 @@ host beyond a trusted LAN.
 | `scripts/stage_mods.sh` | Copy built mods from sibling `dist/` into `mods-available/`, recreate the enabled copies |
 | `scripts/deploy.sh` | Stage mods + rsync this project to the server host (`--restart` also restarts the container) |
 | `scripts/update_mods.sh` | Server-side: restage enabled mods + restart container (no image rebuild) |
-| `scripts/run.sh` | Container lifecycle on the server host (build/start/install-only/logs/stop/backup/status/version; `--help` lists them) |
+| `scripts/run.sh` | Container lifecycle on the server host (build/start/install-only/logs/stop/backup/restore/status/version; `--help` lists them) |
 | `scripts/perf.sh` | EfficientServer toggle (`on`/`off`/`status`) + telnet `apm status` snapshot (`measure`) |
 | `scripts/lib-env.sh` | Shared `.env` loader, telnet value validation, telnet session helper (sourced by the ops scripts) |
 | `start.sh` / `stop.sh` | Top-level daily shortcuts: start / graceful stop (wrap `run.sh`) |
@@ -197,15 +198,59 @@ Add players to the admin list via telnet after joining, e.g.
   touches `backups/`. Rollback of code or mods is not automated: redeploy an
   older sibling build; saves are unaffected by deploys.
 
+## Recovering state
+
+`backups/` sits on the same host as the saves it protects, so it survives a
+bad deploy, a bad config and a deleted world, but not the loss of the host
+itself. Copy archives off the host if that loss matters (rsync them to
+another machine or an off-host store on whatever schedule you run backups);
+nothing in this repo does it for you.
+
+Restoring:
+
+```bash
+./stop.sh                      # or ./scripts/run.sh stop
+./scripts/run.sh restore       # newest archive in backups/
+./scripts/run.sh restore backups/7dtd-saves-20260901-120000.tar.gz
+./start.sh
+```
+
+`restore` verifies the archive (readable gzip/tar, carries a `Saves/`
+payload, no entry escaping the archive root) before it touches anything, and
+refuses while the server runs, because the game would write over the restored
+files. The saves it replaces are archived first into `backups/`, so a restore
+is reversible: run `restore` again against that pre-restore archive to go
+back. The restored files keep the owner-only mode the archives use
+(`serveradmin.xml` and the webadmin record are credentials).
+
+- **RPO:** the time since the last backup. With `7dtd-backup.timer` enabled
+  that is under a day, plus whatever ran last before the host was off; with
+  only the ad-hoc command, it is however long since anyone remembered.
+- **RTO:** stop (up to about 2 min worst case, the telnet save plus forced
+  stop) plus the extract of the archive, which is minutes for a world of
+  normal size. Start the server and the world loads.
+- Configs, the game install and the admin seed are not backed up: they
+  re-render from `config/` or re-download from Steam on the next start. The
+  `.webadmin-password` record and `serveradmin.xml` are inside the archives,
+  so the dashboard credentials come back with the saves.
+
 ## Durable service (optional)
 
 ```bash
 podman build -t localhost/7dtd-server:latest .
 cp systemd/7dtd-server.container ~/.config/containers/systemd/
+cp systemd/7dtd-backup.{service,timer} ~/.config/containers/systemd/
 systemctl --user daemon-reload
 systemctl --user enable --now 7dtd-server
+systemctl --user enable --now 7dtd-backup.timer
 loginctl enable-linger maci
 ```
+
+`7dtd-backup.timer` runs `./scripts/run.sh backup` daily (04:17, with up to
+10 minutes of jitter, and a missed day runs at the next boot). Without it
+nothing bounds the RPO: the world is only as safe as the last time you
+remembered. A failed run leaves the unit failed, visible in
+`systemctl --user status 7dtd-backup.service` and the journal.
 
 Stops and restarts of the service go through the same graceful path as
 `./stop.sh` (telnet save + shutdown before the container is killed), via the

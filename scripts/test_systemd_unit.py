@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Unit tests pinning the quadlet unit contract (systemd/7dtd-server.container).
+"""Unit tests pinning the quadlet unit contract (systemd/7dtd-server.container)
+and the daily save backup (systemd/7dtd-backup.{service,timer}).
 
 Methodology: the unit is the durable lifecycle and it must not drift from the
 decisions the ad-hoc lifecycle (scripts/run.sh) owns. The contracts pinned
@@ -23,6 +24,10 @@ here:
                   health_check) for a container that is up but no longer
                   serving, with a start period covering the first-boot depot
                   download, and never restarts on the status alone.
+  backup schedule the timer runs the same `run.sh backup` an operator runs,
+                  daily, and catches up a missed day at the next boot: the
+                  world is unrecoverable past the last archive, so the RPO
+                  is the age of whatever ran last.
 
 Each failed check prints a FAIL line; the process exits nonzero if any failed.
 """
@@ -119,5 +124,43 @@ check(
     len(podman_args) == 1 and podman_args[0].strip() == "--security-opt=no-new-privileges",
 )
 
-exit_status()
 print("quadlet unit contract OK")
+
+# The backup timer is what bounds the RPO: a world whose only copy is the last
+# time someone remembered to run the backup has no bound at all. Its contract:
+#
+#  schedule   the service runs scripts/run.sh backup, the same command the
+#             operator runs by hand, so the scheduled and ad-hoc paths cannot
+#             drift apart
+#  persistence Persistent=true runs a missed day at the next boot instead of
+#             dropping it, and a nonzero exit (a failed backup) leaves the
+#             unit failed where systemd's status and the journal can see it
+backup_service = (ROOT / "systemd" / "7dtd-backup.service").read_text(encoding="utf-8")
+backup_timer = (ROOT / "systemd" / "7dtd-backup.timer").read_text(encoding="utf-8")
+
+exec_start = re.findall(r"^ExecStart=(.*)$", backup_service, re.MULTILINE)
+check(
+    "the backup timer runs scripts/run.sh backup",
+    exec_start == ["%h/7dtd-server/scripts/run.sh backup"],
+)
+check(
+    "the backup service is a oneshot (no daemon to supervise)",
+    re.findall(r"^Type=(.*)$", backup_service, re.MULTILINE) == ["oneshot"],
+)
+check(
+    "a missed backup runs at the next boot (Persistent=true)",
+    re.findall(r"^Persistent=(.*)$", backup_timer, re.MULTILINE) == ["true"],
+)
+check(
+    "the timer targets the backup service",
+    re.findall(r"^Unit=(.*)$", backup_timer, re.MULTILINE) == ["7dtd-backup.service"],
+)
+check(
+    "the timer is installed into timers.target",
+    re.findall(r"^WantedBy=(.*)$", backup_timer, re.MULTILINE) == ["timers.target"],
+)
+calendars = re.findall(r"^OnCalendar=(.*)$", backup_timer, re.MULTILINE)
+check("the timer has a daily schedule", len(calendars) == 1 and "-*-*" in calendars[0])
+
+exit_status()
+print("backup timer contract OK")

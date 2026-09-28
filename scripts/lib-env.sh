@@ -12,15 +12,30 @@
 # (e.g. TELNET_PASSWD=) must not silently fall back to the default value with
 # no trace of why the operator's line had no effect.
 #
-# Argv guards (require_argc / require_command): one owner of the usage-error
-# contract shared by the ops scripts. Both exit 2 (a usage error must be
-# distinguishable from a failed operation) and print the offender, then the
-# caller's usage, on stderr. Both run before any setup side effect, so a typo
-# surfaces as a usage error even when the environment itself is broken.
+# Argv guards (require_argc / require_optional_arg / require_command): one
+# owner of the usage-error contract shared by the ops scripts. All exit 2 (a
+# usage error must be distinguishable from a failed operation) and print the
+# offender, then the caller's usage, on stderr. All run before any setup side
+# effect, so a typo surfaces as a usage error even when the environment itself
+# is broken.
 require_argc() { # max_args extra_argv usage_fn
   local max="$1" usage_fn="$2" extra="$3"
   if [[ -n "$extra" ]]; then
     echo "FATAL: unexpected argument '$extra' ($0 takes at most $max argument(s))" >&2
+    "$usage_fn" >&2
+    exit 2
+  fi
+}
+
+# For the one command that takes an optional operand (run.sh restore
+# [archive]): usage_fn first, then the script's own argv. Rejects a second
+# operand, so a mistyped path plus a flag is still a usage error rather than a
+# silently ignored word.
+require_optional_arg() { # usage_fn "$@"
+  local usage_fn="$1"
+  shift
+  if (( $# > 1 )); then
+    echo "FATAL: unexpected argument '$2' ($0 takes at most 1 argument(s))" >&2
     "$usage_fn" >&2
     exit 2
   fi

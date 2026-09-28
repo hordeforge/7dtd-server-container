@@ -3,8 +3,9 @@
 # host networking). All runtime state lives in ./data on the host; the
 # container itself is disposable.
 #
-# Usage: run.sh {build|start|run|restart|install-only|stop|logs|status|backup|version}
-# (`run` is an alias of `start`; `backup` archives the world saves.)
+# Usage: run.sh {build|start|run|restart|install-only|stop|logs|status|backup|restore|version}
+# (`run` is an alias of `start`; `backup` archives the world saves and
+# `restore [archive]` puts one back, defaulting to the newest.)
 # `--help` prints the command list without touching the environment or data/.
 # Env overrides: TELNET_PASSWORD, TELNET_PORT, WEBADMIN_PASSWORD,
 # STEAMCMD_UPDATE, STEAMCMD_ONLY, SEVENDTD_CONTAINER_NAME, SEVENDTD_IMAGE.
@@ -22,7 +23,7 @@ source "$ROOT/scripts/lib-env.sh"
 
 usage() {
   cat <<'EOF'
-usage: run.sh {build|start|run|restart|install-only|stop|logs|status|backup|version}
+usage: run.sh {build|start|run|restart|install-only|stop|logs|status|backup|restore|version}
 
 Manage the 7dtd-server podman container; all runtime state lives in ./data
 (the container itself is disposable).
@@ -36,6 +37,9 @@ Manage the 7dtd-server podman container; all runtime state lives in ./data
   logs           follow container logs
   status         show container state (default with no command)
   backup         archive world saves into backups/ (keeps the newest 7)
+  restore        replace data/userdata/Saves with a backup archive
+                 (no argument = the newest in backups/); archives the
+                 current saves first, so a restore is itself reversible
   version        print the VERSION file (the canonical version home)
 
 Env overrides: TELNET_PASSWORD, TELNET_PORT, WEBADMIN_PASSWORD,
@@ -60,9 +64,14 @@ esac
 # surface as a usage error even when the environment itself is broken
 # (guards live in scripts/lib-env.sh, shared with the other ops scripts).
 COMMAND="${1:-status}"
-require_argc 1 usage "${2:-}"
 require_command "$COMMAND" \
-  'build|start|run|restart|install-only|stop|logs|status|backup|version' usage
+  'build|start|run|restart|install-only|stop|logs|status|backup|restore|version' usage
+# restore alone takes an archive path; every other command takes none, so a
+# stray second word is still the usage error it was before.
+case "$COMMAND" in
+  restore) require_optional_arg usage "${@:2}" ;;
+  *)       require_argc 0 usage "${2:-}" ;;
+esac
 
 # Is $NAME in the running set? podman's output is captured rather than piped
 # into `grep -Fxq`: grep -q exits at the first match, and under
@@ -349,44 +358,29 @@ stop() {
   fi
 }
 
-backup() {
-  # Archive the world saves (data/userdata/Saves) into backups/. The saves
-  # are the only state that cannot be regenerated (the game depot re-downloads,
-  # configs re-render from the templates), so they are what backup owns.
-  if [[ ! -d "$USERDATA_DIR/Saves" ]]; then
-    echo "FATAL: nothing to back up ($USERDATA_DIR/Saves is missing; has the server ever started?)" >&2
-    exit 1
-  fi
-  if container_running; then
-    # Best-effort live save: a fresh saveworld makes the archive useful even
-    # taken mid-session. A failed request must not block the archive (an
-    # inconsistent-but-present backup beats none), so every failure here only
-    # warns -- same shape as stop()'s fallback, minus the forced stop.
-    # (request_telnet lives in scripts/lib-env.sh, shared with stop().)
-    echo "requesting world save via telnet ..."
-    local reply=""
-    if request_telnet reply 'saveworld' 15; then
-      # The save completes server-side after the reply; give the region
-      # writes a moment to settle before tar reads them.
-      sleep 5
-    elif (( $? == 2 )); then
-      echo "WARN: telnet saveworld failed; archiving without a fresh save" >&2
-      printf '%s\n' "${reply:-<no output>}" | tail -n 3 >&2
-    else
-      echo "WARN: telnet not reachable on $TELNET_PORT; archiving without a fresh save" >&2
-    fi
-  fi
+archive_saves() {
+  # Tar data/userdata/Saves into a fresh owner-only archive and prune the
+  # oldest beyond KEEP_BACKUPS. Shared by backup() (the operator's own
+  # snapshot) and restore() (the pre-restore snapshot, so a restore is
+  # reversible), which is why the live-save telnet request lives in backup().
   mkdir -p "$BACKUP_DIR"
   # The archive carries serveradmin.xml and the .webadmin-password record from
   # Saves/, so it gets the entrypoint's credential-file treatment: owner-only.
   umask 077
-  local stamp archive tar_rc=0
+  local stamp archive tar_rc=0 n=0
   # UTC, because the prune below reads the stamp as the age sort key. A local
   # stamp repeats across a fall-back transition (two archives, one name, the
   # second overwriting the first) and reorders after a host TZ change, so a
   # newer save can be pruned as the oldest.
   stamp="$(date -u +%Y%m%d-%H%M%S)"
   archive="$BACKUP_DIR/7dtd-saves-$stamp.tar.gz"
+  # One stamp per second, so a backup immediately followed by a pre-restore
+  # archive would otherwise overwrite the first with the state the operator
+  # is about to discard.
+  while [[ -e "$archive" ]]; do
+    n=$(( n + 1 ))
+    archive="$BACKUP_DIR/7dtd-saves-$stamp-$n.tar.gz"
+  done
   # GNU tar exits 1 for warnings alone (a file changed as it was read, which
   # happens when the game writes during a live backup): keep that archive and
   # say why. Only >= 2 means tar could not produce something usable.
@@ -414,7 +408,105 @@ backup() {
       echo "WARN: could not remove old backup ${archives[$i]}" >&2
     fi
   done
-  echo "backup written: $archive (keeping the newest $KEEP_BACKUPS in $BACKUP_DIR)"
+  echo "archive written: $archive (keeping the newest $KEEP_BACKUPS in $BACKUP_DIR)"
+}
+
+backup() {
+  # Archive the world saves (data/userdata/Saves) into backups/. The saves
+  # are the only state that cannot be regenerated (the game depot re-downloads,
+  # configs re-render from the templates), so they are what backup owns.
+  if [[ ! -d "$USERDATA_DIR/Saves" ]]; then
+    echo "FATAL: nothing to back up ($USERDATA_DIR/Saves is missing; has the server ever started?)" >&2
+    exit 1
+  fi
+  if container_running; then
+    # Best-effort live save: a fresh saveworld makes the archive useful even
+    # taken mid-session. A failed request must not block the archive (an
+    # inconsistent-but-present backup beats none), so every failure here only
+    # warns -- same shape as stop()'s fallback, minus the forced stop.
+    # (request_telnet lives in scripts/lib-env.sh, shared with stop().)
+    echo "requesting world save via telnet ..."
+    local reply=""
+    if request_telnet reply 'saveworld' 15; then
+      # The save completes server-side after the reply; give the region
+      # writes a moment to settle before tar reads them.
+      sleep 5
+    elif (( $? == 2 )); then
+      echo "WARN: telnet saveworld failed; archiving without a fresh save" >&2
+      printf '%s\n' "${reply:-<no output>}" | tail -n 3 >&2
+    else
+      echo "WARN: telnet not reachable on $TELNET_PORT; archiving without a fresh save" >&2
+    fi
+  fi
+  archive_saves
+}
+
+restore() {
+  # Put a backup archive back into data/userdata/Saves. This is the other
+  # half of backup(): without it a backup is a hypothesis nobody has tested.
+  # Refuses a running server (the game would write over the restored files)
+  # and preserves the current saves first, so a restore is reversible.
+  local archive="${1:-}"
+  if [[ -z "$archive" ]]; then
+    local candidates=()
+    shopt -s nullglob
+    candidates=("$BACKUP_DIR"/7dtd-saves-*.tar.gz)
+    shopt -u nullglob
+    if (( ${#candidates[@]} == 0 )); then
+      echo "FATAL: no backup archive in $BACKUP_DIR to restore" >&2
+      exit 1
+    fi
+    # UTC stamps sort lexicographically, so glob order is age order: the last
+    # entry is the newest, matching the prune's key in archive_saves().
+    archive="${candidates[${#candidates[@]} - 1]}"
+  fi
+  if [[ ! -f "$archive" ]]; then
+    echo "FATAL: no such backup archive: $archive" >&2
+    exit 1
+  fi
+  # Preflight before touching data/userdata: a truncated or corrupt archive
+  # must fail here, not halfway through a half-replaced Saves/. Listing it
+  # also rejects an archive that would write outside the tree.
+  local listing entry has_saves=0
+  if ! listing="$(tar -tzf "$archive" 2>/dev/null)"; then
+    echo "FATAL: $archive is not a readable tar.gz (truncated or corrupt); nothing was changed" >&2
+    exit 1
+  fi
+  while IFS= read -r entry; do
+    case "$entry" in
+      Saves|Saves/*) has_saves=1 ;;
+      /*|../*|*/../*|*/..)
+        echo "FATAL: $archive holds an entry outside the archive root ('$entry'); refusing to extract" >&2
+        exit 1
+        ;;
+    esac
+  done <<<"$listing"
+  if (( has_saves == 0 )); then
+    echo "FATAL: $archive contains no Saves/ payload; refusing to restore it" >&2
+    exit 1
+  fi
+  if podman ps --format '{{.Names}}' | grep -Fxq "$NAME"; then
+    echo "FATAL: $NAME is running; stop it first (./scripts/run.sh stop) so the game cannot write over the restored saves" >&2
+    exit 1
+  fi
+  if [[ -d "$USERDATA_DIR/Saves" ]]; then
+    # Pre-restore snapshot: the state the restore is about to discard must
+    # itself be recoverable, and it lands in the same owner-only archives the
+    # retention keeps.
+    echo "archiving the current saves before overwriting them ..."
+    archive_saves
+  fi
+  # Owner-only extraction (umask 077 applies to the restored files too, so
+  # serveradmin.xml and the webadmin record stay ungroup-readable), and
+  # --no-same-owner so an archive carrying a foreign uid cannot chown the
+  # restored tree.
+  umask 077
+  rm -rf "$USERDATA_DIR/Saves"
+  if ! tar -xzf "$archive" --no-same-owner -C "$USERDATA_DIR"; then
+    echo "FATAL: extraction of $archive failed; $USERDATA_DIR/Saves is incomplete" >&2
+    exit 1
+  fi
+  echo "restored $archive into $USERDATA_DIR/Saves (start the server to load it)"
 }
 
 case "$COMMAND" in
@@ -428,6 +520,7 @@ case "$COMMAND" in
   install-only) install_only ;;
   stop)         stop ;;
   backup)       backup ;;
+  restore)      restore "${2:-}" ;;
   logs)         podman logs -f "$NAME" ;;
   # Anchor the name filter: podman treats it as a regex, and unanchored it
   # would also list the $NAME-install pre-warm container.

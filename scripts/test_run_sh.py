@@ -52,6 +52,11 @@ few archives; its contract runs against a sandboxed copy of the tree:
   live-warn  container running + telnet dead: warns and still archives
   fresh      no saves yet: a loud refusal, not an empty archive
 
+restore() is the other half of it, so it runs against the same sandbox:
+newest-by-default and explicit-archive selection, a pre-restore snapshot of
+the replaced saves, and loud refusals (running server, no archives, corrupt
+or payload-free archive) that leave data/userdata untouched.
+
 Each failed check prints a FAIL line; the process exits nonzero if any failed.
 """
 
@@ -700,6 +705,211 @@ with tempfile.TemporaryDirectory() as tmp:
         proc.returncode != 0 and b"nothing to back up" in out,
     )
 
+
+# restore(): the other half of backup(). A backup nobody can put back is a
+# hypothesis, so the restore path is pinned against a sandboxed tree the same
+# way backup() is: newest-by-default selection, the pre-restore snapshot that
+# makes the operation reversible, and loud refusals for every case where
+# touching data/userdata would be wrong.
+def plant_archive(path: Path, region_bytes: bytes) -> None:
+    """Write a run.sh-shaped Saves archive (0600) holding one region file."""
+    with tempfile.TemporaryDirectory() as stage:
+        saves = Path(stage) / "Saves" / "region"
+        saves.mkdir(parents=True)
+        (saves / "r.0.0.region").write_bytes(region_bytes)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tarfile.open(path, "w:gz") as tf:
+            tf.add(Path(stage) / "Saves", arcname="Saves")
+    path.chmod(0o600)
+
+
+# restore with an empty backups/: nothing to restore is a loud refusal, not a
+# no-op that reads as a successful recovery.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    make_sandbox(tmpdir)
+    install_podman_stub(tmpdir, PODMAN_STUB)
+    env = stub_env(tmpdir)
+    proc = subprocess.run(
+        [str(tmpdir / "scripts" / "run.sh"), "restore"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    out = proc.stdout + proc.stderr
+    check(
+        "restore with no archives refuses loudly",
+        proc.returncode != 0 and b"no backup archive" in out,
+    )
+
+
+# restore: no argument picks the newest archive by the UTC stamp and the saves
+# it replaces are archived first, so the operator can undo the restore.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    make_sandbox(tmpdir)
+    install_podman_stub(tmpdir, PODMAN_STUB)
+    saves = tmpdir / "data" / "userdata" / "Saves" / "region"
+    saves.mkdir(parents=True)
+    (saves / "r.0.0.region").write_bytes(b"current-world")
+    backups = tmpdir / "backups"
+    plant_archive(backups / "7dtd-saves-20200101-000000.tar.gz", b"old-world")
+    plant_archive(backups / "7dtd-saves-20200102-000000.tar.gz", b"new-world")
+    env = stub_env(tmpdir)
+    proc = subprocess.run(
+        [str(tmpdir / "scripts" / "run.sh"), "restore"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    out = proc.stdout + proc.stderr
+    check("restore exits 0", proc.returncode == 0)
+    if proc.returncode != 0:
+        print(proc.stderr.decode(errors="replace"), file=sys.stderr)
+    check(
+        "restore loaded the newest archive's world",
+        (saves / "r.0.0.region").read_bytes() == b"new-world",
+    )
+    # The discarded state must still be recoverable from backups/.
+    recovered = [
+        name
+        for name in (p.name for p in backups.glob("7dtd-saves-*.tar.gz"))
+        if name > "7dtd-saves-20200102-000000.tar.gz"
+    ]
+    check("restore archived the saves it replaced", bool(recovered))
+    if recovered:
+        with tarfile.open(backups / recovered[0]) as tf:
+            payload = tf.extractfile("Saves/region/r.0.0.region")
+            check(
+                "the pre-restore archive holds the replaced world",
+                payload is not None and payload.read() == b"current-world",
+            )
+    check(
+        "restore never stops or starts the server",
+        {rec[0] for rec in stub_invocations(tmpdir / "podman-argv.log") if rec} == {b"ps"},
+    )
+
+
+# restore <archive>: an explicit path wins over the newest-by-default pick.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    make_sandbox(tmpdir)
+    install_podman_stub(tmpdir, PODMAN_STUB)
+    saves = tmpdir / "data" / "userdata" / "Saves" / "region"
+    saves.mkdir(parents=True)
+    (saves / "r.0.0.region").write_bytes(b"current-world")
+    backups = tmpdir / "backups"
+    plant_archive(backups / "7dtd-saves-20200101-000000.tar.gz", b"old-world")
+    plant_archive(backups / "7dtd-saves-20200102-000000.tar.gz", b"new-world")
+    chosen = backups / "7dtd-saves-20200101-000000.tar.gz"
+    env = stub_env(tmpdir)
+    proc = subprocess.run(
+        [str(tmpdir / "scripts" / "run.sh"), "restore", str(chosen)],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    check("restore with an explicit archive exits 0", proc.returncode == 0)
+    check(
+        "restore loaded the named archive, not the newest",
+        (saves / "r.0.0.region").read_bytes() == b"old-world",
+    )
+
+
+# restore while the server runs: the game would write over the restored files,
+# so refuse before touching data/userdata.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    make_sandbox(tmpdir)
+    install_podman_stub(tmpdir, PODMAN_STUB)
+    saves = tmpdir / "data" / "userdata" / "Saves" / "region"
+    saves.mkdir(parents=True)
+    (saves / "r.0.0.region").write_bytes(b"current-world")
+    plant_archive(tmpdir / "backups" / "7dtd-saves-20200101-000000.tar.gz", b"old-world")
+    env = stub_env(tmpdir, STUB_PS_OUTPUT=f"{NAME}\n")
+    proc = subprocess.run(
+        [str(tmpdir / "scripts" / "run.sh"), "restore"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    out = proc.stdout + proc.stderr
+    check(
+        "restore with a running server refuses",
+        proc.returncode != 0 and b"is running" in out,
+    )
+    check(
+        "the refused restore left the live saves alone",
+        (saves / "r.0.0.region").read_bytes() == b"current-world",
+    )
+
+
+# restore of an unreadable or payload-free archive: the preflight must fail
+# before Saves/ is removed, or a bad archive destroys the state it meant to
+# recover.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    make_sandbox(tmpdir)
+    install_podman_stub(tmpdir, PODMAN_STUB)
+    saves = tmpdir / "data" / "userdata" / "Saves" / "region"
+    saves.mkdir(parents=True)
+    (saves / "r.0.0.region").write_bytes(b"current-world")
+    backups = tmpdir / "backups"
+    backups.mkdir(parents=True)
+    (backups / "7dtd-saves-20200101-000000.tar.gz").write_bytes(b"not-a-tarball")
+    env = stub_env(tmpdir)
+    proc = subprocess.run(
+        [str(tmpdir / "scripts" / "run.sh"), "restore"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    out = proc.stdout + proc.stderr
+    check(
+        "restore of a corrupt archive refuses",
+        proc.returncode != 0 and b"not a readable tar.gz" in out,
+    )
+    check(
+        "the corrupt restore left the saves alone",
+        (saves / "r.0.0.region").read_bytes() == b"current-world",
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    make_sandbox(tmpdir)
+    install_podman_stub(tmpdir, PODMAN_STUB)
+    saves = tmpdir / "data" / "userdata" / "Saves" / "region"
+    saves.mkdir(parents=True)
+    (saves / "r.0.0.region").write_bytes(b"current-world")
+    with tempfile.TemporaryDirectory() as stage:
+        (Path(stage) / "somethingelse").write_text("x", encoding="utf-8")
+        (tmpdir / "backups").mkdir(parents=True)
+        with tarfile.open(tmpdir / "backups" / "7dtd-saves-20200101-000000.tar.gz", "w:gz") as tf:
+            tf.add(Path(stage) / "somethingelse", arcname="somethingelse")
+    env = stub_env(tmpdir)
+    proc = subprocess.run(
+        [str(tmpdir / "scripts" / "run.sh"), "restore"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    out = proc.stdout + proc.stderr
+    check(
+        "restore of a Saves-less archive refuses",
+        proc.returncode != 0 and b"no Saves/ payload" in out,
+    )
+    check(
+        "the payload-free restore left the saves alone",
+        (saves / "r.0.0.region").read_bytes() == b"current-world",
+    )
+
+
 # CLI surface: --help answers without any setup side effect, and a bad
 # invocation must be distinguishable from a failed operation by scripts
 # consuming this CLI, so usage errors exit 2 (not 1 like real failures).
@@ -768,6 +978,20 @@ with tempfile.TemporaryDirectory() as tmp:
         timeout=30,
     )
     check("extra argument exits 2 naming it", proc.returncode == 2 and b"--keep" in proc.stderr)
+
+    # Only restore takes an archive path, and exactly one: a second word
+    # there is the same usage error as anywhere else.
+    proc = subprocess.run(
+        [str(run_sh), "restore", "a.tar.gz", "b.tar.gz"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    check(
+        "restore rejects a second archive argument",
+        proc.returncode == 2 and b"b.tar.gz" in proc.stderr,
+    )
 
     # The daily wrappers forward everything except help: asking either for
     # --help must answer 0 on stdout here (never a FATAL from run.sh), while
