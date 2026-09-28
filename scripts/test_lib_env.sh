@@ -418,6 +418,46 @@ done
   echo "FAIL: ascii_length must count bytes under C (got '$(ascii_length 'pässwörd')')" >&2; exit 1; }
 echo "password length unit OK"
 
+# ensure_private_file: .env carries both passwords, so the mode the operator's
+# copy landed with is part of the control. An existing file is tightened in
+# place (a cp under a 022 umask leaves 0644, readable by every other account
+# on the host), a missing file is not an error (the .env is optional), and a
+# chmod that cannot complete is a loud failure rather than a silent run with
+# the file still world-readable.
+private_tmp="$(mktemp -d)"
+printf 'TELNET_PASSWORD=x\n' > "$private_tmp/env"
+chmod 644 "$private_tmp/env"
+( ensure_private_file "$private_tmp/env" )
+[[ "$(stat -c %a "$private_tmp/env" 2>/dev/null || stat -f %Lp "$private_tmp/env")" == 600 ]] || {
+  echo "FAIL: ensure_private_file did not tighten a 0644 file to 0600 (got $(stat -c %a "$private_tmp/env" 2>/dev/null || stat -f %Lp "$private_tmp/env"))" >&2; exit 1; }
+( ensure_private_file "$private_tmp/absent" ) || {
+  echo "FAIL: ensure_private_file must not fail on a missing (optional) .env" >&2; exit 1; }
+chmod_dir_only() {
+  # A chmod that cannot complete: the file keeps its permissive mode, which is
+  # the case the fatal exists for. Driven by a stub on PATH rather than by
+  # directory permissions, because chmod on a file the caller owns succeeds
+  # however the parent directory is locked down.
+  mkdir -p "$private_tmp/stub"
+  printf '#!/bin/sh\necho "chmod: changing permissions: Operation not permitted" >&2\nexit 1\n' \
+    > "$private_tmp/stub/chmod"
+  chmod 755 "$private_tmp/stub/chmod"
+}
+chmod_dir_only
+printf 'TELNET_PASSWORD=x\n' > "$private_tmp/locked-env"
+chmod 644 "$private_tmp/locked-env"
+locked_msg="$( PATH="$private_tmp/stub:$PATH" ensure_private_file "$private_tmp/locked-env" 2>&1 )" \
+  && locked_rc=0 || locked_rc=$?
+[[ "$locked_rc" == 1 ]] || {
+  echo "FAIL: an un-tightenable secret file must exit 1 (got $locked_rc)" >&2; exit 1; }
+[[ "$locked_msg" == *owner-only* ]] || {
+  echo "FAIL: the un-tightenable secret file must say why (got '$locked_msg')" >&2; exit 1; }
+# The same stub must not stop the tightening from being reported as a failure
+# the caller can act on: the file is still 0644, and the message names the fix.
+[[ "$(stat -c %a "$private_tmp/locked-env" 2>/dev/null || stat -f %Lp "$private_tmp/locked-env")" == 644 ]] || {
+  echo "FAIL: a refused chmod must leave the file as it was" >&2; exit 1; }
+rm -rf "$private_tmp"
+echo "secret file mode OK"
+
 # check_telnet_port boundaries. Leading zeros must not hit bash octal parsing
 # (the documented bug), and both range ends are exercised.
 for good in 8087 1 65535 08087 00001 26902; do

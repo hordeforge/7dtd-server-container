@@ -394,6 +394,26 @@ ascii_length() { # value; prints the count
   printf '%s' "${#1}"
 }
 
+# Keep a secret-bearing file owner-only, tightening an existing file in place
+# so a copy made with a permissive umask (cp .env.example .env, an editor that
+# writes 0644) stops being readable by every other account on the host. .env
+# carries both passwords, and the rest of the tree already treats that as a
+# disclosure: data/, backups/ and the archives below are 0700/0600 for the
+# same reason, so .env was the one secret file whose mode nothing owned.
+# chmod, not a refusal: the operator's file is correct content and the fix is
+# one command they should not have to know to run, and tightening never turns
+# a working deployment into a failing one. A chmod that cannot complete is
+# fatal rather than silent, because the alternative is running with the file
+# still world-readable and reporting nothing.
+ensure_private_file() { # path
+  local file="$1"
+  [[ -e "$file" ]] || return 0
+  chmod 600 "$file" || {
+    echo "FATAL: cannot keep $file owner-only (it carries the telnet and webadmin passwords); fix its mode by hand" >&2
+    exit 1
+  }
+}
+
 check_webadmin_password() {
   reject_unsafe_value WEBADMIN_PASSWORD "$WEBADMIN_PASSWORD"
   if (( $(ascii_length "$WEBADMIN_PASSWORD") < 8 )); then

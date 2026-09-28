@@ -213,6 +213,9 @@ done
 # applied, so a typo'd line cannot half-configure the run.
 if [[ -f "$ROOT/.env" ]]; then
   check_env_file_keys "$ROOT/.env"
+  # The file carries both passwords, so its mode is tightened before a single
+  # value is read out of it, not after the values are already in this process.
+  ensure_private_file "$ROOT/.env"
   load_env_file "$ROOT/.env"
 fi
 
