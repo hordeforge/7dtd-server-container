@@ -30,25 +30,14 @@ Each failed check prints a FAIL line; the process exits nonzero if any failed.
 from __future__ import annotations
 
 import re
-import sys
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+from harness import ROOT, check, exit_status
+
 UNIT = ROOT / "systemd" / "7dtd-server.container"
 
 # Worst-case graceful-stop path in seconds (see module docstring); the unit
 # timeout must exceed it or systemd force-kills mid-save.
 WORST_STOP_SECS = 3 + 10 + 90 + 30
-
-failed_checks: list[str] = []
-
-
-def check(name: str, cond: bool) -> None:
-    if cond:
-        print(f"OK: {name}")
-    else:
-        print(f"FAIL: {name}", file=sys.stderr)
-        failed_checks.append(name)
 
 
 text = UNIT.read_text(encoding="utf-8")
@@ -130,6 +119,5 @@ check(
     len(podman_args) == 1 and podman_args[0].strip() == "--security-opt=no-new-privileges",
 )
 
-if failed_checks:
-    sys.exit(1)
+exit_status()
 print("quadlet unit contract OK")

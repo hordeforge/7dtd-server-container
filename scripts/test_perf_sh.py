@@ -34,7 +34,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-SCRIPTS = Path(__file__).resolve().parent
+from harness import SCRIPTS, check, exit_status
 
 
 def resolved_bin_path(*bins: str) -> str:
@@ -56,17 +56,6 @@ def resolved_bin_path(*bins: str) -> str:
 
 
 SANDBOX_PATH = resolved_bin_path("bash", "sed", "grep", "tail", "tr", "ls")
-
-failed_checks: list[str] = []
-
-
-def check(name: str, cond: bool) -> None:
-    if cond:
-        print(f"OK: {name}")
-    else:
-        print(f"FAIL: {name}", file=sys.stderr)
-        failed_checks.append(name)
-
 
 # Top-level flag (2-space indent, comma) plus nested flags at other depths;
 # only the first may ever change.
@@ -257,6 +246,5 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     check("the refused invocation restarted nothing", not (root / "restarts.log").exists())
 
-if failed_checks:
-    sys.exit(1)
+exit_status()
 print("perf.sh toggle contract OK")

@@ -38,18 +38,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-SCRIPTS = Path(__file__).resolve().parent
-
-failed_checks: list[str] = []
-
-
-def check(name: str, cond: bool) -> None:
-    if cond:
-        print(f"OK: {name}")
-    else:
-        print(f"FAIL: {name}", file=sys.stderr)
-        failed_checks.append(name)
-
+from harness import SCRIPTS, check, exit_status
 
 # stage_mods.sh's SRCS array, keyed the way the script enables them.
 SIBLING_OF = {
@@ -412,6 +401,5 @@ with tempfile.TemporaryDirectory() as tmp:
         not mods.exists() and not (root / "mods-available").exists(),
     )
 
-if failed_checks:
-    sys.exit(1)
+exit_status()
 print("mod staging contract OK")

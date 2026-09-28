@@ -41,22 +41,11 @@ import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-SCRIPTS = Path(__file__).resolve().parent
-ROOT = SCRIPTS.parent
+from harness import ROOT, SCRIPTS, check, exit_status
+
 ENTRYPOINT = ROOT / "entrypoint.sh"
 LIB_ENV = SCRIPTS / "lib-env.sh"
 CONFIG = ROOT / "config"
-
-failed_checks: list[str] = []
-
-
-def check(name: str, cond: bool) -> bool:
-    if cond:
-        print(f"OK: {name}")
-    else:
-        print(f"FAIL: {name}", file=sys.stderr)
-        failed_checks.append(name)
-    return cond
 
 
 def digest(pw: str) -> str:
@@ -400,6 +389,5 @@ with tempfile.TemporaryDirectory() as tmp:
         (game_mods / "0_TFP_Harmony" / "0_TFP_Harmony.dll").exists(),
     )
 
-if failed_checks:
-    sys.exit(1)
+exit_status()
 print("entrypoint boot contract OK")

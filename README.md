@@ -49,7 +49,7 @@ host beyond a trusted LAN.
 | `pyproject.toml`, `.yamllint.yaml`, `requirements-lint.txt` | Static analysis config (ruff rules + 100-col format, mypy strict, yamllint) and the hash-pinned analyzer closure; enforced by `make lint` locally and in CI from the same recipe |
 | `.github/workflows/ci.yml` | CI: lint, tests, Containerfile and config-template validation; publishes the coverage badge on main |
 | `scripts/test_lib_env.sh`, `scripts/test_coverage_badge.py`, `scripts/test_check_config_xml.py`, `scripts/test_config_templates.py`, `scripts/test_deploy_sh.py`, `scripts/test_entrypoint_boot.py`, `scripts/test_systemd_unit.py`, `scripts/test_containerfile.py`, `scripts/test_run_sh.py`, `scripts/test_perf_sh.py`, `scripts/test_stage_mods.py` | Tests behind `make test`; `fake-telnet-server.py` is their fake telnet endpoint fixture |
-| `scripts/check-config-xml.py`, `scripts/coverage_badge.py` | CI helpers: config XML well-formedness check, coverage badge renderer |
+| `scripts/check-config-xml.py`, `scripts/coverage_badge.py`, `scripts/harness.py` | CI helpers: config XML well-formedness check, coverage badge renderer, shared check reporter for the suites above |
 | `systemd/7dtd-server.container` | Quadlet for a durable rootless user service |
 | `docs/THREAT_MODEL.md` | Attack surface of this harness: entry points, trust boundaries, existing controls, ranked gaps |
 | `mods/` (runtime) | Enabled mods, bind-mounted into the container |
@@ -192,9 +192,8 @@ Add players to the admin list via telnet after joining, e.g.
   .tar.gz` (owner-only, it carries `serveradmin.xml` and the webadmin record),
   and keeps the newest 7 archives by that stamp, which is UTC so the order
   survives a DST transition or a host timezone change. `deploy.sh` never
-  touches `backups/`.
-  Rollback of code or mods is not automated: redeploy an older sibling build;
-  saves are unaffected by deploys.
+  touches `backups/`. Rollback of code or mods is not automated: redeploy an
+  older sibling build; saves are unaffected by deploys.
 
 ## Durable service (optional)
 

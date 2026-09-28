@@ -21,16 +21,9 @@ import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from harness import check, exit_status
+
 SCRIPT = Path(__file__).resolve().parent / "check-config-xml.py"
-failed_checks: list[str] = []
-
-
-def check(name: str, cond: bool) -> None:
-    if cond:
-        print(f"OK: {name}")
-    else:
-        print(f"FAIL: {name}", file=sys.stderr)
-        failed_checks.append(name)
 
 
 def run(*args: str) -> subprocess.CompletedProcess[bytes]:
@@ -107,6 +100,5 @@ with tempfile.TemporaryDirectory() as tmp:
         f"{tmpdir}: NOT well-formed".encode() in r.stderr,
     )
 
-if failed_checks:
-    sys.exit(1)
+exit_status()
 print("check-config-xml rules OK")

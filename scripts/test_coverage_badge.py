@@ -23,19 +23,12 @@ import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from harness import check, exit_status
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import coverage_badge
 
 NS = "{http://www.w3.org/2000/svg}"
-failed_checks: list[str] = []
-
-
-def check(name: str, cond: bool) -> None:
-    if cond:
-        print(f"OK: {name}")
-    else:
-        print(f"FAIL: {name}", file=sys.stderr)
-        failed_checks.append(name)
 
 
 def render(line_rate_attr: str | None) -> tuple[int, ET.Element]:
@@ -159,6 +152,5 @@ check(
     and value_rect.get("height") == "20",
 )
 
-if failed_checks:
-    sys.exit(1)
+exit_status()
 print("coverage_badge rules OK")

@@ -41,19 +41,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-SCRIPTS = ROOT / "scripts"
+from harness import SCRIPTS, check, exit_status
+
 DEPLOY_SH = SCRIPTS / "deploy.sh"
-
-failed_checks: list[str] = []
-
-
-def check(name: str, cond: bool) -> None:
-    if cond:
-        print(f"OK: {name}")
-    else:
-        print(f"FAIL: {name}", file=sys.stderr)
-        failed_checks.append(name)
 
 
 def invocations(log: Path) -> list[list[bytes]]:
@@ -397,6 +387,5 @@ with tempfile.TemporaryDirectory() as tmp:
         and not (project / "mods-available").exists(),
     )
 
-if failed_checks:
-    sys.exit(1)
+exit_status()
 print("deploy.sh remote-restart contract OK")

@@ -133,11 +133,27 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# Reclaim env files stranded by a SIGKILLed previous run. Every command
-# sweeps, not just the ones that start a container: these files carry the
-# telnet and webadmin passwords, so a run that only stops or backs up must not
-# leave one sitting in $TMPDIR for the days before the next start. (Defined
-# below; called here so the sweep outlives the start-path ownership.)
+# Reclaim env files stranded by a SIGKILLed previous run, whose traps never
+# ran. Every command sweeps, not just the ones that start a container: these
+# files carry the telnet and webadmin passwords, so a run that only stops or
+# backs up must not leave one sitting in $TMPDIR for the days before the next
+# start. The owning PID therefore rides in the file name, and a live
+# concurrent run's file (its PID answers kill -0) is left alone. A PID
+# recycled to an unrelated process only shields one stale file until that
+# process exits.
+sweep_stale_secret_env_files() {
+  local f base pid
+  for f in "${TMPDIR:-/tmp}"/7dtd-container-env.*.*; do
+    [[ -f "$f" ]] || continue
+    base="${f##*/7dtd-container-env.}"
+    pid="${base%%.*}"
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
+    if ! kill -0 "$pid" 2>/dev/null; then
+      rm -f -- "$f" 2>/dev/null || true
+    fi
+  done
+}
+
 sweep_stale_secret_env_files
 
 # Telnet values come from the environment or .env, get the shared lab defaults
@@ -161,26 +177,6 @@ fi
 
 mkdir -p "$GAME_DIR" "$USERDATA_DIR" "$ROOT/mods" "$ROOT/config"
 
-# Secret env files orphaned by a killed previous run (SIGKILL bypasses every
-# trap) would accumulate in $TMPDIR forever: mktemp never reuses a name and
-# each file carries both secrets. The owning PID therefore rides in the file
-# name, and the sweep above (plus make_common, before each new file) reclaims
-# entries whose owner is gone; a live concurrent run's file (its PID answers
-# kill -0) is left alone. A PID recycled to an unrelated process only shields
-# one stale file until that process exits.
-sweep_stale_secret_env_files() {
-  local f base pid
-  for f in "${TMPDIR:-/tmp}"/7dtd-container-env.*.*; do
-    [[ -f "$f" ]] || continue
-    base="${f##*/7dtd-container-env.}"
-    pid="${base%%.*}"
-    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
-    if ! kill -0 "$pid" 2>/dev/null; then
-      rm -f -- "$f" 2>/dev/null || true
-    fi
-  done
-}
-
 # Shared container env + mounts.
 make_common() {
   # Secrets travel through an owner-only env file, never the podman command
@@ -192,6 +188,8 @@ make_common() {
   # check_webadmin_password, whose character rules keep them byte-exact
   # through the env-file format: no backslash/quote/$ metacharacters and no
   # leading or trailing whitespace (which podman's parser would trim).
+  # Sweep again right before minting: a long stop() can outlive the sweep
+  # above, and the file minted here must be the newest one in $TMPDIR.
   sweep_stale_secret_env_files
   # Owner-only env file carrying TELNET_PASSWORD/WEBADMIN_PASSWORD into the
   # container (removed by the EXIT trap); local to this call, its only reads.

@@ -28,8 +28,8 @@ import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-SCRIPTS = Path(__file__).resolve().parent
-ROOT = SCRIPTS.parent
+from harness import ROOT, SCRIPTS, check, exit_status
+
 CONFIG = ROOT / "config"
 CHECK_XML = SCRIPTS / "check-config-xml.py"
 
@@ -61,16 +61,6 @@ EXPR_VALUES: dict[str, str] = {
 # identify a person. Kept in one place so adding a new element type is one
 # line here, not a hunt through the template.
 ID_ATTRS = ("userid", "steamID", "crossuserid")
-
-failed_checks: list[str] = []
-
-
-def check(name: str, cond: bool) -> None:
-    if cond:
-        print(f"OK: {name}")
-    else:
-        print(f"FAIL: {name}", file=sys.stderr)
-        failed_checks.append(name)
 
 
 def placeholders(text: str) -> set[str]:
@@ -185,6 +175,5 @@ check(
     all(set(u.attrib) == {"name", "pass"} for u in seeded_users if u.tag == "user"),
 )
 
-if failed_checks:
-    sys.exit(1)
+exit_status()
 print("config template render contract OK")

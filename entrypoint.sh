@@ -177,13 +177,12 @@ seed_admin_file() {
   assert_rendered "$out" '@WEBADMIN_PASSWORD_HASH@'
   # The credential record lives under the umask-077 scope above, so both the
   # temp write and the renamed record land 0600. The record must land BEFORE
-  # the seeded admin file: the seed is skipped whenever serveradmin.xml
-  # exists, so writing the record after the
-  # rename would let a crash in between strand a dashboard password that is
-  # recorded nowhere and can never be re-seeded. Record first keeps every
-  # outcome recoverable: a failure before the rename leaves no seeded file,
-  # so the next boot re-runs the whole seed and overwrites the record; after
-  # it, both files exist.
+  # the seeded admin file: the seed is skipped whenever serveradmin.xml exists,
+  # so writing the record after the rename would let a crash in between strand
+  # a dashboard password that is recorded nowhere and can never be re-seeded.
+  # Record first keeps every outcome recoverable: a failure before the rename
+  # leaves no seeded file, so the next boot re-runs the whole seed and
+  # overwrites the record; after it, both files exist.
   if (( minted == 1 )); then
     printf '%s\n' "$WEBADMIN_PASSWORD" > "$record_tmp"
     mv -f "$record_tmp" "$record"
