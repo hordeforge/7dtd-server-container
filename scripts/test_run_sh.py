@@ -1414,6 +1414,75 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     (tmpdir / ".env").unlink()
 
+    # The container name is the body of the anchored `podman ps --filter
+    # name=^${NAME}$` regex and the image reference is a podman -t argument, so
+    # a value carrying regex or option syntax is refused here rather than
+    # making `status` report a container that was never started.
+    for key, bad_value in (
+        ("SEVENDTD_CONTAINER_NAME", "srv|name"),
+        ("SEVENDTD_CONTAINER_NAME", "-leading-dash"),
+        ("SEVENDTD_CONTAINER_NAME", "srv name"),
+        ("SEVENDTD_IMAGE", "-rf"),
+        ("SEVENDTD_IMAGE", "localhost/7dtd server:latest"),
+    ):
+        proc = subprocess.run(
+            [str(run_sh), "status"],
+            env={**env, key: bad_value},
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+        check(
+            f"{key}={bad_value!r} is refused",
+            proc.returncode == 1 and f"{key} must match".encode() in proc.stderr,
+        )
+    # A registry and a tag are legitimate image syntax and must survive.
+    proc = subprocess.run(
+        [str(run_sh), "config"],
+        env={**env, "SEVENDTD_IMAGE": "quay.io/horde/7dtd-server:v1.2.3"},
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    check(
+        "a registry-qualified image reference is accepted",
+        proc.returncode == 0 and b"quay.io/horde/7dtd-server:v1.2.3" in proc.stdout,
+    )
+    # A rejected podman value is a report line, not the end of the report,
+    # the same way a rejected BACKUP_KEEP is.
+    proc = subprocess.run(
+        [str(run_sh), "config"],
+        env={**env, "SEVENDTD_CONTAINER_NAME": "srv|name"},
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    check(
+        "config reports a rejected container name instead of dying on it",
+        proc.returncode == 0
+        and b"values rejected: FATAL: SEVENDTD_CONTAINER_NAME must match" in proc.stdout,
+    )
+    # The opt-in that authorizes the committed public telnet password is a
+    # config value like any other, so the report has to carry it.
+    for allow in ("0", "1"):
+        proc = subprocess.run(
+            [str(run_sh), "config"],
+            env={**env, "ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD": allow},
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+        check(
+            f"config reports ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD={allow}",
+            proc.returncode == 0
+            and re.search(
+                rf"^ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD\s+{allow}\s+\(environment\)",
+                proc.stdout.decode(),
+                re.MULTILINE,
+            )
+            is not None,
+        )
+
     # BACKUP_KEEP is a validated config value: a bad one fails before the run
     # does anything, instead of reaching the prune arithmetic. 18446744073709551617
     # is 2^64+1, which bash arithmetic wraps to 1 with no error: a bound tested

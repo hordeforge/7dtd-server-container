@@ -62,6 +62,20 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   one container log under `--restart unless-stopped`) is separable with a
   single grep. `run.sh logs` and the failed-start tail also pass
   `--timestamps`, which is what dates the game's own output, still undated.
+- **`SEVENDTD_CONTAINER_NAME` and `SEVENDTD_IMAGE` are validated like every
+  other key.** Both reach podman's argv, and the container name is the body of
+  the anchored `podman ps --filter name=^${NAME}$` regex that `run.sh status`
+  matches on, so a name carrying regex or option syntax made `status` report a
+  container nobody started while `stop()` acted on that answer. A value with a
+  metacharacter, a space, or a leading `-` is now refused before any command
+  uses it, and `run.sh config` reports the rejection instead of dying on it.
+  A registry-qualified image reference (`quay.io/horde/7dtd-server:v1.2.3`) is
+  still accepted.
+- **`ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD` is in the `run.sh config` report,
+  and is no longer shown as a secret.** The report matched secret keys as
+  `*PASSWORD*`, which also matched that key, so the one switch saying whether
+  a host runs on the committed public telnet password was printed as `(set,
+  redacted)`. The two secret keys are now named outright.
 - **A discoverable local loop.** `make` prints the task list, `make test-one
   SUITE=<name>` runs a single suite instead of all twelve, and `make check`
   runs lint and test in CI's order. A missing `uv` or `shellcheck` now fails
@@ -160,6 +174,13 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   interfaces, `shell=True`) all run. The five rules still off (S101, S105,
   S311, S314, S324) are named in `pyproject.toml` so the gap is a list, not an
   omission.
+- **`.env.example` no longer ships an active `TELNET_PASSWORD=change-me`.**
+  An operator who copied the template and filled in nothing else booted a
+  telnet console, reachable on every interface, under a password published in
+  this repository, and the public-default opt-in never fired because a
+  password *was* set. The line is commented out like `WEBADMIN_PASSWORD`, so
+  an unedited copy now stops at `check_telnet_env` with a `FATAL` naming the
+  fix instead of starting a server.
 - **The dashboard seed no longer commits an individual's platform ids.**
   `config/serveradmin_seed.xml` shipped two hardcoded `<user>` entries
   (a Steam userid and an EOS id) in `<adminTools><users>`, and the same Steam

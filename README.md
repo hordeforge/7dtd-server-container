@@ -252,7 +252,16 @@ export BACKUP_KEEP=14                        # save archives kept in backups/ (d
 `./scripts/run.sh config` prints the effective configuration of this host,
 where each value came from (environment, `.env`, or the committed default),
 and whether the value rules accept it. Secret values are never printed; it
-reports them as set or unset.
+reports them as set or unset. `ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD` is in
+that report too, so "is this host opted in to the public telnet password" has
+an answer without reading the environment by hand.
+
+Every key above is checked before a command uses it, and `run.sh config`
+reports a rejected value instead of dying on it. `SEVENDTD_CONTAINER_NAME`
+and `SEVENDTD_IMAGE` are no exceptions: both reach podman's argv and the
+container name is the body of the anchored `podman ps --filter` regex
+`status` matches on, so a value carrying regex or option syntax is refused
+rather than producing a `status` that reports a container nobody started.
 
 `TELNET_PASSWORD` is required. The committed lab default (`retest`) is public
 and a set telnet password makes the game listen on every interface, so a boot

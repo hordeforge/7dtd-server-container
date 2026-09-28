@@ -179,9 +179,13 @@ ARCHIVE_COLLIDE_SEP='~'
 # environment before the .env load below. The snapshot has to happen here:
 # init_telnet_env / init_steamcmd_env / the :- defaults further down fill the
 # unset ones, after which every value reads as "set" and provenance is lost.
+# ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD is reported like every other key it
+# governs: it is the one switch that authorizes booting on the committed public
+# telnet password, and a report that omitted it could not answer "is this host
+# opted in to the public password" without reading the environment by hand.
 CONFIG_KEYS="TELNET_PASSWORD WEBADMIN_PASSWORD TELNET_PORT STEAMCMD_UPDATE \
-STEAMCMD_ONLY BACKUP_KEEP=KEEP_BACKUPS SEVENDTD_CONTAINER_NAME=NAME \
-SEVENDTD_IMAGE=IMAGE"
+STEAMCMD_ONLY ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD=ALLOW_PUBLIC_DEFAULT \
+BACKUP_KEEP=KEEP_BACKUPS SEVENDTD_CONTAINER_NAME=NAME SEVENDTD_IMAGE=IMAGE"
 declare -A CONFIG_SOURCE
 for config_key in $CONFIG_KEYS; do
   config_key="${config_key%%=*}"
@@ -204,6 +208,16 @@ fi
 # what keeps the value inside 64-bit arithmetic, which bash wraps silently.
 BACKUP_KEEP_MIN=1
 BACKUP_KEEP_MAX=999999999
+
+# Shape of the two podman-facing values, as named patterns rather than
+# literals inside the rule below. A container name is what podman itself
+# accepts for --name, and the leading-alnum requirement is what keeps a value
+# starting with '-' from being read as an option instead of an argument. An
+# image reference is registry/name:tag, so '/', ':' and '@' belong to the set
+# too. scripts/deploy.sh shape-checks its three SEVENDTD_* values for the same
+# reason.
+CONTAINER_NAME_RE='^[A-Za-z0-9][A-Za-z0-9._-]*$'
+IMAGE_RE='^[A-Za-z0-9][A-Za-z0-9._:/@-]*$'
 
 # Backup retention varies per host (disk size, how far back an operator wants
 # to reach), so it is a validated config value with a committed default rather
@@ -228,6 +242,12 @@ done
 
 NAME="${SEVENDTD_CONTAINER_NAME:-7dtd-server}"
 IMAGE="${SEVENDTD_IMAGE:-localhost/7dtd-server:latest}"
+# The same default check_telnet_env reads, filled here so the config report
+# can print a value for a key that is usually unset. It is a local report
+# variable, not an export: nothing outside run.sh consumes it, and
+# check_telnet_env keeps reading the environment variable itself.
+# shellcheck disable=SC2034  # read back through show_config's ${!var}, so the reference is indirect
+ALLOW_PUBLIC_DEFAULT="${ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD:-0}"
 
 # Release every env file this run owns, keyed on the PID embedded in the
 # name rather than on the freshly created path: acquisition spans the mktemp
@@ -321,10 +341,29 @@ check_backup_keep() {
   fi
 }
 
+# NAME and IMAGE reach podman argv, and NAME additionally is the body of the
+# anchored `podman ps --filter name=^${NAME}$` regex: podman reads a leading
+# '-' as an option, a metacharacter in the name changes what `status` matches
+# (a name that starts a container that exists while `status` reports none, or
+# vice versa), and stop()/backup() then act on that wrong answer. A bad value
+# is refused here, before any command uses it, on the same boundary the other
+# keys get.
+check_podman_values() {
+  if [[ ! "$NAME" =~ $CONTAINER_NAME_RE ]]; then
+    echo "FATAL: SEVENDTD_CONTAINER_NAME must match $CONTAINER_NAME_RE (got '$NAME')" >&2
+    exit 1
+  fi
+  if [[ ! "$IMAGE" =~ $IMAGE_RE ]]; then
+    echo "FATAL: SEVENDTD_IMAGE must match $IMAGE_RE (got '$IMAGE')" >&2
+    exit 1
+  fi
+}
+
 check_env_values() {
   check_telnet_env
   check_steamcmd_env
   check_backup_keep
+  check_podman_values
   # Optional dashboard webuser password: when provided it is validated here so
   # a bad value fails on the host instead of mid-boot in the container. When
   # unset, the entrypoint mints a random one at seed time (see
@@ -368,7 +407,12 @@ show_config() { # verdict
     key="${entry%%=*}"
     var="${entry#*=}"
     case "$key" in
-      *PASSWORD*)
+      # The two secret keys, named rather than matched as *PASSWORD*: that
+      # substring also matches ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD, which is
+      # a {0,1} switch, not a secret. Reporting the opt-in as "(set, redacted)"
+      # hid the one value that says whether this host runs on the committed
+      # public telnet password, which is exactly what the report exists for.
+      TELNET_PASSWORD|WEBADMIN_PASSWORD)
         if [[ -z "${!key+x}" ]]; then
           # An unset WEBADMIN_PASSWORD is not a missing value: the entrypoint
           # mints one at first seed. Say which, or the operator reads a
