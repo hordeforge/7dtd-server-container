@@ -10,6 +10,19 @@ before 1.1.1 are reconstructed from their GitHub release notes.
 
 ## [Unreleased]
 
+### Added
+
+- OCI labels on the image (title, description, source, license, version) so
+  `podman inspect` reports what it ships. The version label copies `VERSION`,
+  and `scripts/test_containerfile.py` fails the gate on a release bump that
+  forgets it.
+
+### Changed
+
+- The quadlet starts the container with `--security-opt=no-new-privileges`.
+  Container root stays (rootless podman maps it to the host user), but nothing
+  in the image needs a setuid escalation.
+
 ### Fixed
 
 - **Backup archive stamps are UTC.** `run.sh backup` named archives with the
@@ -17,6 +30,8 @@ before 1.1.1 are reconstructed from their GitHub release notes.
   fall-back DST transition could repeat a stamp (one archive overwriting the
   other) and a host timezone change or deploy to another region could prune a
   newer save as the oldest. Existing archives keep their names.
+- The `Containerfile` header claimed the V3.1.0 game line; the server and its
+  mods target V3.2.0.
 
 ## [1.1.3] - 2026-09-21
 

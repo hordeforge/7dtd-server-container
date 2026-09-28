@@ -35,6 +35,10 @@ Init=true
 # Environment=WEBADMIN_PASSWORD=change-me
 # :Z relabels the sources to container_file_t (SELinux enforcing RHEL host).
 # mods is rw for the /api/perf toggle (EfficientServer config).
+# The game binary and steamcmd run as container root by design (see the
+# Containerfile), but nothing in this image needs a setuid escalation, so
+# no-new-privileges blocks one if the game or a mod ever turns hostile.
+PodmanArgs=--security-opt=no-new-privileges
 Volume=%h/7dtd-server/data/game:/root/7dtd:Z
 Volume=%h/7dtd-server/data/userdata:/root/.local/share/7DaysToDie:Z
 Volume=%h/7dtd-server/mods:/mods:Z

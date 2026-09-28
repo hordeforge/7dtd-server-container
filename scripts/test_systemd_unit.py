@@ -102,6 +102,14 @@ check(
     and re.findall(r"^HealthRetries=(\d+)$", text, re.MULTILINE) != [],
 )
 
+# Least privilege: container root is a deliberate choice (rootless podman maps
+# it to the host user), and nothing in the image needs a setuid escalation.
+podman_args = re.findall(r"^PodmanArgs=(.*)$", text, re.MULTILINE)
+check(
+    "PodmanArgs keeps no-new-privileges on every start",
+    len(podman_args) == 1 and podman_args[0].strip() == "--security-opt=no-new-privileges",
+)
+
 if failed_checks:
     sys.exit(1)
 print("quadlet unit contract OK")

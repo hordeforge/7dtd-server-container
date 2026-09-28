@@ -5,6 +5,16 @@
 # Build:  podman build -t localhost/7dtd-server:latest .
 FROM docker.io/steamcmd/steamcmd:latest
 
+# OCI image metadata, so `podman inspect` and a registry report what the tree
+# ships without reading VERSION. org.opencontainers.image.version tracks the
+# VERSION file; scripts/test_containerfile.py fails the build on a release bump
+# that forgets to update it here.
+LABEL org.opencontainers.image.title="7dtd-server" \
+      org.opencontainers.image.description="7 Days to Die dedicated server harness (Outpost)" \
+      org.opencontainers.image.source="https://github.com/hordeforge/7dtd-server-container" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="1.1.3"
+
 USER root
 
 # The depot ships its own Unity/Mono/steamclient libraries. On top of the

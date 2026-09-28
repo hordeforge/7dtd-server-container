@@ -18,11 +18,11 @@ Workspace root guide: [`hordeforge/.github` AGENTS.md](https://github.com/hordef
 | Mod staging from sibling `dist/` + enabled copies | `scripts/stage_mods.sh`, `mods/`, `mods-available/` |
 | Deploy + container lifecycle + ops scripts | `scripts/deploy.sh` (`--restart`), `scripts/update_mods.sh`, `scripts/run.sh`, `scripts/perf.sh`; shared `.env`/telnet lib: `scripts/lib-env.sh` |
 | Enabled tweaks + bot options doc | `MODS.md` |
-| CI workflow + tests and helpers | `.github/workflows/ci.yml`, `.github/dependabot.yml`, `requirements-lint.txt`, `Makefile`, `scripts/test_lib_env.sh`, `scripts/fake-telnet-server.py`, `scripts/check-config-xml.py`, `scripts/coverage_badge.py`, `scripts/test_coverage_badge.py`, `scripts/test_check_config_xml.py`, `scripts/test_config_templates.py`, `scripts/test_deploy_sh.py`, `scripts/test_entrypoint_boot.py`, `scripts/test_systemd_unit.py`, `scripts/test_run_sh.py`, `scripts/test_perf_sh.py`, `scripts/test_stage_mods.py` |
+| CI workflow + tests and helpers | `.github/workflows/ci.yml`, `.github/dependabot.yml`, `requirements-lint.txt`, `Makefile`, `scripts/test_lib_env.sh`, `scripts/fake-telnet-server.py`, `scripts/check-config-xml.py`, `scripts/coverage_badge.py`, `scripts/test_coverage_badge.py`, `scripts/test_check_config_xml.py`, `scripts/test_config_templates.py`, `scripts/test_deploy_sh.py`, `scripts/test_entrypoint_boot.py`, `scripts/test_systemd_unit.py`, `scripts/test_containerfile.py`, `scripts/test_run_sh.py`, `scripts/test_perf_sh.py`, `scripts/test_stage_mods.py` |
 | Static analysis config (ruff + ruff format, mypy strict, yamllint) | `pyproject.toml`, `.yamllint.yaml` (enforced via `make lint` locally and in CI, versions pinned in `requirements-lint.txt`) |
 | Threat model (entry points, boundaries, controls, ranked gaps) | `docs/THREAT_MODEL.md` |
 | Rootless systemd service unit | `systemd/7dtd-server.container` |
-| Version (canonical home) + changelog + tag gate | `VERSION` (`run.sh version`), `CHANGELOG.md`, `.github/workflows/release.yml` |
+| Version (canonical home) + changelog + tag gate | `VERSION` (`run.sh version`), `CHANGELOG.md`, `.github/workflows/release.yml`; the image's `org.opencontainers.image.version` label copies it and `scripts/test_containerfile.py` fails the gate when they drift |
 
 ## Does not own
 
