@@ -706,6 +706,12 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   the swap drops it. Carrying the old bytes forward would ship a stale mod
   under the name of one that no longer builds, so the test now asserts the
   drop and names the contract in the comment.
+- The lock-contention case in `scripts/test_run_sh.py` slept a fixed 2s before
+  releasing the ops lock, so on a loaded host the queued `backup` could reach
+  its flock probe only after the holder was gone: it never had to queue, printed
+  no `waiting:` line, and the suite went red on a clean tree. It now reads the
+  child's own queue report and holds the lock until it arrives, bounded so a
+  child that dies early fails instead of hanging.
 - The license of every package in the pinned analyzer closure is recorded in
   the `requirements-lint.txt` header, read from the installed metadata.
   `yamllint` is the only copyleft in it (GPL-3.0-or-later, against this

@@ -158,6 +158,11 @@ if "--env-file" in argv:
 TELNET_PASSWORD = "s3cret-pass"
 WEBADMIN_PASSWORD = "pass word 12"  # interior space must survive byte-exact
 NAME = "7dtd-server"  # run.sh's default SEVENDTD_CONTAINER_NAME
+# How long the lock-contention test waits for the queued command to say it is
+# queued. A fixed sleep raced a slow interpreter start on a loaded host: the
+# holder released the lock before the child reached its probe, so the child
+# never had to queue and printed no "waiting:" line.
+QUEUE_REPORT_SECS = 30.0
 
 # Same recorder, but `podman run` blocks long enough for the signal-path test
 # to interrupt run.sh while the env file exists and cleanup is still pending.
@@ -2219,18 +2224,33 @@ with tempfile.TemporaryDirectory() as tmp:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
-        # Held lock, live child: it must still be running and must not have
-        # written an archive, which is the whole point of the lock.
-        time.sleep(2)
+        # The queueing is the child's own report, so read it instead of
+        # sleeping a guessed interval: the lock stays held until the child says
+        # it is waiting, which is also what makes the two checks below true.
+        stderr = waiter.stderr
+        assert stderr is not None, "stderr=PIPE was asked for, so the pipe is here"
+        queued = bytearray()
+        os.set_blocking(stderr.fileno(), False)
+        deadline = time.monotonic() + QUEUE_REPORT_SECS
+        while b"waiting:" not in queued and time.monotonic() < deadline:
+            try:
+                chunk = os.read(stderr.fileno(), 4096)
+            except BlockingIOError:
+                time.sleep(0.05)
+                continue
+            if not chunk:
+                break  # the child closed stderr: it failed before queueing
+            queued += chunk
+        os.set_blocking(stderr.fileno(), True)
+        check("the queued command said what it waits for", b"waiting:" in queued)
         check("a mutating command waits instead of running", waiter.poll() is None)
         check("the waiting command wrote no archive", not list(backups.iterdir()))
     finally:
         fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
         holder.close()
 
-    _out, err = waiter.communicate(timeout=120)
+    waiter.communicate(timeout=120)
     check("the queued backup succeeds once the lock is free", waiter.returncode == 0)
-    check("the queued backup says what it waited for", b"waiting:" in err)
     check("the queued backup wrote its archive", len(list(backups.iterdir())) == 1)
 
 # `status` is the command an operator runs during an incident, and `podman ps`

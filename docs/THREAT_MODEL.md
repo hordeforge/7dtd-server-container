@@ -9,7 +9,10 @@ sec-review with the references below; this document aims those passes.
 
 Last reviewed: 2026-09-28 against VERSION 1.1.3, re-verified the same day
 after the weekly backup-verification job and the `data/.ops.lock` command
-serialization landed (previous full pass 2026-08-26).
+serialization landed, then again after the host-modes change
+(`scripts/run.sh` `ensure_private_dir`, process-wide `umask 077` in
+`entrypoint.sh`) put player records on the same footing as the credentials
+(previous full pass 2026-08-26).
 Re-run this review whenever the surface changes: new listener, new mount, new
 script, new env variable. Owner and review cadence are organizational
 decisions, noted here as open items, not invented.
@@ -29,7 +32,7 @@ that does not shift.
 | R3 | Every listener binds the host network namespace with no firewall or ACL anywhere in the repo; game joins need no password and the server is publicly listed | The "LAN only" assumption is enforced by nothing in this tree | `scripts/run.sh` `make_common`, `systemd/7dtd-server.container` `Network=host`, `config/serverconfig.tmpl.xml:9,16` |
 | R4 | Supply chain: the default `steamcmd/steamcmd:latest` base tag is floating; unsigned C# mods copied wholesale into the game process | Whoever controls the base tag, a sibling `dist/`, or host-side `mods/` gets code execution in the user session at next boot | `Containerfile` `FROM`/`ARG BASE_IMAGE`, `entrypoint.sh` `sync_mods`, `scripts/stage_mods.sh` |
 | R5 | Secrets lifecycle gaps: `.env` (both passwords) rsynced to the server host each deploy; minted webadmin password stored plaintext beside the admin file; telnet password crosses the wire in cleartext; no rotation procedure | Credential disclosure outlives a single compromise | `scripts/deploy.sh` `rsync` call, `entrypoint.sh` `seed_admin_file`, `scripts/lib-env.sh` `telnet_session` |
-| R6 | Save archives under `backups/` are credential-bearing: each carries `serveradmin.xml` (dashboard digest, admin permissions) and `.webadmin-password`; retention keeps 7 unencrypted copies, and `restore` reinstates whatever those files contain | Restoring a tampered or stale archive silently rewrites who holds admin on the dashboard and which webuser password works; losing the host loses the world | `scripts/run.sh` `archive_saves`, `restore`, `systemd/7dtd-backup.service`, `entrypoint.sh` `seed_admin_file` |
+| R6 | Save archives under `backups/` are credential-bearing and player-record-bearing: each carries `serveradmin.xml` (dashboard digest, admin permissions, platform ids, ban list) and `.webadmin-password` beside the world saves; retention keeps 7 unencrypted copies, and `restore` reinstates whatever those files contain | Restoring a tampered or stale archive silently rewrites who holds admin on the dashboard and which webuser password works; each copy is also a full export of who played and when, at rest on one host; losing the host loses the world | `scripts/run.sh` `archive_saves`, `restore`, `systemd/7dtd-backup.service`, `entrypoint.sh` `seed_admin_file` |
 
 R1 through R3 compound: the same exposed host carries the console, the
 dashboard, and the joinable game.
@@ -134,10 +137,23 @@ Every row above was verified against the tree at the review date.
   (`config/serveradmin_seed.xml` `<commands>`, everything else at level 0), and
   `<apitokens>` is empty but would carry bearer secrets if an operator adds
   entries.
+- **Player records**, the data classes the README's "Player data on the host"
+  table names and the code holds: platform ids and the ban list plus the
+  dashboard digest in `data/userdata/Saves/serveradmin.xml`
+  (`entrypoint.sh` `seed_admin_file`); player names, positions, inventories and
+  bases in the save chunks under `data/userdata/Saves/`
+  (`scripts/run.sh` `archive_saves`); and join/leave lines with platform ids,
+  names and client addresses in `data/userdata/Logs/output.log`, which the game
+  opens at boot (`entrypoint.sh` final `exec` line) and the dashboard reads.
+  The names and the client addresses identify people who never authenticated
+  anything beyond a protocol join, so disclosure of this class is a privacy
+  event even though no credential rides with it. Nothing in this repo exports,
+  prunes, corrects, or erases it: the log grows until an operator deletes it and
+  erasure is `rm -rf` by hand (`README.md` "Player data on the host").
 - **Save archives in `backups/`**: the only off-`Saves/` copy of the world
   (retention `BACKUP_KEEP`, default 7), of the dashboard credentials, and of
-  the game log in `data/userdata/Logs/` (join and leave lines: names, platform
-  ids, client addresses), which nothing else copies. Unencrypted, same host, no
+  every player record above, the game log in `data/userdata/Logs/` included,
+  which nothing else copies. Unencrypted, same host, no
   off-host copy shipped here (`scripts/run.sh` `archive_saves`,
   `systemd/7dtd-backup.service`).
 - **Compute of the host user session** (rootless, but unconfined within that
@@ -300,6 +316,31 @@ only the ones that go through it.
 - **Repudiation:** none of the three leaves an operator identity anywhere; the
   journal names the unit, not the person.
 
+### Boundary 9: other local accounts on the host to `data/` and `backups/`
+
+The server host is not dedicated to this tree: anything running as a second
+account on it can read whatever mode the data files carry. Under rootless
+podman the container's root is the host user, so every file the game writes
+into `data/` and every copy `archive_saves` makes lands with the host user's
+modes, not the game install's.
+
+- **Information disclosure:** two classes sit behind the same boundary, the
+  credentials (R5) and the player records above. `data/game`,
+  `data/userdata` and `backups/` are created and re-tightened to 0700 by
+  `ensure_private_dir`, and the entrypoint's process-wide `umask 077` covers
+  the files the game itself writes, so the logs and the save chunks land 0600
+  rather than at the 022 default. A tree an earlier version opened is closed on
+  the next `run.sh` command, and a `chmod` that cannot be applied fails the
+  command instead of running on (`scripts/run.sh` `ensure_private_dir`).
+  The `data/` root itself is created at the default mode; it holds only the two
+  0700 subdirs, so it discloses the existence of the tree and nothing in it.
+- **Denial of service:** the log file is not bounded by anything in this repo.
+  `SaveDataLimit=-1` (`config/serverconfig.tmpl.xml:53`) already leaves save
+  disk usage uncapped, and no retention job prunes `data/userdata/Logs`
+  (`README.md` "Player data on the host"); a full disk reaches the game, not
+  just the log, and neither the daily backup nor the weekly verify reports
+  free space. Recorded as G12, not fixed here.
+
 ## Mitigations that exist (mapped)
 
 | Control | Covers | Reference |
@@ -317,6 +358,7 @@ only the ones that go through it.
 | Telnet shutdown/saveworld requests bound by a readiness probe and a timeout | A stale session racing a restarting container and sending the password into the wrong listener; an unbounded wait | `scripts/lib-env.sh` `request_telnet`, `telnet_probe`, `scripts/run.sh` `stop`, `backup` |
 | Secrets never in argv; 0600 mktemp env file; EXIT/signal traps; PID-keyed sweep of orphaned secret files | Local disclosure via `/proc/*/cmdline`, stranded credential files | `scripts/run.sh` signal traps, `cleanup_secret_env_file`, `sweep_stale_secret_env_files`, `make_common`, `scripts/lib-env.sh` `telnet_session` |
 | `umask 077` + temp-file + atomic rename + SIGKILL-stranded-temp sweep for credential-bearing renders | Partial/truncated credential files left readable or corrupt on disk | `entrypoint.sh` `render_config`, `seed_admin_file` |
+| Owner-only player data: `data/game`, `data/userdata` and `backups/` created and re-tightened to 0700 on every command (failing the command if the mode cannot be set), and a process-wide `umask 077` in the entrypoint so every file the game writes into the mounts, save chunks and `Logs/output.log` included, lands 0600 instead of 022 | Any other account on the server host reading the world, the join log with names and client addresses, or the credentials, out of files a rootless container wrote as the host user; a tree an earlier release opened staying open | `scripts/run.sh` `ensure_private_dir`, `entrypoint.sh` `umask 077` preamble (covers `seed_admin_file`, `render_config`, and the `exec`'d game) |
 | PID-keyed sweep of stranded staging siblings in the game's `Mods/` | A half-copied mod left in host `data/game` by a killed boot, loaded by the game as a second broken copy of a staged mod | `entrypoint.sh` `sync_mods`, `scripts/lib-env.sh` `sweep_stale_staging` |
 | Minted webadmin password kept out of logs | Credential leakage into retained journald data | `entrypoint.sh` `seed_admin_file` |
 | Telnet failed-login throttle | Online password guessing rate | `config/serverconfig.tmpl.xml:36-37` (game-enforced) |
@@ -332,8 +374,11 @@ only the ones that go through it.
 No documentation claim in `README.md` or `AGENTS.md` contradicts the code as
 of this review; the claims spot-checked (secret handling, telnet binding
 behavior, seed behavior, backup/restore verification and retention, the
-`no-new-privileges` and health settings, and the "not built" list that names
-this document) all match their referenced implementations. The one claim the
+`no-new-privileges` and health settings, the host file modes and the "Player
+data on the host" inventory in `README.md` (0700 `data/game`, `data/userdata`,
+`backups/`, 0600 files the game writes, no outbound reporting in this tree, no
+log retention), and the "not built" list that names this document) all match
+their referenced implementations. The one claim the
 tree does not back is a port number, not a control: both docs list 26902 as
 the LiteNetLib data port while no template line in this repo sets it (see the
 game-protocol row above).
@@ -362,10 +407,12 @@ game-protocol row above).
    (quarantine the archive, diff its `serveradmin.xml` against the live one
    before extracting, bound the extracted size); handing the code fix to
    sec-review.
-8. **G8:** save archives are unencrypted credential copies on the same host as
-   the credentials they contain, with no off-host copy. Losing the host loses
-   the world and its backups together; the README states this, and it is a
-   deliberate cost, not a defect.
+8. **G8:** save archives are unencrypted copies of the world, the player
+   records and the dashboard credentials, kept on the same host as the data
+   they contain, with no off-host copy. Losing the host loses the world and its
+   backups together; the README states this, and it is a deliberate cost, not
+   a defect. Within the host they are now owner-only, so the exposure is
+   account takeover or host loss, not a second local reader (Boundary 9).
 9. **G9:** `no-new-privileges` is applied on the quadlet path only, so a
    container started by `scripts/run.sh` runs without it.
 10. **G10:** ops-command serialization is best-effort in two places. A host
@@ -383,6 +430,16 @@ game-protocol row above).
     archive mid-write) is a unit state and a journal line, with nothing
     forwarding or paging on it; a week can pass with the daily job failing
     before the 3-day staleness bound turns it into a `FATAL` anyone reads.
+12. **G12:** nothing bounds the data the server writes to disk on its own.
+    `SaveDataLimit=-1` (`config/serverconfig.tmpl.xml:53`) leaves save disk
+    usage uncapped and no job prunes `data/userdata/Logs`, so the join/leave
+    log grows for the life of the tree. A full disk is an availability event
+    for the game and the backups, and neither backup unit checks free space
+    (`systemd/7dtd-backup.service`, `systemd/7dtd-backup-verify.service`,
+    `scripts/run.sh` `archive_saves`, `verify_backup`). Cheap partial
+    mitigations exist (a size or age cap on the log, a positive
+    `SaveDataLimit`, a free-space precondition in the backup path); the code
+    fix goes to sec-review.
 
 ## Abuse cases (authenticated-hostile-user scenarios)
 
@@ -408,6 +465,13 @@ game-protocol row above).
   `sync_mods` sweeps every entry `/mods` does not stage, and `sync_tree`
   replaces any staged entry that differs from `/mods` rather than leaving the
   local edit in place.
+- **Another local account on the server host:** `data/userdata` (world saves,
+  `serveradmin.xml` with platform ids and the ban list) and the join log with
+  names and client addresses are readable to it only while their modes are open;
+  `ensure_private_dir` and the entrypoint `umask 077` close that
+  (`scripts/run.sh` `ensure_private_dir`, `entrypoint.sh` `umask 077`
+  preamble). What the same account cannot get, it can still do: it shares the
+  host's disk, and nothing bounds what the game writes to it (G12).
 - **Anyone who can place an archive where an operator restores from**
   (a shared `backups/`, an archive copied from another host, an operator
   handed a `.tar.gz` to "try"): the restore preflight passes as long as the
@@ -461,3 +525,12 @@ the named code path.
   nor the lock alone settles (Boundary 8, G10, G11).
 - Open organizational items (not invented here): named security owner, review
   cadence, disclosure contact/process (`SECURITY.md`).
+- Corrected in the 2026-09-28 host-modes pass: the enabled-set wipe no longer
+  bounds a hand-planted mod to one staging interval when it sits under one of
+  the three owned names and that sibling's `dist/` is missing (Boundary 5);
+  archives were carrying the player records, not only credentials (R6, G8).
+  Added in that pass: player records as an asset class with the files named
+  (Saves chunks, `serveradmin.xml`, `Logs/output.log`), Boundary 9 for other
+  local accounts on the host, the `ensure_private_dir` and process-wide
+  `umask 077` controls, the abuse case they close, and G12 for the unbounded
+  log and save growth the same pass documented in the README.
