@@ -98,27 +98,26 @@ for i in "${!NAMES[@]}"; do
 done
 
 # The new set is built here, in a staging dir, and swapped in below, so a
-# failed copy leaves the previously enabled mods in place. Staging starts as a
-# copy of the currently enabled set, so sync_tree still finds an identical
-# tree to skip on a redeploy that changed no mod. Nothing in $ROOT/mods is
-# touched until every copy has succeeded: a sync_tree into mods/$name here, or
-# pruning the old tree before the new one is complete, would destroy a working
-# enabled set on a run that then reports the failure, and the swap below
-# overwrites mods/ wholesale anyway, so that write bought nothing. The swap's
-# `rm -rf mods/*` already empties mods/ and drops whatever the new set does
-# not name, so a mod enabled by hand still survives only until the next
-# successful staging run.
+# failed copy leaves the previously enabled mods in place. Nothing in
+# $ROOT/mods is touched until every copy has succeeded: a sync_tree into
+# mods/$name here, or pruning the old tree before the new one is complete,
+# would destroy a working enabled set on a run that then reports the failure.
+#
+# A mod already enabled whose mods-available/ tree is identical is not staged
+# at all: it is already the right bytes in the right place, so copying it into
+# the staging dir only to delete that copy and rename it back in below is
+# write amplification on every deploy, and a redeploy that changed no mod is
+# exactly the case staging skips. Those names are recorded in `kept` instead,
+# and the swap leaves their live trees alone.
 rm -rf "$enabled_staging"
 mkdir -p "$enabled_staging"
-for name in "${NAMES[@]}"; do
-  if [[ -d "$ROOT/mods/$name" ]]; then
-    cp -a "$ROOT/mods/$name" "$enabled_staging/$name"
-  fi
-done
 enabled=0
+kept=()
 for name in "${NAMES[@]}"; do
   if [[ -d "$ROOT/mods-available/$name" ]]; then
-    if ! sync_tree "$ROOT/mods-available/$name" "$enabled_staging/$name"; then
+    if trees_equal "$ROOT/mods-available/$name" "$ROOT/mods/$name"; then
+      kept+=("$name")
+    elif ! sync_tree "$ROOT/mods-available/$name" "$enabled_staging/$name"; then
       rm -rf "$enabled_staging"
       echo "FATAL: failed to enable $name (copy into $enabled_staging failed); $ROOT/mods left unchanged" >&2
       exit 1
@@ -144,9 +143,20 @@ fi
 # yet touched the enabled set. The per-entry renames below are atomic, and each
 # mod is either its old tree or its new one, never a half-written mix. The
 # directory is bind-mounted, so the swap is per entry rather than one rename of
-# mods/ itself. What atomicity does not cover is a rename that fails: see the
-# loop for what that leaves behind.
-rm -rf "$ROOT/mods/"*
+# mods/ itself. A mod named in `kept` is already the staged content, so it
+# survives the wipe untouched and no rename replaces it. What atomicity does
+# not cover is a rename that fails: see the loop for what that leaves behind.
+for d in "$ROOT/mods/"*; do
+  [[ -e "$d" ]] || continue
+  keep=0
+  for name in ${kept[@]+"${kept[@]}"}; do
+    if [[ "$d" == "$ROOT/mods/$name" ]]; then
+      keep=1
+      break
+    fi
+  done
+  (( keep == 0 )) && rm -rf "$d"
+done
 # A rename that fails (disk full, permissions) lands between mods, and the old
 # trees are already gone by then, so the mods not yet moved exist only here.
 # The next run's sweep reclaims $enabled_staging (this PID is gone by then), so
@@ -156,7 +166,7 @@ for d in "$enabled_staging"/*/; do
   [[ -d "$d" ]] || continue
   entry="${d%/}"
   name="${entry##*/}"
-  if ! mv "$entry" "$ROOT/mods/$name"; then
+  if ! mv -f "$entry" "$ROOT/mods/$name"; then
     echo "FATAL: failed to enable $name (mv '$entry' -> '$ROOT/mods/$name'); $ROOT/mods holds only the mods moved before this one, and the rest is in $enabled_staging, which the next staging run sweeps -- re-run $0" >&2
     exit 1
   fi

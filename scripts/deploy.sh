@@ -96,7 +96,10 @@ fi
 # server host (.env travels on purpose so the server-side scripts render and
 # validate the same values). The .scratch* pattern also covers scratch files
 # dropped beside the directory (e.g. .scratch_<name>.sh copies kept for
-# reference).
+# reference). Quoted because the pattern must reach rsync verbatim: unquoted,
+# the shell expands it against the caller's cwd first, so a deploy run from a
+# directory that happens to hold .scratch passes a narrower exclude than the
+# one this script documents.
 # --delay-updates stages every updated file in the receiver's .~tmp~ directory
 # and renames it into place only once the whole transfer finished, so a
 # dropped connection or an rsync killed mid-run cannot leave the server host
@@ -115,7 +118,7 @@ rsync -a --delete --delay-updates --timeout=60 -e "ssh -o ConnectTimeout=10" \
   --exclude __pycache__ \
   --exclude coverage \
   --exclude coverage.cobertura.xml \
-  --exclude .scratch* \
+  --exclude '.scratch*' \
   "$ROOT/" "${SSH_USER}@${HOST}:${DEST_DIR}/" || rsync_rc=$?
 # rsync --delete applies deletions as it goes, so a failed transfer can still
 # leave the server host with fewer files than it started with (--delay-updates

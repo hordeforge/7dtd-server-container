@@ -319,6 +319,26 @@ show_config() { # verdict
   # and where did it come from" without reading three files, and how a
   # misconfiguration gets a name instead of a guess.
   local entry key var value source
+  # Which keys the .env file actually sets, collected in one pass over the
+  # file. Asking per key with a grep subprocess re-read .env once per config
+  # key and forks once per key, for a report that only ever needs the answer
+  # to the same question eight times.
+  local -A in_env=()
+  local eline ekey
+  if [[ -f "$ROOT/.env" ]]; then
+    while IFS= read -r eline || [[ -n "$eline" ]]; do
+      # Same shape load_env_file accepts: an optional `export`, then KEY=.
+      # Leading whitespace is not stripped, because the loader does not strip
+      # it either: such a line is an invalid key it warns about and skips, and
+      # crediting it here would report .env as the source of a value that
+      # never took effect. is_env_key is the loader's own key rule.
+      eline="${eline#export }"
+      [[ "$eline" == *=* ]] || continue
+      ekey="${eline%%=*}"
+      is_env_key "$ekey" || continue
+      in_env["$ekey"]=1
+    done < "$ROOT/.env"
+  fi
   for entry in $CONFIG_KEYS; do
     # Each entry is the config key, plus the variable holding its effective
     # value when that differs from the key itself (BACKUP_KEEP is validated
@@ -347,14 +367,13 @@ show_config() { # verdict
       # Not in the environment: the .env filled it, or a default did. The
       # committed defaults are exactly the values a .env line would carry for
       # these keys, so a key absent from the file is the default. The file was
-      # already read (and key-checked) above when it exists.
-      #
-      # env_file_supplies, not a pattern spelled out here: it replays the
-      # loader's own line walk, so a line the loader skipped (leading
-      # whitespace before the key, say) is not credited to the file. A local
-      # grep with a looser pattern reports the committed default as coming
+      # already read (and key-checked) above when it exists, and the key set
+      # was collected from it once at the top of this function. The collected
+      # set replays the loader's own line walk, so a line the loader skipped
+      # (leading whitespace before the key, say) is not credited to the file.
+      # A grep with a looser pattern reports the committed default as coming
       # from .env, which is the one answer this report must never get wrong.
-      if env_file_supplies "$ROOT/.env" "$key"; then
+      if [[ -n "${in_env[$key]:-}" ]]; then
         source='.env'
       else
         source='default'

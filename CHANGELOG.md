@@ -165,6 +165,19 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   requested value.** The toggle is the config write; the restart only makes
   the game re-read it. Repeating the same command used to cost a world save,
   a shutdown and a boot for no change.
+- **A redeploy that changed no mod no longer rewrites the enabled set.**
+  `stage_mods.sh` seeded its staging dir with a copy of every enabled mod, then
+  diffed the copy against `mods-available/`, then deleted the live tree and
+  renamed the identical copy back in. Every deploy therefore wrote the whole
+  enabled set (tens of megabytes) to produce a byte-identical result. An
+  enabled mod whose `mods-available/` tree is already equal is now left in
+  place and skipped by the swap; a mod whose dist did change is still replaced,
+  a hand-enabled mod is still swept, and a run that fails still leaves the
+  previous set untouched. On a three-mod, 46 MB set a redeploy that changed
+  nothing went from ~2.1 s to ~0.53 s (hyperfine, 8 runs each).
+- `run.sh config` reads `.env` once instead of forking a `grep` per reported
+  key, and `update_mods.sh` strips a mod's name with parameter expansion rather
+  than a `basename` fork per mod.
 
 - **The coverage badge job builds kcov with the runner's own core count.** It
   is compiled from source on every push to main (`--parallel 2` capped a
@@ -281,6 +294,14 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   claims to be reproducible and reproduces nothing. A value too large to be a
   seconds stamp is now refused before podman runs, and a zero-padded one is
   read as decimal rather than as octal.
+- **A `--exclude .scratch*` glob reached rsync pre-expanded.** The pattern was
+  unquoted, so the shell expanded it against the caller's working directory
+  before rsync saw it: a deploy run from a directory that happens to contain
+  `.scratch` passed a narrower exclude than the one the script documents, and
+  one run from an empty directory passed the literal pattern. The pattern is
+  quoted now. `scripts/test_deploy_sh.py` already pinned the full rsync argv
+  and caught this once such a directory existed.
+
 - **A config file with an unusable encoding declaration crashed the XML
   parsers.** `encoding='x-mac-roman'` (an editor that wrote a Mac Roman
   declaration) or `encoding='utf-7'` fails outside `ParseError`: an unknown

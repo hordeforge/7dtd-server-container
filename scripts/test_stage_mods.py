@@ -52,7 +52,7 @@ NAMES = list(SIBLING_OF)
 
 WS_LINE = 'WS="$(cd "$ROOT/.." && pwd)"'
 
-SANDBOX_PATH = resolved_bin_path("bash", "cp", "mv", "rm", "ls", "mkdir", "basename", "dirname")
+SANDBOX_PATH = resolved_bin_path("bash", "cp", "mv", "rm", "ls", "mkdir", "dirname")
 
 
 def fake_dist(ws: Path, name: str, marker: str) -> Path:
@@ -186,6 +186,61 @@ with tempfile.TemporaryDirectory() as tmp:
         "only present dists were enabled",
         sorted(p.name for p in (root / "mods").iterdir()) == ["EfficientServer"],
     )
+
+# A redeploy that changed no mod is the common case, and it must not rewrite
+# the enabled set: staging an already-correct mod only to delete that copy and
+# rename it back in is write amplification on every deploy. A mod whose content
+# did change must still be replaced, and a stale hand-enabled mod must still
+# be swept, so the kept and the replaced paths are exercised together.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    root = make_stage_sandbox(tmpdir / "warm", NAMES)
+    mods = root / "mods"
+    first = run_script(root / "scripts" / "stage_mods.sh", cwd=root, env={})
+    check("warm-up stage exits 0", first.returncode == 0)
+    if first.returncode != 0:
+        print(first.stderr.decode(errors="replace"), file=sys.stderr)
+    inodes = {name: (mods / name).stat().st_ino for name in NAMES}
+
+    second = run_script(root / "scripts" / "stage_mods.sh", cwd=root, env={})
+    check("redeploy with no mod changed exits 0", second.returncode == 0)
+    if second.returncode != 0:
+        print(second.stderr.decode(errors="replace"), file=sys.stderr)
+    check(
+        "an unchanged mod keeps its live tree instead of being recopied",
+        {name: (mods / name).stat().st_ino for name in NAMES} == inodes,
+    )
+    check(
+        "an unchanged mod still holds the staged content",
+        all(
+            (mods / name / "Config" / "config.json").read_text(encoding="utf-8")
+            == f"marker-{name}-{i}"
+            for i, name in enumerate(NAMES)
+        ),
+    )
+
+    # One mod's dist changes: that mod is replaced in place, the others keep
+    # their trees, and a hand-enabled mod is still swept by the same run.
+    changed = "EfficientServer"
+    ws_file = (
+        tmpdir / "warm" / "ws" / SIBLING_OF[changed] / "dist" / changed / "Config" / "config.json"
+    )
+    ws_file.write_text("marker-rebuilt", encoding="utf-8")
+    seeded_mod(mods, "OldMod", "stale")
+    third = run_script(root / "scripts" / "stage_mods.sh", cwd=root, env={})
+    check("stage after a mod rebuild exits 0", third.returncode == 0)
+    if third.returncode != 0:
+        print(third.stderr.decode(errors="replace"), file=sys.stderr)
+    check(
+        "a mod whose dist changed took the new content",
+        (mods / changed / "Config" / "config.json").read_text(encoding="utf-8") == "marker-rebuilt",
+    )
+    check(
+        "a mod whose dist did not change kept its live tree",
+        all((mods / name).stat().st_ino == inodes[name] for name in NAMES if name != changed),
+    )
+    check("a hand-enabled mod is still swept on a redeploy", not (mods / "OldMod").exists())
+    check("staging litter swept on a redeploy", litter_gone(mods))
 
 # The enabled set is the one thing staging must never lose: deploy.sh pushes
 # whatever mods/ holds, so a run that fails part way (or stages nothing at all)

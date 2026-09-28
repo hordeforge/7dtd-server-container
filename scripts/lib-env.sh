@@ -244,9 +244,15 @@ load_env_file() {
 # with no directory at all.
 # Returns nonzero when the copy fails, with no staging entry left behind; the
 # caller owns the message, since each one names a different operation.
+trees_equal() { # src dst; 0 when both trees hold the same content
+  [[ -e "$2" ]] || return 1
+  command -v diff >/dev/null 2>&1 || return 1
+  diff -r -q "$1" "$2" >/dev/null 2>&1
+}
+
 sync_tree() { # src dst
   local src="$1" dst="$2" staging retired
-  if [[ -e "$dst" ]] && command -v diff >/dev/null 2>&1 && diff -r -q "$src" "$dst" >/dev/null 2>&1; then
+  if trees_equal "$src" "$dst"; then
     return 0
   fi
   staging="${dst%/*}/.${dst##*/}.tmp.$$"

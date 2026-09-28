@@ -45,7 +45,11 @@ if [[ -d mods-available ]]; then
   sweep_stale_staging mods
   for d in mods/*/; do
     [[ -d "$d" ]] || continue
-    name="$(basename "$d")"
+    # Parameter expansion, not a basename(1) fork per mod: the loop runs on
+    # every deploy on the server host and the trailing slash is already
+    # stripped by the same `${d%/}` the rest of the lib uses.
+    name="${d%/}"
+    name="${name##*/}"
     if [[ -d "mods-available/$name" ]]; then
       # sync_tree stages through a hidden temp rename, so a cp killed midway
       # (disk full, Ctrl-C) never leaves a half-written mod dir in mods/ for
