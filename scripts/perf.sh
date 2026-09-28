@@ -78,7 +78,18 @@ set_state() {
     exit 1
   fi
   was="$(get_state)"
-  sed -i -E "s/${ENABLED_LINE_RE}(true|false)/  \"Enabled\": $1/" "$CFG"
+  # In-place edit with a portable spelling. GNU sed takes -i bare; BSD sed
+  # (macOS) requires an argument and treats the next word as the backup suffix,
+  # so `sed -i -E` there silently writes an `efficientserver.json-E` litter
+  # file and runs the script in BRE mode, where the alternation does not match
+  # and the verify below reports a format drift that never happened. Probe the
+  # capability (only GNU sed answers --version) rather than the OS name.
+  local edit="s/${ENABLED_LINE_RE}(true|false)/  \"Enabled\": $1/"
+  if sed --version >/dev/null 2>&1; then
+    sed -i -E "$edit" "$CFG"
+  else
+    sed -i '' -E "$edit" "$CFG"
+  fi
   # Verify the edit landed: a config reformatted by a future mod build would
   # make the sed a silent no-op, and restarting the container would change
   # nothing while reporting success.

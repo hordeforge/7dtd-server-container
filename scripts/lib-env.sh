@@ -371,12 +371,28 @@ health_check() { # timeout_seconds (default 5)
   telnet_probe "$TELNET_PORT" "$timeout_secs"
 }
 
+# MD5 hex digest of stdin, printed bare. md5sum(1) is GNU coreutils and does
+# not exist on the macOS workstations the ops scripts also run on, where the
+# same digest is spelled md5(1); probe for whichever is present rather than
+# branching on the OS name. md5sum prints "hash  -", md5 -q prints "hash";
+# the caller strips at the first space, so both forms land there the same.
+md5_hex() {
+  if command -v md5sum >/dev/null 2>&1; then
+    md5sum
+  elif command -v md5 >/dev/null 2>&1; then
+    md5 -q
+  else
+    echo "FATAL: no MD5 digest tool found (need md5sum or md5)" >&2
+    return 1
+  fi
+}
+
 # Render a webadmin password as the base64 MD5 digest the dashboard expects in
 # serveradmin.xml (<user pass="...">). One owner shared by the entrypoint seed
 # path and its test vector, so the two cannot drift apart.
 webadmin_password_digest() { # password; digest on stdout
   local hex
-  hex="$(printf '%s' "$1" | md5sum)"
+  hex="$(printf '%s' "$1" | md5_hex)"
   hex="${hex%% *}"
   printf '%b' "$(printf '%s' "$hex" | sed 's/\(..\)/\\x\1/g')" | base64
 }

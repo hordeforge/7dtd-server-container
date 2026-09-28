@@ -179,6 +179,33 @@ fi
 # the golden vector pins md5("admin") base64 independent of the implementation.
 b64="$(webadmin_password_digest admin)"
 [[ "$b64" == "ISMvKXpXpadDiUoOSoAfww==" ]] || { echo "FAIL: md5-base64 digest vector" >&2; exit 1; }
+# Same vector through the BSD branch: on a macOS workstation md5sum(1) is
+# absent and md5(1) is the only digest tool, so md5_hex must select it and
+# call it the way BSD spells it (-q, no filename). PATH is restricted to a
+# stub dir holding just that tool, which fails on any other argument, so a
+# regression to the md5sum spelling surfaces here instead of on a mac.
+MD5SUM_BIN="$(command -v md5sum || true)"
+mkdir -p "$tmp/bsdpath"
+# Restricted PATH holding exactly the tools the digest renderer needs, with
+# md5sum left out: that is the shape of a stock macOS workstation, where the
+# BSD md5 is the only digest tool on hand. Absolute interpreter and helpers,
+# since the stub cannot look any of them up on the restricted PATH.
+for tool in base64 sed cut cat; do
+  ln -s "$(command -v "$tool")" "$tmp/bsdpath/$tool"
+done
+cat > "$tmp/bsdpath/md5" <<EOF
+#!$(command -v bash)
+[[ "\$1" == "-q" ]] || { echo "stub md5: expected -q, got '\$1'" >&2; exit 1; }
+"$MD5SUM_BIN" | "$(command -v cut)" -d' ' -f1
+EOF
+chmod +x "$tmp/bsdpath/md5"
+b64_bsd="$(PATH="$tmp/bsdpath" "$(command -v bash)" -c 'source "'"$ROOT"'/scripts/lib-env.sh"; webadmin_password_digest admin')"
+[[ "$b64_bsd" == "ISMvKXpXpadDiUoOSoAfww==" ]] || { echo "FAIL: md5-base64 digest vector via BSD md5 (got '$b64_bsd')" >&2; exit 1; }
+# No digest tool at all must fail loudly, not render an empty digest the
+# dashboard would accept as a blank password.
+if PATH="$tmp/bsdpath/empty" webadmin_password_digest admin >/dev/null 2>&1; then
+  echo "FAIL: digest rendered with no md5 tool on PATH" >&2; exit 1
+fi
 echo "webadmin password rules OK"
 
 # Locale independence of the value policy. `[[:print:]]` and `[[:space:]]` are
@@ -362,6 +389,8 @@ start_fake_server() { # received_bytes_path [fake-server args...]
   # restarts would otherwise accumulate a live process per case.
   stop_fake_server
   python3 "$ROOT/scripts/fake-telnet-server.py" 0 "$@" >"$port_file" &
+  # shellcheck disable=SC2031  # false positive: this runs in the function body,
+  # not a subshell, so the EXIT hook in the parent reaps the pid
   server_pid=$!
   for _ in $(seq 1 100); do
     [[ -s "$port_file" ]] && break

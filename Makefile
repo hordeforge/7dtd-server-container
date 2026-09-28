@@ -43,8 +43,11 @@ $(PYBIN)/ruff: requirements-lint.txt
 lint: $(PYBIN)/ruff
 	set -euo pipefail; \
 	for f in $(SCRIPTS); do bash -n "$$f" && echo "bash -n OK: $$f"; done
+	# `|| exit 1`, not `&& echo`: under set -e a failing left side of a && list
+	# is exempt, so the loop ended on the last finding's status without
+	# aborting the recipe and every shellcheck error passed the gate.
 	set -euo pipefail; \
-	for f in $(SCRIPTS); do shellcheck -x "$$f" && echo "shellcheck OK: $$f"; done
+	for f in $(SCRIPTS); do shellcheck -x "$$f" || exit 1; echo "shellcheck OK: $$f"; done
 	set -euo pipefail; \
 	for ref in $$(grep -hoE 'scripts/[-a-z_]+\.sh' $(SCRIPTS) | sort -u); do \
 	  test -f "$$ref" || { echo "missing referenced script: $$ref" >&2; exit 1; }; \

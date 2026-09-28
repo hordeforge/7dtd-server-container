@@ -77,6 +77,47 @@ RUN_STUB = """#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$PERF_STUB_LOG"
 """
 
+# Stand-in for BSD sed (macOS): rejects the GNU-only spellings perf.sh must
+# not use and normalizes the BSD in-place form onto the local sed, so the real
+# edit still lands and only the argument shape is under test. BSD sed has no
+# --version and treats the word after -i as a mandatory backup suffix, so
+# `sed -i -E ...` misparses there instead of editing in place.
+BSD_SED_STUB = """#!/usr/bin/env python3
+import os
+import sys
+
+real_sed = os.environ["PERF_TEST_REAL_SED"]
+if "--version" in sys.argv[1:]:
+    sys.exit(1)
+kept = []
+skip_suffix = False
+for i, arg in enumerate(sys.argv[1:]):
+    if skip_suffix:
+        skip_suffix = False
+        continue
+    if arg == "-i":
+        if i + 1 >= len(sys.argv) - 1 or sys.argv[i + 2].startswith("-"):
+            print("sed: BSD sed -i requires a backup suffix", file=sys.stderr)
+            sys.exit(1)
+        kept.append("-i")
+        skip_suffix = True
+        continue
+    kept.append(arg)
+os.execv(real_sed, [real_sed, *kept])
+"""
+
+
+def make_bsd_sed_stub(root: Path) -> Path:
+    """Write a BSD sed stand-in into the sandbox; return its bin directory."""
+    real_sed = shutil.which("sed")
+    assert real_sed is not None
+    bindir = root / "bsdbin"
+    bindir.mkdir()
+    stub = bindir / "sed"
+    stub.write_text(BSD_SED_STUB)
+    stub.chmod(0o755)
+    return bindir
+
 
 def make_sandbox(tmpdir: Path, config: str | None) -> Path:
     scripts = tmpdir / "scripts"
@@ -158,6 +199,34 @@ with tempfile.TemporaryDirectory() as tmp:
     check(
         "on restarted the container once more (one restart per flip)",
         (root / "restarts.log").read_text(encoding="utf-8") == "restart\nrestart\n",
+    )
+
+    # Same contract under BSD sed (macOS): `sed -i -E` is a GNU spelling, and
+    # BSD sed reads -E as the backup suffix, so the toggle would run in BRE
+    # mode and litter a `efficientserver.json-E` file in the mod dir. The stub
+    # rejects both GNU-only shapes, so only the portable spelling survives.
+    root = make_sandbox(Path(tmp) / "bsd-sed", CONFIG_ON)
+    bsd_bin = make_bsd_sed_stub(root)
+    expect(
+        "off flips the flag under BSD sed",
+        run_perf(
+            ["off"],
+            root,
+            {
+                "PATH": f"{bsd_bin}:/usr/bin:/bin",
+                "PERF_TEST_REAL_SED": shutil.which("sed") or "",
+            },
+        ),
+        "EfficientServer -> false (was on)",
+        0,
+    )
+    check(
+        "BSD sed rewrote only the top-level Enabled flag",
+        cfg_path(root).read_text(encoding="utf-8") == CONFIG_OFF,
+    )
+    check(
+        "BSD sed left no -i backup file behind",
+        sorted(p.name for p in cfg_path(root).parent.iterdir()) == ["efficientserver.json"],
     )
 
     # Negative: off without a config must refuse loudly instead of restarting
