@@ -208,6 +208,17 @@ sync_mods() {
   local mods="$GAME_DIR/Mods"
   mkdir -p "$mods"
   local d name
+  # Reclaim the staging siblings sync_tree creates here (.<name>.tmp.<pid>,
+  # .<name>.tmp.retired.<pid>) whose owning boot is gone, before anything
+  # reads this dir. A boot killed between its cp and its rename (OOM, podman
+  # kill -9, host power loss) has no trap to clean up, and the game loads
+  # every subdirectory of Mods/, so a stranded half-written copy of a staged
+  # mod would boot as a second, broken copy of it on the next start. The
+  # removal loop below is not that sweep: it walks "$mods"/*/ without
+  # dotglob, so a dot-prefixed staging entry is invisible to it, and this
+  # dir is host state (data/game) that outlives the container. Same helper
+  # and same PID rule as the host staging scripts, live in flight included.
+  sweep_stale_staging "$mods"
   # Remove what /mods no longer stages, and nothing else. A mod that is still
   # staged stays put: sync_tree below rewrites it only when its content
   # differs, so an unchanged boot does not delete and recopy every staged mod.

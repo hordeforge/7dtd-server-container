@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import os
 import shutil
 import stat
 import subprocess
@@ -418,6 +419,41 @@ with tempfile.TemporaryDirectory() as tmp:
         "stock 0_TFP_Harmony survives the sweep",
         (game_mods / "0_TFP_Harmony" / "0_TFP_Harmony.dll").exists(),
     )
+
+    # A boot killed between sync_tree's cp and its rename strands its staging
+    # sibling (and, on a failed install, the retired one) in the game's Mods
+    # dir, which is host state that outlives the container and a directory the
+    # game scans for mods. The next boot must reclaim a dead owner's entries
+    # and must not touch a live owner's.
+    stranded = game_mods / ".BotMod.tmp.999999"
+    stranded.mkdir()
+    (stranded / "BotMod.dll").write_text("half-copied", encoding="utf-8")
+    retired = game_mods / ".BotMod.tmp.retired.999999"
+    retired.mkdir()
+    (retired / "BotMod.dll").write_text("previous", encoding="utf-8")
+    # This process is alive, so its PID must shield an in-flight entry the
+    # way it does for the host staging scripts.
+    in_flight = game_mods / f".BotMod.tmp.{os.getpid()}"
+    in_flight.mkdir()
+    sweep_boot = run_entrypoint(root, {})
+    check("boot over stranded staging litter exits 0", sweep_boot.returncode == 0)
+    check(
+        "a staging copy stranded by a killed boot is reclaimed",
+        not stranded.exists(),
+    )
+    check(
+        "a staging tree retired by a failed install is reclaimed",
+        not retired.exists(),
+    )
+    check(
+        "a live owner's staging entry survives the sweep",
+        in_flight.exists(),
+    )
+    check(
+        "no dead owner's staging entry is left in the game's Mods",
+        sorted(p.name for p in game_mods.glob(".*.tmp.*")) == [in_flight.name],
+    )
+    check("the sweep left no temp litter", no_temp_files(game_mods))
 
 exit_status()
 print("entrypoint boot contract OK")

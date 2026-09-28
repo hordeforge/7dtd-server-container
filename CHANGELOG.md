@@ -77,7 +77,11 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   (readable gzip/tar, carries a `Saves/` payload, no entry escaping the
   archive root), a running server is refused, and the saves the restore
   replaces are archived first as a `-prerestore` snapshot, so the operation is
-  reversible and a retried bare `restore` re-applies the same backup. Recovery
+  reversible and a retried bare `restore` re-applies the same backup. A retry
+  that finds the live saves already holding that backup ends as a no-op, with
+  no second pre-restore snapshot, and the archive is unpacked beside `Saves/`
+  and moved into place so a failed extraction leaves the current world intact.
+  Recovery
   steps, RPO and RTO are in the README's "Recovering state" section.
 - **Daily save backup (`systemd/7dtd-backup.{service,timer}`).** A user
   timer runs `run.sh backup` once a day (04:17, up to 10 minutes of jitter)
@@ -259,6 +263,25 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   form, which re-applies the same backup; undoing a restore is still an
   explicit `restore <archive>` naming that snapshot. The snapshots stay in the
   same archive set, so the retention and prune cover them as before.
+- **A retried `run.sh restore` no longer spends a retention slot.** The
+  second run of a retried restore re-applied an archive the live saves
+  already held and still wrote a pre-restore snapshot of that identical
+  world, so seven retries of a recovery evicted the operator's real backups
+  from `backups/` at `BACKUP_KEEP=7`. The restore now compares the extracted
+  archive against `Saves/` (`diff -r -q`, the same content comparison
+  `sync_tree` skips on) and ends with "nothing to restore" when they match.
+- **A failed restore no longer leaves the world half-replaced.** The archive
+  was extracted straight onto `data/userdata` after `rm -rf Saves`, so a
+  truncated archive left an incomplete `Saves/` behind. It is now unpacked
+  into a PID-named staging dir beside `Saves/` and moved into place, and
+  stranded staging dirs from a killed run are swept by the next restore.
+- **A boot killed mid-sync left a half-copied mod in the game's `Mods/`.**
+  `entrypoint.sh` swept the temp files its own renders strand but not the
+  staging siblings `sync_tree` creates, and the removal loop above them walks
+  `Mods/*/` without `dotglob`, so a `.EfficientServer.tmp.<pid>` from an
+  OOM-killed boot stayed in host `data/game` forever, where the game scans it
+  for mods on every start. `sync_mods` now sweeps those entries by owning PID
+  before reading the directory, the same rule the host staging scripts use.
 - **The container health probe reported every server unhealthy.** It ran
   `init_telnet_env`, which exits 1 on an unset `TELNET_PASSWORD`; the quadlet
   unit pins none and the probe runs in its own environment, so the probe

@@ -881,7 +881,9 @@ with tempfile.TemporaryDirectory() as tmp:
 # restore run twice is the operation a retry produces, and it must land on the
 # same world as one run: the pre-restore snapshot the first run leaves behind
 # is the newest archive, so a bare restore that treated it as a target would
-# silently undo the recovery on the second attempt.
+# silently undo the recovery on the second attempt. The second run finds Saves
+# already holding the archive's content, so it takes no second snapshot and
+# spends no retention slot on a no-op.
 with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
     make_sandbox(tmpdir)
@@ -900,6 +902,7 @@ with tempfile.TemporaryDirectory() as tmp:
         check=False,
         timeout=120,
     )
+    archives_after_first = sorted(p.name for p in backups.glob("*.tar.gz"))
     second = subprocess.run(
         [str(tmpdir / "scripts" / "run.sh"), "restore"],
         env=env,
@@ -915,18 +918,30 @@ with tempfile.TemporaryDirectory() as tmp:
         "the second restore left the first one's world in place",
         (saves / "r.0.0.region").read_bytes() == b"new-world",
     )
+    check(
+        "the repeated restore said there was nothing to do",
+        b"nothing to restore" in second.stdout,
+    )
+    check(
+        "the repeated restore wrote no second pre-restore snapshot",
+        sorted(p.name for p in backups.glob("*.tar.gz")) == archives_after_first,
+    )
+    check(
+        "the repeated restore left no staging litter in data/userdata",
+        sorted(p.name for p in (tmpdir / "data" / "userdata").glob(".restore.tmp.*")) == [],
+    )
     snapshots = sorted(backups.glob("7dtd-saves-*-prerestore*.tar.gz"))
     check(
-        "both restores pre-restore snapshots are marked, not plain archives",
-        len(snapshots) == 2,
+        "the restore pre-restore snapshot is marked, not a plain archive",
+        len(snapshots) == 1,
     )
     recoverable = []
     for snapshot in snapshots:
         with tarfile.open(snapshot) as tf:
             recoverable.append(tf.extractfile("Saves/region/r.0.0.region") is not None)
     check(
-        "the pre-restore snapshots stay recoverable as explicit targets",
-        len(recoverable) == 2 and all(recoverable),
+        "the pre-restore snapshot stays recoverable as an explicit target",
+        len(recoverable) == 1 and all(recoverable),
     )
 
 

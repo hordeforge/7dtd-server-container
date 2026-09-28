@@ -247,9 +247,10 @@ this game service and its user account context.
   XML. Recorded as a threat for sec-review, not fixed here.
 - **Denial of service / resource exhaustion:** no size, entry-count, or
   expansion bound is applied before extraction. `tar -tzf` on a small
-  compression bomb still succeeds, and `restore` then `rm -rf`s the live
-  `Saves/` and extracts whatever it produces into `data/userdata`; a failed
-  extraction leaves `Saves/` incomplete (the script says so and exits 1).
+  compression bomb still succeeds, and `restore` then extracts it into a
+  staging dir beside `Saves/` and moves the result into place, so a failed or
+  truncated extraction leaves the live `Saves/` untouched (the script says so
+  and exits 1) but the staging dir still consumes the disk it just filled.
   `BACKUP_KEEP` bounds how many archives accumulate, not how large one is
   (`scripts/run.sh` `KEEP_BACKUPS` validation, `archive_saves` prune).
   Retention only runs on a backup run, so a restore that fills the disk is not
@@ -265,7 +266,7 @@ this game service and its user account context.
 | Shared validation of secret/port/flag values (character class, port range, `{0,1}` domain), enforced identically on host and in container | Injection of secret values through sed/XML rendering and shell quoting; silent fallback to defaults | `scripts/lib-env.sh` `reject_unsafe_value` through `init_steamcmd_env`, baked copy `Containerfile` `COPY scripts/lib-env.sh`, sourced `entrypoint.sh` boot preamble |
 | No-eval `.env` parser with malformed-line warnings, plus refusal of unknown keys before any value applies | Env file as code injection; typo'd keys silently ignored (the loader warning case) and typo'd keys silently *accepted but unused* (the unknown-key case) | `scripts/lib-env.sh` `load_env_file`, `check_env_file_keys`, `ENV_FILE_KEYS` |
 | `run.sh config` prints every effective value with its source and never a secret value | A wrong telnet port or a rejected value discovered only as a boot failure; credential leakage into a shared terminal | `scripts/run.sh` `show_config` |
-| Restore preflight: readable gzip/tar, must carry a `Saves/` payload, no absolute or escaping entry, refused while the server runs, `--no-same-owner`, `umask 077`, pre-restore snapshot | Path-escape or uid-carrying archive writing outside `data/userdata`; a live game overwriting the restored saves; a restore that is itself unrecoverable | `scripts/run.sh` `restore` |
+| Restore preflight: readable gzip/tar, must carry a `Saves/` payload, no absolute or escaping entry, refused while the server runs, `--no-same-owner`, `umask 077`, pre-restore snapshot, extraction into a PID-named staging dir moved into place, no-op when the live saves already hold the archive | Path-escape or uid-carrying archive writing outside `data/userdata`; a live game overwriting the restored saves; a restore that is itself unrecoverable; a retried restore evicting real backups from the retention; a failed extraction leaving a half-replaced world | `scripts/run.sh` `restore` |
 | Owner-only archives, UTC stamps, exclusive create (`noclobber`) for the name, a collision counter whose byte order matches creation order, the prune and the bare restore reading the list in `LC_ALL=C` order, `tar` exit >= 2 deletes the partial, prune to `KEEP_BACKUPS` | Two concurrent backups interleaving gzip into one corrupt archive; a partial archive kept as if valid; a recovery that restores the older of two archives a collided second produced, or prunes the newer one, because the host's locale sorts the name differently; unbounded disk growth from a scheduled backup | `scripts/run.sh` `archive_saves`, `backup_archives` |
 | Digest-buildable base (`ARG BASE_IMAGE`) and reproducible builds (`SOURCE_DATE_EPOCH` -> `podman build --timestamp`, seconds only, bounded above so a millisecond stamp is refused) | Untraceable executed base and unreproducible images; a rebuild of a reported digest that cannot be diffed against the original. Only for a caller that opts in; the default build uses neither | `Containerfile` `ARG BASE_IMAGE`, `scripts/run.sh` `build_image` |
 | `no-new-privileges` on the quadlet path | Setuid escalation inside the container (nothing in this image is setuid today) | `systemd/7dtd-server.container` `PodmanArgs=` |
@@ -273,6 +274,7 @@ this game service and its user account context.
 | Telnet shutdown/saveworld requests bound by a readiness probe and a timeout | A stale session racing a restarting container and sending the password into the wrong listener; an unbounded wait | `scripts/lib-env.sh` `request_telnet`, `telnet_probe`, `scripts/run.sh` `stop`, `backup` |
 | Secrets never in argv; 0600 mktemp env file; EXIT/signal traps; PID-keyed sweep of orphaned secret files | Local disclosure via `/proc/*/cmdline`, stranded credential files | `scripts/run.sh` signal traps, `cleanup_secret_env_file`, `sweep_stale_secret_env_files`, `make_common`, `scripts/lib-env.sh` `telnet_session` |
 | `umask 077` + temp-file + atomic rename + SIGKILL-stranded-temp sweep for credential-bearing renders | Partial/truncated credential files left readable or corrupt on disk | `entrypoint.sh` `render_config`, `seed_admin_file` |
+| PID-keyed sweep of stranded staging siblings in the game's `Mods/` | A half-copied mod left in host `data/game` by a killed boot, loaded by the game as a second broken copy of a staged mod | `entrypoint.sh` `sync_mods`, `scripts/lib-env.sh` `sweep_stale_staging` |
 | Minted webadmin password kept out of logs | Credential leakage into retained journald data | `entrypoint.sh` `seed_admin_file` |
 | Telnet failed-login throttle | Online password guessing rate | `config/serverconfig.tmpl.xml:36-37` (game-enforced) |
 | Graceful stop: telnet save+shutdown, bounded wait, force fallback; wired into systemd `ExecStop` | World-save loss on stop/restart (availability/integrity of the top asset) | `scripts/run.sh` `stop`, `systemd/7dtd-server.container` `ExecStop` |

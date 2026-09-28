@@ -308,7 +308,11 @@ files. The saves it replaces are archived first into `backups/` as
 `7dtd-saves-<UTC stamp>-prerestore.tar.gz`, so a restore is reversible: run
 `restore` against that pre-restore archive by name to go back. The
 no-argument form never picks a `-prerestore` archive, so a retried bare
-`restore` re-applies the same backup instead of undoing the first one. The
+`restore` re-applies the same backup instead of undoing the first one; when the
+live saves already hold that backup's content, the run reports that there is
+nothing to restore and takes no second pre-restore snapshot, so retries cost
+no retention slot. The archive is unpacked beside `Saves/` and moved into
+place, so a failed extraction leaves the current world intact. The
 restored files keep the owner-only mode the archives use
 (`serveradmin.xml` and the webadmin record are credentials).
 

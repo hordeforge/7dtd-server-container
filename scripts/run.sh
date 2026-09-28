@@ -45,7 +45,8 @@ Manage the 7dtd-server podman container; all runtime state lives in ./data
                  (no argument = the newest backup in backups/; the
                  -prerestore snapshots it skips are never picked that
                  way, so a repeated bare restore re-applies the same
-                 archive); archives the current saves first, so a
+                 archive, and one that already holds it is a no-op);
+                 archives the current saves first, so a
                  restore is itself reversible
   version        print the VERSION file (the canonical version home)
 
@@ -725,6 +726,39 @@ restore() {
     exit 1
   fi
   local prerestore_archive=""
+  # Owner-only extraction (umask 077 applies to the restored files too, so
+  # serveradmin.xml and the webadmin record stay ungroup-readable), and
+  # --no-same-owner so an archive carrying a foreign uid cannot chown the
+  # restored tree. It lands in a staging dir beside Saves/ and is moved into
+  # place below, so a failed extraction leaves the current world in place
+  # instead of a half-replaced one. The name carries this run's PID and
+  # matches the `.*.tmp.*` shape the host staging scripts sweep, so a SIGKILL
+  # mid-restore (which skips every trap) is reclaimed by the next restore
+  # rather than accumulating in data/userdata.
+  umask 077
+  local staged="$USERDATA_DIR/.restore.tmp.$$"
+  sweep_stale_staging "$USERDATA_DIR"
+  rm -rf "$staged"
+  mkdir -p "$staged"
+  if ! tar -xzf "$archive" --no-same-owner -C "$staged"; then
+    rm -rf "$staged"
+    echo "FATAL: extraction of $archive failed; $USERDATA_DIR/Saves is unchanged" >&2
+    exit 1
+  fi
+  # A restore is re-run by a retried command, a double-pressed key, or an
+  # operator unsure the first one landed. When Saves already holds the
+  # archive's content, the target state is in place, so the run ends here: no
+  # pre-restore snapshot (each is a retention slot, so a host with
+  # BACKUP_KEEP=7 loses its real backups to seven retried recoveries) and no
+  # rewrite of a world the server may have played on since. diff(1) compares
+  # content, not mtime, the way sync_tree's skip does; where it is missing
+  # the restore runs unconditionally, the behavior this check replaced.
+  if [[ -d "$USERDATA_DIR/Saves" ]] && command -v diff >/dev/null 2>&1 \
+    && diff -r -q "$staged/Saves" "$USERDATA_DIR/Saves" >/dev/null 2>&1; then
+    rm -rf "$staged"
+    echo "$USERDATA_DIR/Saves already holds $archive; nothing to restore"
+    return 0
+  fi
   if [[ -d "$USERDATA_DIR/Saves" ]]; then
     # Pre-restore snapshot: the state the restore is about to discard must
     # itself be recoverable, and it lands in the same owner-only archives the
@@ -735,24 +769,20 @@ restore() {
     archive_saves prerestore
     prerestore_archive="$ARCHIVE_PATH"
   fi
-  # Owner-only extraction (umask 077 applies to the restored files too, so
-  # serveradmin.xml and the webadmin record stay ungroup-readable), and
-  # --no-same-owner so an archive carrying a foreign uid cannot chown the
-  # restored tree.
-  umask 077
   rm -rf "$USERDATA_DIR/Saves"
-  if ! tar -xzf "$archive" --no-same-owner -C "$USERDATA_DIR"; then
+  if ! mv "$staged/Saves" "$USERDATA_DIR/Saves"; then
     # The replacement is already gone by this point, so the failure message
     # carries the way back: the snapshot taken a line ago holds exactly the
     # saves the rm removed, and naming it is the difference between a named
     # recovery and an operator guessing which archive in backups/ it was.
     if [[ -n "$prerestore_archive" ]]; then
-      echo "FATAL: extraction of $archive failed; $USERDATA_DIR/Saves is incomplete -- the saves it replaced are in $prerestore_archive" >&2
+      echo "FATAL: moving $staged/Saves into place failed; $USERDATA_DIR/Saves is incomplete -- the saves it replaced are in $prerestore_archive" >&2
     else
-      echo "FATAL: extraction of $archive failed; $USERDATA_DIR/Saves is incomplete" >&2
+      echo "FATAL: moving $staged/Saves into place failed; $USERDATA_DIR/Saves is incomplete" >&2
     fi
     exit 1
   fi
+  rm -rf "$staged"
   echo "restored $archive into $USERDATA_DIR/Saves (start the server to load it)"
 }
 
