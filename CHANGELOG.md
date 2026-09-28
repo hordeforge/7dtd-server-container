@@ -199,14 +199,30 @@ password character domain, below), so it is a **major** release: 1.1.3 to
 
 ### Changed
 
-- **A staging run keeps an enabled mod whose sibling dist is gone.** An
-  unbuilt or moved sibling repo left the mod in `NAMES` but absent from
-  `mods-available/`, and the swap treated it as outside the new set and deleted
-  the copy already running on the server, so a staging run turned an unbuilt
-  repository into a removed mod. It is now kept, like an unchanged mod, with
-  `WARN: enabled mod <name> not staged (missing in mods-available/); keeping the
-  copy already enabled in mods/`. A mod that was never enabled is still not
-  enabled by the run.
+- **The analyzers read the language version the gate actually runs on.**
+  `pyproject.toml` declared `python_version = "3.10"` for mypy and
+  `target-version = "py310"` for ruff while `.python-version` pins 3.14, the
+  interpreter every gate command runs on. mypy was type checking against
+  semantics the code never sees, and a bump of the pin would have left both
+  analyzers behind. mypy now carries the pin verbatim and ruff targets the
+  floor the helpers must stay valid for; `scripts/test_makefile.py` fails the
+  gate when the two files disagree. ruff sits one minor below the pin because
+  the pinned formatter misformats a parenthesized `except` tuple at py314.
+- **The build context is checked against the COPY list.** Nothing built the
+  image in CI, so a `.dockerignore` rule that dropped a `COPY` source failed
+  only on the server host at `podman build` time. `scripts/test_containerfile.py`
+  now evaluates the ignore rules and fails the gate when a file the image needs
+  is excluded, reading `.containerignore` when it exists because it takes
+  precedence.
+
+- **A staging run drops an enabled mod whose sibling dist is gone.** An
+  unbuilt or moved sibling repo leaves the mod in `NAMES` but absent from
+  `mods-available/`, so nothing in this tree produced the bytes the copy under
+  that name carries. The run stages only what a build actually produced, and
+  such a mod is dropped like any other entry outside the new set, with
+  `WARN: enabled mod <name> not staged (missing in mods-available/); server
+  will start without it` naming it. Build the sibling, or remove the name from
+  `NAMES` in `scripts/stage_mods.sh`, to keep it on the server.
 
 - **The lint gate reads one interpreter version.** `pyproject.toml` checked
   ruff and mypy against Python 3.10 while `.python-version` pinned the

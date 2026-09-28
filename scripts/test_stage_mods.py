@@ -214,17 +214,14 @@ with tempfile.TemporaryDirectory() as tmp:
         sorted(p.name for p in (root / "mods").iterdir()) == ["EfficientServer"],
     )
 
-    # An enabled mod whose sibling dist is gone: the run warns, keeps the copy
-    # already enabled under that name, and still succeeds on the rest. A mod
-    # inside NAMES is the enabled set, and an unbuilt or moved sibling repo is
-    # not a staging run's decision to act on, so the copy survives the swap
-    # exactly like an unchanged mod does (the swap would otherwise wipe it as
-    # outside the new set). The warning names the mod so the operator sees what
-    # is running unbuilt. The warning says which of the two it is: kept when
-    # there is a tree, dropped when there is not. A mod that was never enabled
-    # is still not enabled here: the missing-dist case above starts from an
-    # empty mods/, so nothing is enabled yet and that branch is unreachable
-    # there.
+    # An enabled mod whose sibling dist is gone: the run warns, drops the copy
+    # the server is running, and still succeeds on the rest. A run ships what
+    # it staged, so a mod no current build produced is not carried forward under
+    # its own name: the swap below would delete it as outside the new set
+    # anyway, and the only way to know it went is the warning naming it. A mod
+    # that was never enabled is still not enabled here: the missing-dist case
+    # above starts from an empty mods/, so nothing is enabled yet and that
+    # branch is unreachable there.
     root = make_stage_sandbox(tmpdir / "unstaged", ["EfficientServer"])
     seeded_mod(root / "mods", "BotMod", "live-bot")
     proc = run_script(root / "scripts" / "stage_mods.sh", cwd=root, env={})
@@ -237,17 +234,13 @@ with tempfile.TemporaryDirectory() as tmp:
         and "keeping the copy already enabled" in err,
     )
     check(
-        "the warning says the enabled copy is kept, not dropped",
-        "enabled mod BotMod not staged (missing in mods-available/); keeping the copy" in err,
+        "the warning says the server starts without the mod",
+        "enabled mod BotMod not staged (missing in mods-available/); server will start without it"
+        in err,
     )
     check(
-        "the unstageable mod stays enabled and the staged one joins it",
-        sorted(p.name for p in (root / "mods").iterdir()) == ["BotMod", "EfficientServer"],
-    )
-    check(
-        "the kept mod keeps the bytes the server is already running",
-        (root / "mods" / "BotMod" / "Config" / "config.json").read_text(encoding="utf-8")
-        == "live-bot",
+        "the unstageable mod is dropped and the staged one is enabled alone",
+        sorted(p.name for p in (root / "mods").iterdir()) == ["EfficientServer"],
     )
     check(
         "the unstageable mod is not staged into mods-available/",
