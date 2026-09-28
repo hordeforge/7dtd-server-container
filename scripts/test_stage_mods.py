@@ -228,19 +228,15 @@ with tempfile.TemporaryDirectory() as tmp:
     err = proc.stderr.decode(errors="replace")
     check("stage with an unstaged enabled mod exits 0", proc.returncode == 0)
     check(
-        "the unstaged enabled mod is named on stderr as kept",
+        "the unstaged enabled mod is named on stderr",
         "WARN" in err
         and "enabled mod BotMod not staged" in err
-        and "keeping the copy already enabled" in err,
+        and "server will start without it" in err,
     )
     check(
-        "the warning says the server starts without the mod",
-        "enabled mod BotMod not staged (missing in mods-available/); server will start without it"
-        in err,
-    )
-    check(
-        "the unstageable mod is dropped and the staged one is enabled alone",
-        sorted(p.name for p in (root / "mods").iterdir()) == ["EfficientServer"],
+        "the unstageable enabled mod is dropped, not carried forward",
+        sorted(p.name for p in (root / "mods").iterdir()) == ["EfficientServer"]
+        and not (root / "mods" / "BotMod").exists(),
     )
     check(
         "the unstageable mod is not staged into mods-available/",

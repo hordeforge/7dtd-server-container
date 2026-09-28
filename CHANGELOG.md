@@ -12,9 +12,11 @@ releases never got one.
 
 ## [Unreleased]
 
-This batch carries a breaking change to a documented config value (the
-password character domain, below), so it is a **major** release: 1.1.3 to
-2.0.0. `VERSION` and the tag gate are bumped at release time, not here.
+This batch carries breaking changes to a documented default and to what a
+host may put in `.env` (the telnet password fallback, the unknown-key
+refusal, and the password character domain, all below), so it is a **major**
+release: 1.1.3 to 2.0.0. `VERSION` and the tag gate are bumped at release
+time, not here.
 
 ### Breaking changes
 
@@ -38,6 +40,51 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   untouched, and the rule is the same one the pre-existing metacharacter
   exclusions already enforced. The full policy is in README, "Server
   configuration".
+
+- **The committed telnet password is opt-in, not a fallback.** Before this
+  release, a host with no `TELNET_PASSWORD` in `.env` and none in the
+  environment fell back to the committed `retest` value with a warning on
+  stderr, and the quadlet unit, which pins no password, booted the same way:
+  a telnet console on every interface, under a password published in this
+  repository. The warning was the whole control, and a warning in a log an
+  operator reads days later is not one. A telnet console is full server
+  control (`shutdown`, `admin add`, `setgamepref`), so the fallback is gone:
+  `ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD` is a `{0,1}` switch and the default
+  (`0`) refuses the boot, on the host and in the container alike.
+
+  Before: unset `TELNET_PASSWORD` meant `retest`, behind a warning nobody is
+  required to read.
+  After: unset `TELNET_PASSWORD` fails the run with `FATAL: TELNET_PASSWORD
+  unset. Set a private value in .env or the environment; ...`, from
+  `scripts/run.sh` before any container work and from the entrypoint when the
+  quadlet unit pins no password.
+  `Environment=ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD=1` in that unit is the
+  only way the container starts without a password of its own.
+
+  **Upgrade:** a host that already set a private `TELNET_PASSWORD` (the case
+  the fallback existed for) changes nothing. A host running the lab on the
+  public default adds `ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD=1` to `.env`, or
+  the matching `Environment=` line to the unit, before its next deploy; a
+  value outside `0`/`1` is refused rather than read as "no", so
+  `=true` fails loud instead of silently meaning `0`. `.env.example` ships
+  the switch set to `0`, and README "Server configuration" states the rule.
+
+- **An unknown key in `.env` is refused, not ignored.** The loader always
+  skipped a key it did not recognize, and a skipped key is invisible: a host
+  carrying its own variable, or a key renamed in a later release, kept
+  booting on a value nobody had set. The complete key set is now a list
+  (`ENV_FILE_KEYS` in `scripts/lib-env.sh`, and `.env.example` documents each
+  key), and a line whose key is not in it fails the run before any value is
+  applied. A key that is not shaped like a key at all (`TELNET_PASSWORD
+  hunter2`, a forgotten `=`) is still the loader's warning to raise, not this
+  failure.
+
+  Before: `MY_OWN_KEY=1` in `.env` was loaded and ignored, every run.
+  After: `scripts/run.sh` and `scripts/perf.sh` exit 1 with
+  `FATAL: .env: unknown key 'MY_OWN_KEY'; this project configures only: ...`.
+
+  **Upgrade:** delete the key, or rename it to the key this repository
+  documents. Nothing reads a value a skipped key could have supplied.
 
 ### Added
 
@@ -78,6 +125,45 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   silence, so the health log podman keeps for each probe was empty and
   `unhealthy` arrived with no cause anywhere; it now names the port it probed
   and the bound it exceeded (a passing probe still prints nothing).
+- **`run.sh config`, the effective configuration of a host with the source of
+  every value.** "Which telnet port is this host actually using, and where did
+  it come from" meant reading three files by hand, and a misconfigured value
+  had no name: it surfaced as a container that would not start. The command
+  prints each key with its value, where the value came from (environment,
+  `.env`, or the committed default), and whether the value rules accept it.
+  Secret values are never printed, only set or unset: the two secret keys are
+  named outright instead of being matched as `*PASSWORD*`. It reports a
+  rejected value rather than dying on it, so a value that fails the rules has
+  a verdict ("values rejected: ...") instead of an exit, which is what makes it
+  a usable diagnostic. It runs after the `.env` load, so an unknown key still
+  refuses the run instead of appearing in the report; that refusal names the
+  key and the whole key set, so the report is not where it is looked up.
+  README "Server configuration" and `run.sh --help` document it.
+
+- **State-mutating `run.sh` commands serialize on one lock.** The daily backup
+  timer, the unit's `ExecStop` and an operator at the keyboard all reach the
+  host on their own schedule, and each command's guard is a check-then-act
+  that its own next line invalidates: a `backup` tar runs straight through a
+  `restore`'s `rm -rf Saves` and writes an archive of a half-deleted,
+  half-extracted tree that the prune then keeps, and `install-only` and
+  `start` share the same hazard over `data/game`, where steamcmd rewrites the
+  depot in place. `start`, `run`, `restart`, `install-only`, `stop`, `backup`
+  and `restore` now take an exclusive `flock` on `data/.ops.lock` (in `data/`,
+  so it is not visible through a bind mount and a quadlet-started container
+  can never contend for it). Nested calls are free. The read-only commands
+  (`logs`, `status`, `config`, `verify-backup`) and `build` never wait, and a
+  host with no `flock(1)` warns once and runs unguarded rather than refusing
+  to start a server.
+
+  A command that finds the lock held says it is waiting, waits up to 120
+  seconds, then exits 1 without touching anything. That is a new failure an
+  operator can hit: a queued command behind a long `install-only` download
+  (or a wedged podman) gives up rather than hanging, and the message names
+  the lock file and the usual holder. 120s is under every bound that would
+  kill a waiting caller anyway (the backup unit's `TimeoutStartSec=300`, the
+  quadlet's `TimeoutStopSec=180`). README "Recovering state" documents the
+  lock and its wait.
+
 - **A scheduled readability check on the save archives.** A backup that exited
   0 is a claim about the file it wrote that day, not proof the file is still
   good; a truncated off-host copy, a dropped tail or an archive nobody pruned
