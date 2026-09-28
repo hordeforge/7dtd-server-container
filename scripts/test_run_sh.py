@@ -70,6 +70,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime
+import fcntl
 import os
 import re
 import shutil
@@ -1424,18 +1425,20 @@ with tempfile.TemporaryDirectory() as tmp:
         )
     # A leading zero is a plain count, not an octal literal: 08 must prune to
     # eight archives, not abort the run inside the prune arithmetic.
-    for padded in ("08", "09", "0007", "007"):
+    for padded_keep in ("08", "09", "0007", "007"):
         proc = subprocess.run(
             [str(run_sh), "config"],
-            env={**env, "BACKUP_KEEP": padded},
+            env={**env, "BACKUP_KEEP": padded_keep},
             capture_output=True,
             check=False,
             timeout=30,
         )
         check(
-            f"BACKUP_KEEP={padded!r} is read in base 10",
+            f"BACKUP_KEEP={padded_keep!r} is read in base 10",
             proc.returncode == 0
-            and re.search(rf"^BACKUP_KEEP\s+{int(padded)}\s", proc.stdout.decode(), re.MULTILINE)
+            and re.search(
+                rf"^BACKUP_KEEP\s+{int(padded_keep)}\s", proc.stdout.decode(), re.MULTILINE
+            )
             is not None,
         )
     proc = subprocess.run(
@@ -1721,6 +1724,62 @@ with tempfile.TemporaryDirectory() as tmp:
         "verify-backup with no archives refuses loudly",
         proc.returncode == 1 and b"no backup archive" in out,
     )
+
+
+# The daily backup timer, a systemd-driven stop (the quadlet ExecStop runs
+# `run.sh stop`) and an operator's restore all reach the host independently, and
+# nothing in the scripts excluded one another: backup()'s tar and restore()'s
+# `rm -rf Saves` + extract interleave into a half-deleted, half-extracted tree
+# that tar still writes as a usable-looking archive. run.sh serializes every
+# command that writes data/ or backups/ on one flock, so a second one waits
+# instead of interleaving.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    make_sandbox(tmpdir)
+    install_podman_stub(tmpdir, PODMAN_STUB)
+    saves = tmpdir / "data" / "userdata" / "Saves" / "region"
+    saves.mkdir(parents=True)
+    (saves / "r.0.0.region").write_bytes(b"world")
+    backups = tmpdir / "backups"
+    backups.mkdir(parents=True)
+    lock_env = stub_env(tmpdir)
+    run_sh = tmpdir / "scripts" / "run.sh"
+
+    # The lock lives in the sandbox data/ dir, and a read-only command must not
+    # queue behind it: `status` only reads podman's state.
+    lock = tmpdir / "data" / ".ops.lock"
+    lock.touch()
+    holder = lock.open("r+b")
+    fcntl.flock(holder.fileno(), fcntl.LOCK_EX)
+    try:
+        proc = subprocess.run(
+            [str(run_sh), "status"],
+            env=lock_env,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+        check("a read-only command does not wait on the ops lock", proc.returncode == 0)
+
+        waiter = subprocess.Popen(
+            [str(run_sh), "backup"],
+            env=lock_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        # Held lock, live child: it must still be running and must not have
+        # written an archive, which is the whole point of the lock.
+        time.sleep(2)
+        check("a mutating command waits instead of running", waiter.poll() is None)
+        check("the waiting command wrote no archive", not list(backups.iterdir()))
+    finally:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
+        holder.close()
+
+    _out, err = waiter.communicate(timeout=120)
+    check("the queued backup succeeds once the lock is free", waiter.returncode == 0)
+    check("the queued backup says what it waited for", b"waiting:" in err)
+    check("the queued backup wrote its archive", len(list(backups.iterdir())) == 1)
 
 exit_status()
 print("run.sh secret-transport and build contract OK")

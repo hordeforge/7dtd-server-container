@@ -63,6 +63,12 @@ variables already present in the environment win over it, defaults come last.
 An unknown key in .env is refused. deploy.sh reads SEVENDTD_SERVER_HOST,
 SEVENDTD_SERVER_USER and SEVENDTD_SERVER_DIR from the environment.
 
+Every command that writes data/, backups/ or the container (start, run,
+restart, install-only, stop, backup, restore) takes one exclusive lock on
+data/.ops.lock first, so the daily backup timer, a systemd-driven stop and an
+operator command cannot interleave. A command that finds the lock held waits
+up to 120s and then fails without touching anything.
+
 Exit codes: 0 success, 2 usage error (unknown command or a stray argument),
 1 a failed operation or a rejected configuration value.
 EOF
@@ -215,8 +221,9 @@ KEEP_BACKUPS="${BACKUP_KEEP:-7}"
 # past the rules below and then failed inside the prune arithmetic, leaving
 # the excess unset and every archive kept. Strip the padding here, in the main
 # shell, so the value the report prints, the check accepts and the prune
-# subtracts are one number. A non-numeric value is left alone so
-# check_backup_keep can name what the operator actually wrote.
+# subtracts are one number. All zeros collapse to 0, below the minimum, and a
+# non-numeric value is left alone so check_backup_keep can name what the
+# operator actually wrote.
 normalize_backup_keep() {
   KEEP_BACKUPS="${KEEP_BACKUPS#"${KEEP_BACKUPS%%[!0]*}"}"
   KEEP_BACKUPS="${KEEP_BACKUPS:-0}"
@@ -427,6 +434,67 @@ fi
 check_env_values
 
 mkdir -p "$GAME_DIR" "$USERDATA_DIR" "$ROOT/mods" "$ROOT/config"
+
+# One exclusive lock over the commands that mutate host state (data/,
+# backups/, the container). These commands are not mutually excluded by
+# anything else: the daily backup timer fires on its own schedule, the quadlet
+# unit calls `run.sh stop` from systemd, and an operator types `run.sh
+# restore` whenever. Two of those at once is a real interleaving, and each
+# one's guard is a check-then-act that its own next line invalidates.
+#
+# The worst pairing is the daily timer and an operator recovery: backup() tars
+# data/userdata/Saves while restore() runs `rm -rf Saves` and extracts over it,
+# so the archive lands holding a half-deleted, half-extracted tree (tar exits
+# 0 or 1, and the prune keeps it), and the operator's recovery path now points
+# at a corrupt archive. install-only and start share the same hazard over
+# data/game, where steamcmd rewrites the depot in place.
+#
+# flock(1) on one file descriptor, so the kernel releases it when the process
+# exits for any reason, including a signal the traps above do not catch: no
+# stale lock file to reclaim, no PID keying, and no way for a killed run to
+# strand the next one. Fixed descriptor 9 rather than `exec {fd}>` because the
+# ops scripts still run on the bash 3.2 that ships with macOS. The lock lives
+# in data/ (git-ignored, created just above) and not in data/game/, so it is
+# not visible through a bind mount inside a container: a container booted by
+# the quadlet unit can never contend for a lock a host command is holding.
+#
+# Nested calls are free: start() calls stop(), and restore() takes a
+# pre-restore archive, so both re-enter commands that lock. OPS_LOCK_HELD makes
+# the second acquisition a no-op, which a second flock on a fresh descriptor
+# for the same file would not be (that is this process blocking on itself).
+#
+# 120s is under every bound that can kill a waiting caller anyway: the backup
+# service's TimeoutStartSec=300 and the quadlet's TimeoutStopSec=180. Past it
+# the holder is an install-only mid-download or a wedged podman, and failing
+# loud beats hanging a command whose supervisor has already given up on it.
+LOCK_FILE="$ROOT/data/.ops.lock"
+LOCK_WAIT_SECS=120
+OPS_LOCK_HELD=0
+acquire_ops_lock() {
+  if (( OPS_LOCK_HELD )); then
+    return 0
+  fi
+  # No flock(1) (the macOS workstations; util-linux does not ship it there).
+  # Say so rather than run unguarded in silence: the server host is Linux and
+  # has it, so the guard there is the container_running check alone.
+  if ! command -v flock >/dev/null 2>&1; then
+    echo "WARN: flock(1) not found; concurrent run.sh commands are not serialized on this host" >&2
+    OPS_LOCK_HELD=1
+    return 0
+  fi
+  exec 9>"$LOCK_FILE"
+  # Non-blocking probe first so the "waiting" line names only the runs that
+  # actually queued behind another one.
+  if ! flock -n 9; then
+    echo "waiting: another run.sh command is mutating data/ or backups/ (up to ${LOCK_WAIT_SECS}s)" >&2
+    if ! flock -w "$LOCK_WAIT_SECS" 9; then
+      exec 9>&-
+      echo "FATAL: another run.sh command has held $LOCK_FILE for ${LOCK_WAIT_SECS}s; not touching data/ or backups/ (a long install-only download is the usual holder)" >&2
+      exit 1
+    fi
+  fi
+  OPS_LOCK_HELD=1
+}
 
 # Shared container env + mounts.
 make_common() {
@@ -978,13 +1046,24 @@ case "$COMMAND" in
   # The one canonical version home (REPOSITORY_STANDARDS.md section 8); the
   # release workflow refuses a tag that disagrees with it.
   version)      cat "$ROOT/VERSION" ;;
-  # start() opens with the graceful stop, so restarting needs nothing else.
-  start|run|restart)
-                start ;;
-  install-only) install_only ;;
-  stop)         stop ;;
-  backup)       backup ;;
-  restore)      restore "${2:-}" ;;
+  # Everything below mutates data/, backups/ or the container, so every one of
+  # them serializes on the ops lock. The read-only commands (logs, status,
+  # config, verify-backup) and the image build do not: they change nothing
+  # another run could observe mid-flight. `config` has already exited above.
+  start|run|restart|install-only|stop|backup|restore)
+                acquire_ops_lock
+                case "$COMMAND" in
+                  # start() opens with the graceful stop, so restarting needs
+                  # nothing else.
+                  start|run|restart) start ;;
+                  install-only)      install_only ;;
+                  stop)              stop ;;
+                  backup)            backup ;;
+                  restore)           restore "${2:-}" ;;
+                esac
+                ;;
+  # verify-backup only reads backups/: it restores nothing and writes no
+  # archive of its own, so it never contends for the lock.
   verify-backup) verify_backup "${2:-}" ;;
   logs)         podman logs -f "$NAME" ;;
   # Anchor the name filter: podman treats it as a regex, and unanchored it

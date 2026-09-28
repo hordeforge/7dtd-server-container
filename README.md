@@ -317,6 +317,16 @@ exits 1 when an archive is unreadable or the newest one is older than three
 days, which means the backup schedule stopped running. The exit code of the
 `backup` run that wrote a file is not evidence the file is still good.
 
+Every command that writes `data/`, `backups/` or the container (`start`,
+`run`, `restart`, `install-only`, `stop`, `backup`, `restore`) takes one
+exclusive lock on `data/.ops.lock` first. The daily timer, the unit's
+`ExecStop` and an operator at the keyboard all reach the host on their own
+schedule, and without the lock a `backup` tar runs straight through a
+`restore`'s `rm -rf Saves`. A command that finds the lock held waits up to
+120 seconds, says it is waiting, then gives up without touching anything. The
+read-only commands (`logs`, `status`, `config`, `verify-backup`) and `build`
+never wait.
+
 `restore` verifies the archive (readable gzip/tar, carries a `Saves/`
 payload, no entry escaping the archive root) before it touches anything, and
 refuses while the server runs, because the game would write over the restored
