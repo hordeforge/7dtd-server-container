@@ -383,8 +383,15 @@ archive_saves() {
   archive="$BACKUP_DIR/7dtd-saves-$stamp.tar.gz"
   # One stamp per second, so a backup immediately followed by a pre-restore
   # archive would otherwise overwrite the first with the state the operator
-  # is about to discard.
-  while [[ -e "$archive" ]]; do
+  # is about to discard. The name is claimed with an exclusive create, not
+  # tested for: `[[ -e ]]` then `tar -czf` is a check-then-act, and two runs
+  # inside one second (the daily timer and an operator backup, or a backup and
+  # restore's pre-restore archive) both passed the test and then gzipped into
+  # the same path, interleaving two gzip streams into one corrupt archive that
+  # each run then pruned as if it were its own. noclobber opens with O_EXCL, so
+  # exactly one run wins a name and the loser moves on to the next. tar
+  # truncates the reserved inode; the umask 077 above already gave it 0600.
+  while ! ( set -o noclobber; : > "$archive" ) 2>/dev/null; do
     n=$(( n + 1 ))
     archive="$BACKUP_DIR/7dtd-saves-$stamp-$n.tar.gz"
   done

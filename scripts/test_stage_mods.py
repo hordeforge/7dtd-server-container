@@ -112,12 +112,24 @@ def run_script(
     )
 
 
-def tmp_litter(directory: Path, owner: str) -> None:
+def dead_pid() -> int:
+    """A PID no process owns, so the sweep must reclaim its entries.
+
+    Reaped, not merely exited: an unreaped zombie still answers kill -0, which
+    is the same liveness test the sweep applies.
+    """
+    proc = subprocess.Popen(["true"])
+    proc.wait()
+    return proc.pid
+
+
+def tmp_litter(directory: Path, owner: str, pid: int) -> Path:
     """A leftover staging entry as a killed cp would strand it."""
     directory.mkdir(parents=True, exist_ok=True)
-    litter = directory / f".{owner}.tmp.999"
+    litter = directory / f".{owner}.tmp.{pid}"
     litter.mkdir()
     (litter / "half-written").write_text("junk", encoding="utf-8")
+    return litter
 
 
 def litter_gone(*dirs: Path) -> bool:
@@ -136,10 +148,16 @@ with tempfile.TemporaryDirectory() as tmp:
     mods = root / "mods"
     mods_available = root / "mods-available"
 
-    # A stale hand-enabled mod and stranded staging entries must not survive.
+    # A stale hand-enabled mod and stranded staging entries must not survive,
+    # but a live owner's in-flight entry must: the sweep runs on every stage,
+    # so a blanket rm of the `.*.tmp.*` shape would delete a concurrent run's
+    # tree between its cp and its rename.
     seeded_mod(mods, "OldMod", "stale")
-    tmp_litter(mods, "EfficientServer")
-    tmp_litter(mods_available, "BotMod")
+    dead_a = tmp_litter(mods, "EfficientServer", dead_pid())
+    dead_b = tmp_litter(mods_available, "BotMod", dead_pid())
+    live = tmp_litter(mods, "7dtd-server-apm-bridge", os.getpid())
+    retired = mods / f".EfficientServer.tmp.retired.{os.getpid()}"
+    retired.mkdir()
 
     proc = run_script(root / "scripts" / "stage_mods.sh", cwd=root, env={})
     err = proc.stderr.decode(errors="replace")
@@ -148,7 +166,7 @@ with tempfile.TemporaryDirectory() as tmp:
         print(err, file=sys.stderr)
     check(
         "mods carries exactly the owned NAMES set",
-        sorted(p.name for p in mods.iterdir()) == sorted(NAMES),
+        sorted(p.name for p in mods.iterdir() if not p.name.startswith(".")) == sorted(NAMES),
     )
     check(
         "staged mods are real copies (marker files landed)",
@@ -159,6 +177,16 @@ with tempfile.TemporaryDirectory() as tmp:
         ),
     )
     check("stale hand-enabled mod was wiped", not (mods / "OldMod").exists())
+    check("dead owners' staging litter swept from both directories", not dead_a.exists())
+    check("dead owners' staging litter swept from mods-available too", not dead_b.exists())
+    check(
+        "a live owner's in-flight staging entry is left alone",
+        live.is_dir() and retired.is_dir(),
+    )
+    # The entries just planted stand in for concurrent runs; drop them so the
+    # cases below start from a clean tree.
+    shutil.rmtree(live)
+    shutil.rmtree(retired)
     check("staging litter swept from both directories", litter_gone(mods, mods_available))
 
     # A missing sibling dist warns but must not block the other mods.
@@ -286,7 +314,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # Staged but never enabled: update restages what is already enabled in
     # mods/, so a mods-available-only mod must not sneak in.
     seeded_mod(mods_available, "NotEnabled", "not-enabled")
-    tmp_litter(mods, "BotMod")
+    tmp_litter(mods, "BotMod", dead_pid())
 
     proc = run_script(scripts / "update_mods.sh", cwd=root, env={"UPD_STUB_LOG": str(stub_log)})
     err = proc.stderr.decode(errors="replace")

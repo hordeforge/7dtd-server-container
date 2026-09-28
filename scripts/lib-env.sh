@@ -141,25 +141,83 @@ load_env_file() {
 # this helper replaced.
 #
 # Atomicity is the caller's contract and lives here: the copy lands in a
-# hidden sibling (missed by the staging scripts' `.*.tmp.*` sweep and by the
-# entrypoint's copy loop) and is renamed into place, so a cp killed midway
-# (disk full, Ctrl-C, container killed) never leaves a half-written mod dir.
+# hidden sibling and is renamed into place, so a cp killed midway (disk full,
+# Ctrl-C, container killed) never leaves a half-written mod dir.
+#
+# The install is two renames, not a remove-then-rename. `rm -rf "$dst"` before
+# the rename put the destructive step first: the destination was gone for the
+# whole cost of the rm, and a rename that then failed (ENOSPC, EIO, EPERM)
+# left neither the old tree nor the new one, exactly the loss the staging
+# design exists to prevent. So the current tree is renamed aside to a second
+# hidden sibling first and deleted only after the new one is in place, and a
+# failed install renames the old tree back. Both sibling names match the
+# `.*.tmp.*` shape the staging scripts sweep (each carries this PID), and a
+# concurrent reader sees the swap as a single rename rather than a long window
+# with no directory at all.
 # Returns nonzero when the copy fails, with no staging entry left behind; the
 # caller owns the message, since each one names a different operation.
 sync_tree() { # src dst
-  local src="$1" dst="$2" staging
+  local src="$1" dst="$2" staging retired
   if [[ -e "$dst" ]] && command -v diff >/dev/null 2>&1 && diff -r -q "$src" "$dst" >/dev/null 2>&1; then
     return 0
   fi
   staging="${dst%/*}/.${dst##*/}.tmp.$$"
+  retired="${dst%/*}/.${dst##*/}.tmp.retired.$$"
   mkdir -p "${dst%/*}"
-  rm -rf "$staging"
+  rm -rf "$staging" "$retired"
   if ! cp -a "$src" "$staging"; then
     rm -rf "$staging"
     return 1
   fi
-  rm -rf "$dst"
-  mv "$staging" "$dst"
+  # Only a destination that actually exists has to be retired; mv of a missing
+  # path is the one failure here that must not abort the install.
+  if [[ -e "$dst" ]] && ! mv "$dst" "$retired"; then
+    rm -rf "$staging"
+    return 1
+  fi
+  if ! mv "$staging" "$dst"; then
+    # Put the previous tree back rather than leave the destination empty.
+    if [[ -e "$retired" ]] && ! mv "$retired" "$dst"; then
+      echo "FATAL: sync_tree: install of $src into $dst failed and $retired could not be moved back" >&2
+    fi
+    rm -rf "$staging"
+    return 1
+  fi
+  rm -rf "$retired"
+}
+
+# Reclaim staging siblings (`.<name>.tmp.<pid>`, the shape sync_tree and the
+# staging scripts create) whose owning PID is gone.
+#
+# A blanket rm of the shape is not safe, because those entries are in-flight
+# work, not litter. stage_mods.sh and update_mods.sh each sweep on every run
+# (deploy.sh calls the first, the second restages), so a second run sweeping
+# while the first sits between its cp and its rename deletes the tree the
+# first is about to install; it also deletes the tree sync_tree just retired,
+# which is the only copy left if that install then fails. Keying on the owner
+# PID, the way run.sh's secret-file sweep already does, reclaims what a killed
+# run stranded and leaves a live run alone. The PID is the last dot-separated
+# field, which covers both `.<name>.tmp.<pid>` and sync_tree's
+# `.<name>.tmp.retired.<pid>`. A PID recycled to an unrelated process shields
+# one entry until that process exits.
+sweep_stale_staging() { # dir...
+  local dir f base pid restore_nullglob=0
+  shopt -q nullglob || restore_nullglob=1
+  shopt -s nullglob
+  for dir in "$@"; do
+    dir="${dir%/}"
+    for f in "$dir"/.*.tmp.*; do
+      base="${f##*/}"
+      pid="${base##*.}"
+      [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
+      if ! kill -0 "$pid" 2>/dev/null; then
+        rm -rf -- "$f" 2>/dev/null || true
+      fi
+    done
+  done
+  if (( restore_nullglob == 1 )); then
+    shopt -u nullglob
+  fi
 }
 
 # Shared character policy for values that travel through double-quoted shell

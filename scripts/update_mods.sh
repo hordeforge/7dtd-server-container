@@ -36,8 +36,10 @@ require_argc 0 usage "${2:-${1:-}}"
 if [[ -d mods-available ]]; then
   # Sweep staging leftovers from a previously killed run: hidden, so the
   # mods/*/ loop and the entrypoint's cp of /mods/. would otherwise carry
-  # them into the game's Mods dir as litter.
-  rm -rf mods/.*.tmp.* 2>/dev/null || true
+  # them into the game's Mods dir as litter. Keyed on the owning PID, so a
+  # concurrent restage's in-flight entries survive the sweep
+  # (sweep_stale_staging).
+  sweep_stale_staging mods
   for d in mods/*/; do
     [[ -d "$d" ]] || continue
     name="$(basename "$d")"

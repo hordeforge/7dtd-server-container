@@ -587,6 +587,49 @@ with tempfile.TemporaryDirectory() as tmp:
         b"--env-file" not in (tmpdir / "podman-argv.log").read_bytes(),
     )
 
+# Two backups in the same second (the daily timer and an operator's own
+# backup, or a backup and restore's pre-restore archive) must claim distinct
+# archive names. The name used to be picked with `[[ -e ]]` and then written
+# by tar, a check-then-act: both runs passed the test and gzipped into one
+# path, interleaving two streams into an archive neither could read.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    make_sandbox(tmpdir)
+    install_podman_stub(tmpdir, PODMAN_STUB)
+    saves = tmpdir / "data" / "userdata" / "Saves"
+    (saves / "region").mkdir(parents=True)
+    (saves / "region" / "r.0.0.region").write_bytes(b"chunkdata")
+    backups = tmpdir / "backups"
+    backups.mkdir()
+    env = stub_env(tmpdir)
+    racing = [
+        subprocess.Popen(
+            [str(tmpdir / "scripts" / "run.sh"), "backup"],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        for _ in range(4)
+    ]
+    for racer in racing:
+        _, racer_err = racer.communicate(timeout=120)
+        check("concurrent backup exits 0", racer.returncode == 0)
+        if racer.returncode != 0:
+            print(racer_err.decode(errors="replace"), file=sys.stderr)
+    archives = sorted(backups.glob("7dtd-saves-*.tar.gz"))
+    check("concurrent backups claimed distinct names", len(archives) == len(racing))
+    for archive in archives:
+        try:
+            with tarfile.open(archive) as tf:
+                names = tf.getnames()
+        except tarfile.TarError as exc:
+            check(f"{archive.name} is a readable archive ({exc})", False)
+            continue
+        check(
+            f"{archive.name} holds the planted save, not an interleaved stream",
+            "Saves/region/r.0.0.region" in names,
+        )
+
 
 # backup() stamp zone: the prune reads it as the age sort key, so it has to be
 # the instant (UTC), not the host wall clock. In a zone with a nonzero offset

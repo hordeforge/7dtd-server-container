@@ -75,8 +75,9 @@ enabled_staging="$ROOT/mods/.enabled.tmp.$$"
 # Sweep staging leftovers from a previously killed run (both dirs): hidden,
 # so the wipes and globs below would keep them, and mods/ is bind-mounted,
 # so its litter would reach the game's Mods dir (the entrypoint copies
-# /mods/. including dot entries).
-rm -rf "$ROOT/mods-available/".*.tmp.* "$ROOT/mods/".*.tmp.* 2>/dev/null || true
+# /mods/. including dot entries). Keyed on the owning PID, so a concurrent
+# staging run's in-flight entries survive the sweep (sweep_stale_staging).
+sweep_stale_staging "$ROOT/mods-available" "$ROOT/mods"
 for i in "${!NAMES[@]}"; do
   name="${NAMES[$i]}"
   src="${SRCS[$i]}"
@@ -98,9 +99,10 @@ done
 # failed copy leaves the previously enabled mods in place. Staging starts as a
 # copy of the currently enabled set, so sync_tree still finds an identical
 # tree to skip on a redeploy that changed no mod. Nothing in $ROOT/mods is
-# touched until every copy has succeeded: pruning the old tree before the new
-# one is complete (or rewriting a named mod in place) would destroy a working
-# enabled set on a run that then reports the failure, and the swap's
+# touched until every copy has succeeded: a sync_tree into mods/$name here, or
+# pruning the old tree before the new one is complete, would destroy a working
+# enabled set on a run that then reports the failure, and the swap below
+# overwrites mods/ wholesale anyway, so that write bought nothing. The swap's
 # `rm -rf mods/*` already empties mods/ and drops whatever the new set does
 # not name, so a mod enabled by hand still survives only until the next
 # successful staging run.
@@ -132,10 +134,15 @@ if (( enabled == 0 )); then
   echo "FATAL: none of the enabled mods are staged in $ROOT/mods-available (${NAMES[*]}); $ROOT/mods left unchanged" >&2
   exit 1
 fi
-# Everything in mods/ outside the new set is wiped here and nowhere earlier:
-# a sweep before staging would remove a previously enabled mod from a run that
-# then failed, leaving the tree with less than it started with. The staged set
-# is complete by now, so the swap cannot lose anything.
+# The swap. Everything in mods/ outside the new set is wiped here and nowhere
+# earlier: a sweep before staging would remove a previously enabled mod from a
+# run that then failed, leaving the tree with less than it started with, and
+# the staged set is complete by now, so the swap cannot lose anything. That is
+# what makes the FATAL above true: a run that fails to stage anything has not
+# yet touched the enabled set. The per-entry renames below are atomic, and each
+# mod is either its old tree or its new one, never a half-written mix. The
+# directory is bind-mounted, so the swap is per entry rather than one rename of
+# mods/ itself.
 rm -rf "$ROOT/mods/"*
 for d in "$enabled_staging"/*/; do
   [[ -d "$d" ]] || continue
