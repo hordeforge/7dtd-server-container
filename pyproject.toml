@@ -69,4 +69,8 @@ enable_error_code = [
     "truthy-function",
     "str-bytes-safe",
     "narrowed-type-not-subtype",
+    "explicit-override",  # @override on overriding methods
+    "redundant-cast",     # casts that assert nothing
+    "unused-awaitable",   # awaited coroutines whose result is dropped
+    "truthy-iterable",    # a collection used as a boolean
 ]

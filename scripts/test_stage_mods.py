@@ -201,18 +201,18 @@ with tempfile.TemporaryDirectory() as tmp:
     seeded_mod(mods, "EfficientServer", "live-efficient")
     seeded_mod(mods, "BotMod", "live-bot")
     script = root / "scripts" / "stage_mods.sh"
-    enable_copy = 'cp -a "$ROOT/mods-available/$name" "$enabled_staging/$name"'
+    enable_step = 'sync_tree "$ROOT/mods-available/$name" "$enabled_staging/$name"'
     src = script.read_text(encoding="utf-8")
-    if enable_copy not in src:
+    if enable_step not in src:
         print(
-            f"FAIL: stage_mods.sh enable copy drifted: {enable_copy!r} not found",
+            f"FAIL: stage_mods.sh enable step drifted: {enable_step!r} not found",
             file=sys.stderr,
         )
         sys.exit(1)
     script.write_text(
         src.replace(
-            enable_copy,
-            f'{{ if [[ "$name" != BotMod ]]; then {enable_copy}; else false; fi }}',
+            enable_step,
+            f'{{ if [[ "$name" != BotMod ]]; then {enable_step}; else false; fi }}',
         ),
         encoding="utf-8",
     )

@@ -94,23 +94,31 @@ for i in "${!NAMES[@]}"; do
 done
 
 # The new set is staged here and swapped in below, so a failed copy leaves the
-# previously enabled mods in place. Nothing touches $ROOT/mods before the swap:
+# previously enabled mods in place. Staging starts as a copy of the currently
+# enabled set, so sync_tree still finds an identical tree to skip on a
+# redeploy that changed no mod. Nothing touches $ROOT/mods before the swap:
 # wiping the stale entries or rewriting a named mod in place would destroy a
 # working enabled set on a run that then reports the failure, and the swap's
 # `rm -rf` already drops whatever the new set does not name, so a mod enabled
 # by hand still survives only until the next successful staging run.
 rm -rf "$enabled_staging"
 mkdir -p "$enabled_staging"
+for name in "${NAMES[@]}"; do
+  if [[ -d "$ROOT/mods/$name" ]]; then
+    cp -a "$ROOT/mods/$name" "$enabled_staging/$name"
+  fi
+done
 enabled=0
 for name in "${NAMES[@]}"; do
-  if [[ ! -d "$ROOT/mods-available/$name" ]]; then
+  if [[ -d "$ROOT/mods-available/$name" ]]; then
+    if ! sync_tree "$ROOT/mods-available/$name" "$enabled_staging/$name"; then
+      rm -rf "$enabled_staging"
+      echo "FATAL: failed to enable $name (copy into $enabled_staging failed); $ROOT/mods left unchanged" >&2
+      exit 1
+    fi
+  else
     echo "WARN: enabled mod $name not staged (missing in mods-available/); server will start without it" >&2
     continue
-  fi
-  if ! cp -a "$ROOT/mods-available/$name" "$enabled_staging/$name"; then
-    rm -rf "$enabled_staging"
-    echo "FATAL: failed to enable $name (copy into $enabled_staging failed); $ROOT/mods left unchanged" >&2
-    exit 1
   fi
   enabled=$((enabled + 1))
 done
@@ -121,6 +129,10 @@ if (( enabled == 0 )); then
   echo "FATAL: none of the enabled mods are staged in $ROOT/mods-available (${NAMES[*]}); $ROOT/mods left unchanged" >&2
   exit 1
 fi
+# Everything in mods/ outside the new set is wiped here and nowhere earlier:
+# a sweep before staging would remove a previously enabled mod from a run that
+# then failed, leaving the tree with less than it started with. The staged set
+# is complete by now, so the swap cannot lose anything.
 rm -rf "$ROOT/mods/"*
 for d in "$enabled_staging"/*/; do
   [[ -d "$d" ]] || continue
