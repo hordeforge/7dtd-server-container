@@ -39,8 +39,11 @@ Manage the 7dtd-server podman container; all runtime state lives in ./data
   status         show container state (default with no command)
   backup         archive world saves into backups/ (keeps the newest 7)
   restore        replace data/userdata/Saves with a backup archive
-                 (no argument = the newest in backups/); archives the
-                 current saves first, so a restore is itself reversible
+                 (no argument = the newest backup in backups/; the
+                 -prerestore snapshots it skips are never picked that
+                 way, so a repeated bare restore re-applies the same
+                 archive); archives the current saves first, so a
+                 restore is itself reversible
   version        print the VERSION file (the canonical version home)
 
 Env overrides: TELNET_PASSWORD, TELNET_PORT, WEBADMIN_PASSWORD,
@@ -110,6 +113,13 @@ GAME_DIR="$ROOT/data/game"
 USERDATA_DIR="$ROOT/data/userdata"
 BACKUP_DIR="$ROOT/backups"
 KEEP_BACKUPS=7
+# Name marker for the snapshot restore() takes of the saves it is about to
+# replace. It keeps that snapshot out of the newest-by-default restore target:
+# a bare `restore` run twice would otherwise pick its own pre-restore snapshot
+# the second time and silently undo the first, which is the one result a
+# repeated recovery must never produce. Undoing a restore stays possible by
+# naming the archive explicitly.
+PRERESTORE_SUFFIX=prerestore
 
 # Load the git-ignored .env (precedence as documented in the lib header).
 # Values are data, never executed, and an explicit override such as
@@ -370,17 +380,23 @@ archive_saves() {
   # oldest beyond KEEP_BACKUPS. Shared by backup() (the operator's own
   # snapshot) and restore() (the pre-restore snapshot, so a restore is
   # reversible), which is why the live-save telnet request lives in backup().
+  # The one argument names the kind: a pre-restore snapshot carries the
+  # PRERESTORE_SUFFIX marker so restore()'s newest-by-default pick can skip it.
   mkdir -p "$BACKUP_DIR"
   # The archive carries serveradmin.xml and the .webadmin-password record from
   # Saves/, so it gets the entrypoint's credential-file treatment: owner-only.
   umask 077
-  local stamp archive tar_rc=0 n=0
+  local stamp stem archive tar_rc=0 n=0
   # UTC, because the prune below reads the stamp as the age sort key. A local
   # stamp repeats across a fall-back transition (two archives, one name, the
   # second overwriting the first) and reorders after a host TZ change, so a
   # newer save can be pruned as the oldest.
   stamp="$(date -u +%Y%m%d-%H%M%S)"
-  archive="$BACKUP_DIR/7dtd-saves-$stamp.tar.gz"
+  stem="7dtd-saves-$stamp"
+  if [[ "${1:-}" == "prerestore" ]]; then
+    stem="$stem-$PRERESTORE_SUFFIX"
+  fi
+  archive="$BACKUP_DIR/$stem.tar.gz"
   # One stamp per second, so a backup immediately followed by a pre-restore
   # archive would otherwise overwrite the first with the state the operator
   # is about to discard. The name is claimed with an exclusive create, not
@@ -393,7 +409,7 @@ archive_saves() {
   # truncates the reserved inode; the umask 077 above already gave it 0600.
   while ! ( set -o noclobber; : > "$archive" ) 2>/dev/null; do
     n=$(( n + 1 ))
-    archive="$BACKUP_DIR/7dtd-saves-$stamp-$n.tar.gz"
+    archive="$BACKUP_DIR/$stem-$n.tar.gz"
   done
   # GNU tar exits 1 for warnings alone (a file changed as it was read, which
   # happens when the game writes during a live backup): keep that archive and
@@ -462,12 +478,21 @@ restore() {
   # and preserves the current saves first, so a restore is reversible.
   local archive="${1:-}"
   if [[ -z "$archive" ]]; then
-    local candidates=()
+    local candidates=() c
     shopt -s nullglob
-    candidates=("$BACKUP_DIR"/7dtd-saves-*.tar.gz)
+    for c in "$BACKUP_DIR"/7dtd-saves-*.tar.gz; do
+      # A pre-restore snapshot holds the state a restore discarded, never a
+      # recovery target for a bare restore: picking it (it is the newest
+      # archive the first restore left behind) makes a second `restore` revert
+      # the first. The prune still counts these, so they age out with the rest.
+      case "${c##*/}" in
+        *-"$PRERESTORE_SUFFIX".tar.gz|*-"$PRERESTORE_SUFFIX"-*.tar.gz) continue ;;
+      esac
+      candidates+=("$c")
+    done
     shopt -u nullglob
     if (( ${#candidates[@]} == 0 )); then
-      echo "FATAL: no backup archive in $BACKUP_DIR to restore" >&2
+      echo "FATAL: no backup archive in $BACKUP_DIR to restore (a pre-restore snapshot is not a target; name one explicitly to undo a restore)" >&2
       exit 1
     fi
     # UTC stamps sort lexicographically, so glob order is age order: the last
@@ -509,9 +534,11 @@ restore() {
   if [[ -d "$USERDATA_DIR/Saves" ]]; then
     # Pre-restore snapshot: the state the restore is about to discard must
     # itself be recoverable, and it lands in the same owner-only archives the
-    # retention keeps.
+    # retention keeps. It is marked so the bare restore above never selects it,
+    # which is what makes a repeated bare restore re-apply the same archive
+    # instead of undoing itself.
     echo "archiving the current saves before overwriting them ..."
-    archive_saves
+    archive_saves prerestore
   fi
   # Owner-only extraction (umask 077 applies to the restored files too, so
   # serveradmin.xml and the webadmin record stay ungroup-readable), and

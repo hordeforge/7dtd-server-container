@@ -55,7 +55,8 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   `backups/`, an argument names one. The archive is verified first
   (readable gzip/tar, carries a `Saves/` payload, no entry escaping the
   archive root), a running server is refused, and the saves the restore
-  replaces are archived first, so the operation is reversible. Recovery
+  replaces are archived first as a `-prerestore` snapshot, so the operation is
+  reversible and a retried bare `restore` re-applies the same backup. Recovery
   steps, RPO and RTO are in the README's "Recovering state" section.
 - **Daily save backup (`systemd/7dtd-backup.{service,timer}`).** A user
   timer runs `run.sh backup` once a day (04:17, up to 10 minutes of jitter)
@@ -114,18 +115,36 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   removed on every exit path, and a run that only stops or backs up reclaims
   files stranded by an earlier SIGKILL.
 
+- **`perf.sh on|off` skips the restart when the flag already holds the
+  requested value.** The toggle is the config write; the restart only makes
+  the game re-read it. Repeating the same command used to cost a world save,
+  a shutdown and a boot for no change.
+
 ### Fixed
 
-- **Every `run.sh` command died before doing anything.** The stale-secret
-  sweep ran above its own definition, so bash reported
-  `sweep_stale_secret_env_files: command not found` and `set -e` ended the run
-  at once. The definition now precedes the call.
 - **A failed staging run no longer wipes the enabled mods.** `stage_mods.sh`
   pruned `mods/` down to the owned set before the replacement set was built,
   so a run that then failed (no sibling dist staged, or a failed enable copy)
   left the previously enabled mods deleted, contradicting the "left
   unchanged" message it printed. The new set is now built entirely in the
   staging dir and the swap is what drops a mod the set no longer names.
+- **A repeated bare `run.sh restore` no longer undoes itself.** The pre-restore
+  snapshot it writes is the newest archive, so the second run of a retried
+  restore picked it and reverted the recovery. Those snapshots are now named
+  `7dtd-saves-<UTC stamp>-prerestore.tar.gz` and skipped by the no-argument
+  form, which re-applies the same backup; undoing a restore is still an
+  explicit `restore <archive>` naming that snapshot. The snapshots stay in the
+  same archive set, so the retention and prune cover them as before.
+- **The container health probe reported every server unhealthy.** It ran
+  `init_telnet_env`, which exits 1 on an unset `TELNET_PASSWORD`; the quadlet
+  unit pins none and the probe runs in its own environment, so the probe
+  always failed. It now applies the same default port and the same port check
+  without the password gate, which the probe never needed (it only opens a
+  TCP connect).
+- **Every `run.sh` command died before doing anything.** The stale-secret
+  sweep ran above its own definition, so bash reported
+  `sweep_stale_secret_env_files: command not found` (exit 127) and `set -e`
+  ended the run at once. The definition now precedes the call.
 - **Backup archive stamps are UTC.** `run.sh backup` named archives with the
   host wall clock while the prune read that name as the age order, so a
   fall-back DST transition could repeat a stamp (one archive overwriting the

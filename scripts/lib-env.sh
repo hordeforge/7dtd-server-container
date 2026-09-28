@@ -18,6 +18,12 @@
 # offender, then the caller's usage, on stderr. All run before any setup side
 # effect, so a typo surfaces as a usage error even when the environment itself
 # is broken.
+#
+# Committed lab defaults, one home each: init_telnet_env applies them where a
+# telnet value is consumed, and health_check applies the same port default so
+# the probe cannot drift from the port init_telnet_env owns.
+DEFAULT_TELNET_PORT=8087
+DEFAULT_TELNET_PASSWORD=retest
 require_argc() { # max_args extra_argv usage_fn
   local max="$1" usage_fn="$2" extra="$3"
   if [[ -n "$extra" ]]; then
@@ -347,8 +353,8 @@ init_telnet_env() {
     fi
     echo "WARN: TELNET_PASSWORD unset; falling back to the public lab default (opted in via ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD=1)." >&2
   fi
-  TELNET_PASSWORD="${TELNET_PASSWORD:-retest}"
-  TELNET_PORT="${TELNET_PORT:-8087}"
+  TELNET_PASSWORD="${TELNET_PASSWORD:-$DEFAULT_TELNET_PASSWORD}"
+  TELNET_PORT="${TELNET_PORT:-$DEFAULT_TELNET_PORT}"
   reject_unsafe_value TELNET_PASSWORD "$TELNET_PASSWORD"
   check_telnet_port
 }
@@ -435,15 +441,19 @@ request_telnet() { # reply_var command timeout_secs
 
 # Container health probe: is the game actually serving its telnet console
 # right now. Exits 0 when the endpoint accepts a connection, nonzero
-# otherwise. Sources its own port from init_telnet_env so a container started
-# with no telnet environment (the quadlet unit pins none) still probes the
-# port the entrypoint defaulted to. telnet_probe only opens a TCP connect, so
-# the password never leaves the container on this path; init_telnet_env's
-# default warning is silenced here because a health check runs every minute
-# and its output is the container log, not an operator-facing report.
+# otherwise. telnet_probe only opens a TCP connect, so the password never
+# leaves the container on this path.
+#
+# The port comes from the same default and the same check init_telnet_env
+# applies, but the password gate does not run here: the probe executes as a
+# bare `bash -c` inside the container, where a unit pinning no
+# TELNET_PASSWORD (the quadlet) leaves it unset, and init_telnet_env then
+# exits 1 on the unset password, so every healthy server would report
+# unhealthy forever.
 health_check() { # timeout_seconds (default 5)
   local timeout_secs="${1:-5}"
-  init_telnet_env 2>/dev/null
+  TELNET_PORT="${TELNET_PORT:-$DEFAULT_TELNET_PORT}"
+  check_telnet_port
   telnet_probe "$TELNET_PORT" "$timeout_secs"
 }
 

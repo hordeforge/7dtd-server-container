@@ -21,7 +21,9 @@ usage: perf.sh {on|off|status|measure}
 
 Toggle the EfficientServer (perf) mod and observe its effects.
   on | off    set the top-level Enabled flag in the staged mod config and
-              restart the container (the mod reads it at game boot)
+              restart the container (the mod reads it at game boot); a
+              command that asks for the state the config already has
+              changes nothing and does not restart
   status      print the current toggle state (default with no command)
   measure     capture an `apm status` snapshot from the telnet console
 
@@ -97,7 +99,20 @@ set_state() {
     echo "FATAL: failed to set top-level \"Enabled\": $1 in $CFG (state after edit: $(get_state)); config format changed?" >&2
     exit 1
   fi
-  echo "EfficientServer -> $1 (was $was)"
+  # An already-set flag needs no restart: the toggle is the config write, and
+  # the restart exists to make the game re-read it. Restarting anyway costs a
+  # telnet save + shutdown + boot for nothing, so a repeated `perf.sh on` (a
+  # retried command, an operator double-pressing it) is a no-op instead of a
+  # second world save and container bounce.
+  local target_word=on
+  [[ "$1" == "false" ]] && target_word=off
+  if [[ "$was" == "$target_word" ]]; then
+    echo "EfficientServer already $was; no config change, container not restarted"
+    TOGGLE_CHANGED=0
+  else
+    echo "EfficientServer -> $1 (was $was)"
+    TOGGLE_CHANGED=1
+  fi
 }
 
 case "$COMMAND" in
@@ -105,7 +120,9 @@ case "$COMMAND" in
     flag=true
     [[ "$COMMAND" == off ]] && flag=false
     set_state "$flag"
-    ./scripts/run.sh restart
+    if (( TOGGLE_CHANGED )); then
+      ./scripts/run.sh restart
+    fi
     ;;
   status)
     state="$(get_state || true)"

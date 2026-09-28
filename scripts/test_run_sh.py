@@ -55,7 +55,9 @@ few archives; its contract runs against a sandboxed copy of the tree:
 restore() is the other half of it, so it runs against the same sandbox:
 newest-by-default and explicit-archive selection, a pre-restore snapshot of
 the replaced saves, and loud refusals (running server, no archives, corrupt
-or payload-free archive) that leave data/userdata untouched.
+or payload-free archive) that leave data/userdata untouched. A second bare
+restore re-applies the same archive rather than its own pre-restore snapshot,
+which is what a retried recovery produces.
 
 build is the artifact command: podman stamps layer mtimes with the wall-clock
 time unless --timestamp says otherwise, so the build forwards SOURCE_DATE_EPOCH
@@ -836,6 +838,89 @@ with tempfile.TemporaryDirectory() as tmp:
     check(
         "restore never stops or starts the server",
         {rec[0] for rec in stub_invocations(tmpdir / "podman-argv.log") if rec} == {b"ps"},
+    )
+
+
+# restore run twice is the operation a retry produces, and it must land on the
+# same world as one run: the pre-restore snapshot the first run leaves behind
+# is the newest archive, so a bare restore that treated it as a target would
+# silently undo the recovery on the second attempt.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    make_sandbox(tmpdir)
+    install_podman_stub(tmpdir, PODMAN_STUB)
+    saves = tmpdir / "data" / "userdata" / "Saves" / "region"
+    saves.mkdir(parents=True)
+    (saves / "r.0.0.region").write_bytes(b"current-world")
+    backups = tmpdir / "backups"
+    plant_archive(backups / "7dtd-saves-20200101-000000.tar.gz", b"old-world")
+    plant_archive(backups / "7dtd-saves-20200102-000000.tar.gz", b"new-world")
+    env = stub_env(tmpdir)
+    first = subprocess.run(
+        [str(tmpdir / "scripts" / "run.sh"), "restore"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    second = subprocess.run(
+        [str(tmpdir / "scripts" / "run.sh"), "restore"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    check("restore run twice exits 0 both times", first.returncode == second.returncode == 0)
+    for proc in (first, second):
+        if proc.returncode != 0:
+            print(proc.stderr.decode(errors="replace"), file=sys.stderr)
+    check(
+        "the second restore left the first one's world in place",
+        (saves / "r.0.0.region").read_bytes() == b"new-world",
+    )
+    snapshots = sorted(backups.glob("7dtd-saves-*-prerestore*.tar.gz"))
+    check(
+        "both restores pre-restore snapshots are marked, not plain archives",
+        len(snapshots) == 2,
+    )
+    recoverable = []
+    for snapshot in snapshots:
+        with tarfile.open(snapshot) as tf:
+            recoverable.append(tf.extractfile("Saves/region/r.0.0.region") is not None)
+    check(
+        "the pre-restore snapshots stay recoverable as explicit targets",
+        len(recoverable) == 2 and all(recoverable),
+    )
+
+
+# A backups/ holding nothing but pre-restore snapshots has no recovery target,
+# so a bare restore refuses instead of restoring the state a restore discarded.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    make_sandbox(tmpdir)
+    install_podman_stub(tmpdir, PODMAN_STUB)
+    saves = tmpdir / "data" / "userdata" / "Saves" / "region"
+    saves.mkdir(parents=True)
+    (saves / "r.0.0.region").write_bytes(b"current-world")
+    plant_archive(
+        tmpdir / "backups" / "7dtd-saves-20200101-000000-prerestore.tar.gz", b"current-world"
+    )
+    env = stub_env(tmpdir)
+    proc = subprocess.run(
+        [str(tmpdir / "scripts" / "run.sh"), "restore"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    out = proc.stdout + proc.stderr
+    check(
+        "restore with only pre-restore snapshots refuses",
+        proc.returncode != 0 and b"no backup archive" in out,
+    )
+    check(
+        "the refused restore left the saves alone",
+        (saves / "r.0.0.region").read_bytes() == b"current-world",
     )
 
 

@@ -107,7 +107,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("the good file ahead of the bad one was reported", str(good).encode() in r.stdout)
     r = run(str(malformed), str(good))
     check("a bad first file fails the batch too", r.returncode == 1)
-    check("the batch stops at the first bad file", str(good).encode() not in r.stdout)
+    check("a bad first file does not cut the batch short", str(good).encode() in r.stdout)
 
     # A bad file must not cut the batch short: every file is reported, so the
     # operator sees all the breakage in one run instead of one file per fix.

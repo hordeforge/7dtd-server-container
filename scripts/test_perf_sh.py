@@ -14,6 +14,8 @@ top-level and nested "Enabled" flags; then:
   off        rewrites only the top-level flag byte-exactly, leaves every
              nested flag untouched, reports (was <old>), and restarts once
   on         same contract in reverse
+  repeat     the same toggle again (a retried command) rewrites nothing and
+             does not restart the container
   negatives  off without a config, and off against a config whose format
              drifted out of the sed's reach, must fatal-exit naming the
              cause and must not restart the container
@@ -202,6 +204,24 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     check(
         "on restarted the container once more (one restart per flip)",
+        (root / "restarts.log").read_text(encoding="utf-8") == "restart\nrestart\n",
+    )
+
+    # Repeating the same toggle is what a retried command does: the config
+    # already holds the requested state, so the second run must neither
+    # rewrite it nor pay for another save + shutdown + boot.
+    expect(
+        "repeating on reports the no-op",
+        run_perf(["on"], root),
+        "EfficientServer already on; no config change, container not restarted",
+        0,
+    )
+    check(
+        "the repeated toggle rewrote nothing",
+        cfg_path(root).read_text(encoding="utf-8") == CONFIG_ON,
+    )
+    check(
+        "the repeated toggle did not restart the container",
         (root / "restarts.log").read_text(encoding="utf-8") == "restart\nrestart\n",
     )
 

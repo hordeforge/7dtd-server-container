@@ -255,9 +255,12 @@ Restoring:
 `restore` verifies the archive (readable gzip/tar, carries a `Saves/`
 payload, no entry escaping the archive root) before it touches anything, and
 refuses while the server runs, because the game would write over the restored
-files. The saves it replaces are archived first into `backups/`, so a restore
-is reversible: run `restore` again against that pre-restore archive to go
-back. The restored files keep the owner-only mode the archives use
+files. The saves it replaces are archived first into `backups/` as
+`7dtd-saves-<UTC stamp>-prerestore.tar.gz`, so a restore is reversible: run
+`restore` against that pre-restore archive by name to go back. The
+no-argument form never picks a `-prerestore` archive, so a retried bare
+`restore` re-applies the same backup instead of undoing the first one. The
+restored files keep the owner-only mode the archives use
 (`serveradmin.xml` and the webadmin record are credentials).
 
 - **RPO:** the time since the last backup. With `7dtd-backup.timer` enabled
