@@ -7,7 +7,9 @@ Game engine internals and mod source live in sibling repos and are modeled
 here only at the boundaries this harness creates. Point vulnerabilities go to
 sec-review with the references below; this document aims those passes.
 
-Last reviewed: 2026-09-28 against VERSION 1.1.3 (previous pass 2026-08-26).
+Last reviewed: 2026-09-28 against VERSION 1.1.3, re-verified the same day
+after the weekly backup-verification job and the `data/.ops.lock` command
+serialization landed (previous full pass 2026-08-26).
 Re-run this review whenever the surface changes: new listener, new mount, new
 script, new env variable. Owner and review cadence are organizational
 decisions, noted here as open items, not invented.
@@ -40,14 +42,16 @@ each binds every interface on 192.168.0.100.
 
 | Entry point | Defined | Authn | Notes |
 |---|---|---|---|
-| Game protocol 26900 + LiteNetLib data 26902 (UDP/TCP) | `config/serverconfig.tmpl.xml:15-18` | None: `ServerPassword` empty (line 9), no whitelist (`serveradmin_seed.xml` `<whitelist>`), `ServerVisibility=2` public listing (line 16) | EAC deliberately off (rule 3, AGENTS.md; line 47); modified clients accepted surface |
+| Game protocol 26900 (`ServerPort`), plus the LiteNetLib data port 26902 the docs name for loadgen bots | `config/serverconfig.tmpl.xml:15` (26900 only); `README.md` and `AGENTS.md` Ports tables (26902) | None: `ServerPassword` empty (line 9), no whitelist (`serveradmin_seed.xml` `<whitelist>`), `ServerVisibility=2` public listing (line 16) | EAC deliberately off (rule 3, AGENTS.md; line 47); modified clients accepted surface. No template line configures 26902, so that number rests on the docs, not on this tree: the data port is reachable on whatever the game opens beside `ServerPort` and the loadgen bots, and this repository neither pins nor firewalls it |
 | Web dashboard 8080 (stock dashboard + APM panel + BotMod API) | `config/serverconfig.tmpl.xml:28-31`; modules per `MODS.md` | Webuser login; digest rendered from `WEBADMIN_PASSWORD` or a minted random value (`entrypoint.sh` `render_config`, `seed_admin_file`, `scripts/lib-env.sh` `webadmin_password_digest`) | Documented panel actions: perf toggle + restart, `GET/POST /api/bot` (`MODS.md` perf card and Bot section) |
 | Telnet console `TELNET_PORT` (default 8087) | `config/serverconfig.tmpl.xml:33-37`; port default `scripts/lib-env.sh` `init_telnet_env` | Password (`TELNET_PASSWORD`); failed-login throttle 10 wrong / 10 s block (lines 36-37) | With a password set the game listens on all interfaces (line 35 semantics, `scripts/lib-env.sh` `init_telnet_env`); unset falls back to the public lab default, not loopback-only |
-| Ops CLIs on the server host | `scripts/run.sh`, `scripts/perf.sh`, `scripts/update_mods.sh`, `start.sh`, `stop.sh` | Local file access to the checkout and `.env` | Subcommands and flags are the CLI surface; values validated by `init_telnet_env`/`init_steamcmd_env`. `run.sh` also takes an operator-supplied file operand: `restore [archive]` (`scripts/run.sh` `require_optional_arg`, `restore`) |
+| Ops CLIs on the server host | `scripts/run.sh`, `scripts/perf.sh`, `scripts/update_mods.sh`, `start.sh`, `stop.sh` | Local file access to the checkout and `.env` | Subcommands and flags are the CLI surface; values validated by `init_telnet_env`/`init_steamcmd_env`. `run.sh` also takes an operator-supplied file operand: `restore [archive]` and `verify-backup [archive]` (`scripts/run.sh` `require_optional_arg`, dispatch `case`); a second word to any other command is a usage error |
+| Host IPC: the `data/.ops.lock` command lock | `scripts/run.sh` `acquire_ops_lock`, `LOCK_FILE`, `LOCK_WAIT_SECS` | None: an `flock(2)` advisory lock on a file, held by whoever got there first | Every state-mutating command (`start`, `run`, `restart`, `install-only`, `stop`, `backup`, `restore`) takes it before touching `data/`, `backups/`, or the container; the read-only commands and `build` never wait (`scripts/run.sh` dispatch `case`). Advisory, not enforced by the filesystem: nothing stops a process that does not call the lock, and a host without `flock(1)` warns and proceeds unguarded |
+| Scheduled job: weekly backup readability check | `systemd/7dtd-backup-verify.timer` (Mon 05:23 host local time, `Persistent=true`, `RandomizedDelaySec=600`) running `systemd/7dtd-backup-verify.service` -> `scripts/run.sh` `verify-backup` | Runs with the host user's own privileges; no authn of its own | Lists every archive under `backups/` through restore's own preflight, extracts nothing and never stops the server (`scripts/run.sh` `check_archive_payload`, `verify_backup`; `TimeoutStartSec=300`). It holds no ops lock, so it can observe an archive mid-write; see Boundary 8 |
 | Deploy path workstation to server host | `scripts/deploy.sh` | SSH keys of `maci@192.168.0.100` | rsync of the whole checkout including `.env` (excludes `data/`, `backups/`, caches); optional remote restart via bounded ssh |
 | Environment and `.env` inputs | `TELNET_PASSWORD`, `TELNET_PORT`, `WEBADMIN_PASSWORD`, `STEAMCMD_UPDATE`, `STEAMCMD_ONLY`, `ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD`, `BACKUP_KEEP`, `SEVENDTD_CONTAINER_NAME`, `SEVENDTD_IMAGE` (`scripts/lib-env.sh` `ENV_FILE_KEYS`, `init_telnet_env`/`init_steamcmd_env`); `SEVENDTD_SERVER_HOST`/`_USER`/`_DIR`, `SOURCE_DATE_EPOCH` (`scripts/deploy.sh` header, `scripts/run.sh` `build_image`) | n/a | Loaded by the no-eval parser `load_env_file` (`scripts/lib-env.sh` `load_env_file`); a key outside `ENV_FILE_KEYS` is refused before any value applies (`check_env_file_keys`); password values are restricted to printable ASCII by `reject_unsafe_value`, whose character tests run under `LC_ALL=C` so the host and the container reach the same verdict |
 | Health probe (unauthenticated, in-container) | `HealthCmd` in `systemd/7dtd-server.container`; `scripts/run.sh` `HEALTH_CMD`/`health_check` | None, and it authenticates nothing by design | A bare TCP connect to the telnet port (`scripts/lib-env.sh` `telnet_probe`), run every 60 s by podman. It never sends the password, and a health status never restarts or kills the container, so the probe cannot become an unauthenticated command channel or an availability lever |
-| Scheduled job: daily save backup | `systemd/7dtd-backup.timer` (04:17 host local time, `Persistent=true`, `RandomizedDelaySec=600`) running `systemd/7dtd-backup.service` -> `scripts/run.sh` `backup` | Runs with the host user's own privileges; no authn of its own | Writes a credential-bearing archive into `backups/` and prunes to `BACKUP_KEEP` (default 7). Failure is visible as a failed unit state and journal entries, not a silent skip |
+| Scheduled job: daily save backup | `systemd/7dtd-backup.timer` (04:17 host local time, `Persistent=true`, `RandomizedDelaySec=600`) running `systemd/7dtd-backup.service` -> `scripts/run.sh` `backup` | Runs with the host user's own privileges; no authn of its own | Writes a credential-bearing archive into `backups/` and prunes to `BACKUP_KEEP` (default 7). It queues on the ops lock like any other writer, so a long holder can make the night's run exit 1 (`TimeoutStartSec=300` against a 120s lock wait). Failure is visible as a failed unit state and journal entries, not a silent skip |
 | Image build and CI | `Containerfile` (apt + two COPYs); `.github/workflows/ci.yml`, `.github/workflows/release.yml` | n/a | Actions SHA-pinned in both workflows; analyzer deps hash-pinned with `--require-hashes` in `requirements-lint.txt`. The `ci.yml` badge job alone holds `contents: write` and builds kcov from a pinned upstream commit, so it is the one job where third-party source runs under a write token (`.github/workflows/ci.yml` badge job) |
 | Per-boot Steam fetch | `entrypoint.sh` `install_or_update`, `sync_mods` | Steam anonymous login | Skippable with `STEAMCMD_UPDATE=0` |
 
@@ -69,7 +73,10 @@ Every row above was verified against the tree at the review date.
    (`scripts/run.sh` `make_common`, `systemd/7dtd-server.container` `Volume=` lines). Under
    rootless podman, container root maps to the host user
    (`Containerfile` `ENTRYPOINT` note), so any write inside the mounts is a write as that
-   host user.
+   host user. `data/.ops.lock` sits at the root of `data/`, outside every mount
+   (`scripts/run.sh` `make_common`, `systemd/7dtd-server.container` `Volume=` lines:
+   only `data/game` and `data/userdata` are bind-mounted), so container code cannot
+   pre-create or hold it.
 4. **Secrets flow.** `.env` or environment -> `load_env_file` (literal parse,
    never eval'd) -> owner-only `mktemp` env file -> `podman --env-file`
    (`scripts/run.sh` `make_common`) -> entrypoint environment -> `sed` render into
@@ -259,6 +266,34 @@ this game service and its user account context.
   the pre-restore snapshot it leaves in `backups/`, whose name records the time
   and the `prerestore` marker but not who ran it.
 
+### Boundary 8: scheduled jobs and operator commands over `backups/`
+
+Three independent callers reach the archive directory: the daily timer, the
+weekly verify timer, and an operator at the keyboard. The ops lock serializes
+only the ones that go through it.
+
+- **Denial of service (alarm and RPO):** a holder of `data/.ops.lock` that
+  outlives `LOCK_WAIT_SECS` (120s) makes every queued state-mutating command
+  exit 1 without touching `data/` or `backups/`
+  (`scripts/run.sh` `acquire_ops_lock`). The realistic holder is
+  `install-only` mid-download or a wedged podman, and the daily backup service
+  is one of the queued callers: a skipped night's backup is visible only as a
+  failed unit and journal entries (G6). The weekly verify bounds how long the
+  world can go unbacked before something says so
+  (`BACKUP_STALE_SECS`, 3 days, `scripts/run.sh` `verify_backup`).
+- **False alarm (integrity of the evidence, not of the data):**
+  `verify-backup` deliberately holds no lock, so it can read an archive while
+  `backup` is still writing it, or a file the prune in a concurrent run is
+  about to remove, and report `FAIL ... not restorable`
+  (`scripts/run.sh` `check_archive_payload` on a growing `.tar.gz`; the timer
+  hours are chosen apart, `systemd/7dtd-backup-verify.timer` `OnCalendar`, but
+  an operator or a `Persistent=true` catch-up run is not). The check extracts
+  nothing and is bounded by `TimeoutStartSec=300`, so the cost is a misleading
+  alarm, not a damaged world. A host with no archive at all fails every run
+  for the same reason.
+- **Repudiation:** none of the three leaves an operator identity anywhere; the
+  journal names the unit, not the person.
+
 ## Mitigations that exist (mapped)
 
 | Control | Covers | Reference |
@@ -270,6 +305,8 @@ this game service and its user account context.
 | Owner-only archives, UTC stamps, exclusive create (`noclobber`) for the name, a collision counter whose byte order matches creation order, the prune and the bare restore reading the list in `LC_ALL=C` order, `tar` exit >= 2 deletes the partial, prune to `KEEP_BACKUPS` | Two concurrent backups interleaving gzip into one corrupt archive; a partial archive kept as if valid; a recovery that restores the older of two archives a collided second produced, or prunes the newer one, because the host's locale sorts the name differently; unbounded disk growth from a scheduled backup | `scripts/run.sh` `archive_saves`, `backup_archives` |
 | Digest-buildable base (`ARG BASE_IMAGE`) and reproducible builds (`SOURCE_DATE_EPOCH` -> `podman build --timestamp`, seconds only, bounded above so a millisecond stamp is refused) | Untraceable executed base and unreproducible images; a rebuild of a reported digest that cannot be diffed against the original. Only for a caller that opts in; the default build uses neither | `Containerfile` `ARG BASE_IMAGE`, `scripts/run.sh` `build_image` |
 | `no-new-privileges` on the quadlet path | Setuid escalation inside the container (nothing in this image is setuid today) | `systemd/7dtd-server.container` `PodmanArgs=` |
+| One exclusive ops lock (`flock`, 120s bounded wait, fail loud without touching anything) around every state-mutating `run.sh` command | A `backup` tar interleaving a `restore`'s `rm -rf Saves`, or two backups sharing one archive name, when the daily timer, the unit's `ExecStop` and an operator command all reach the host on their own schedules | `scripts/run.sh` `acquire_ops_lock`, dispatch `case` |
+| Weekly readability check on the real backup evidence, not the exit code of the run that wrote it: restore's own preflight per archive, plus a staleness bound on the newest (`BACKUP_STALE_SECS`, 3 days) | A schedule that stopped running, or a copy that rotted in place, reading as a healthy backup; a test restore being the only way to find out | `systemd/7dtd-backup-verify.service`, `systemd/7dtd-backup-verify.timer`, `scripts/run.sh` `verify_backup`, `check_archive_payload` |
 | Health probe never sends a password and never acts on a health status | Turning the probe into an unauthenticated command channel or an availability lever; a red status taking the server down | `scripts/lib-env.sh` `health_check`, `telnet_probe`, `scripts/run.sh` `HEALTH_FLAGS` |
 | Telnet shutdown/saveworld requests bound by a readiness probe and a timeout | A stale session racing a restarting container and sending the password into the wrong listener; an unbounded wait | `scripts/lib-env.sh` `request_telnet`, `telnet_probe`, `scripts/run.sh` `stop`, `backup` |
 | Secrets never in argv; 0600 mktemp env file; EXIT/signal traps; PID-keyed sweep of orphaned secret files | Local disclosure via `/proc/*/cmdline`, stranded credential files | `scripts/run.sh` signal traps, `cleanup_secret_env_file`, `sweep_stale_secret_env_files`, `make_common`, `scripts/lib-env.sh` `telnet_session` |
@@ -290,7 +327,10 @@ No documentation claim in `README.md` or `AGENTS.md` contradicts the code as
 of this review; the claims spot-checked (secret handling, telnet binding
 behavior, seed behavior, backup/restore verification and retention, the
 `no-new-privileges` and health settings, and the "not built" list that names
-this document) all match their referenced implementations.
+this document) all match their referenced implementations. The one claim the
+tree does not back is a port number, not a control: both docs list 26902 as
+the LiteNetLib data port while no template line in this repo sets it (see the
+game-protocol row above).
 
 ## Gaps, ranked by exploitability and impact
 
@@ -322,6 +362,21 @@ this document) all match their referenced implementations.
    deliberate cost, not a defect.
 9. **G9:** `no-new-privileges` is applied on the quadlet path only, so a
    container started by `scripts/run.sh` runs without it.
+10. **G10:** ops-command serialization is best-effort in two places. A host
+    without `flock(1)` (the macOS workstations) logs a warning and runs
+    unguarded, which the code says out loud; and the lock is advisory, so the
+    protection covers only the commands that call it, which today is all of
+    them. `data/.ops.lock` itself is opened with `exec 9>` without an
+    `O_NOFOLLOW`-style guard, so a symlink planted at that path by anything
+    with write access to the checkout would be followed and its target
+    truncated as the host user (`scripts/run.sh` `acquire_ops_lock`). That
+    access already implies editing `.env` and `deploy.sh`, so this is a
+    defense-in-depth note, not a new path in.
+11. **G11:** the two backup signals are journal-only. A skipped nightly
+    backup or a `verify-backup` `FAIL` (including one caused by reading an
+    archive mid-write) is a unit state and a journal line, with nothing
+    forwarding or paging on it; a week can pass with the daily job failing
+    before the 3-day staleness bound turns it into a `FATAL` anyone reads.
 
 ## Abuse cases (authenticated-hostile-user scenarios)
 
@@ -357,6 +412,12 @@ this document) all match their referenced implementations.
   The same archive is the cheapest way to roll a stolen dashboard password back
   to a value the owner has since rotated, which makes it a repudiation tool as
   well as a privilege one.
+- **A local process that holds `data/.ops.lock`:** any host-side writer that
+  opens the file and takes the flock freezes every state-mutating `run.sh`
+  command for as long as it holds it, and a holder that outlasts 120s turns
+  `backup` and `restore` into clean refusals (`scripts/run.sh`
+  `acquire_ops_lock`). It buys a denial of operations, not access to anything:
+  the same writer could call the commands directly.
 - **Hostile operator on a shared workstation** is out of scope: `deploy.sh`
   already runs with that person's SSH key and checkout.
 
@@ -368,8 +429,11 @@ the named code path.
 - Evidence that exists: journald/podman logs (boot, steamcmd, game stdout),
   `data/userdata/Logs/output.log`, command-execution echo
   (`HideCommandExecutionLog=0`), ops-script failure tails
-  (`scripts/run.sh` `stop`, `scripts/perf.sh` `measure`). Nothing ships them
-  anywhere or reviews them; o11y-review owns log structure.
+  (`scripts/run.sh` `stop`, `scripts/perf.sh` `measure`), and the two backup
+  units' exit states, which now include a weekly readability verdict rather
+  than only the exit code of the run that wrote each file
+  (`systemd/7dtd-backup-verify.service`). Nothing ships them anywhere or
+  reviews them; o11y-review owns log structure.
 - No documented path from "vulnerability reported" to "fix shipped":
   `SECURITY.md` does not exist. Creating one requires an org-level contact
   and process decision, noted here rather than invented.
@@ -385,5 +449,9 @@ the named code path.
   holds `contents: write` rather than the workflow default, and the backup
   archives, health probe, scheduled timer, and restore path were added as
   surface they are.
+- Extended in the same-day re-verification: `verify-backup` and the weekly
+  `7dtd-backup-verify` timer, the `data/.ops.lock` command serialization, and
+  the contention between the two backup callers that neither the daily timer
+  nor the lock alone settles (Boundary 8, G10, G11).
 - Open organizational items (not invented here): named security owner, review
   cadence, disclosure contact/process (`SECURITY.md`).

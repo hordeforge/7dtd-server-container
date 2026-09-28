@@ -240,14 +240,6 @@ password character domain, below), so it is a **major** release: 1.1.3 to
 
 ### Fixed
 
-- **A `BACKUP_KEEP` with a leading zero was read as an octal literal, and an
-  absurdly long one was read as a plausible count.** `(( KEEP_BACKUPS < 1 ))`
-  reads `08` as an invalid octal number, so a padded retention value silently
-  failed the range check, and bash wraps a 64-bit signed integer, so
-  `BACKUP_KEEP=99999999999999999999` passed it and reached the prune loop as
-  7766279631452241919. The value is now normalized in base 10 where it is
-  read, and a value wider than the documented `1` to `999999999` range is
-  refused by name before any command acts on it.
 - **A host with no MD5 tool rendered an empty dashboard password digest.**
   `webadmin_password_digest` ran `md5_hex` in a command substitution and
   discarded its status, so the "no MD5 digest tool" guard never reached the
@@ -270,6 +262,10 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   neither the value nor a line of the file. Dropping the non-printable test
   from the lib's charset pattern makes the new assertion fail, which is how
   it was checked.
+- **The same harness pinned a copy of `run.sh`'s command word list.** The copy
+  stopped matching the real one when `verify-backup` was added, so the
+  `require_command` oracle was scoring a list the script no longer used. It is
+  read out of `scripts/run.sh` now, and the harness fails loudly if it cannot.
 - **`scripts/test_run_sh.py` required a pre-restore snapshot from a failure
   that no longer discards anything.** Restore extracts into a staging
   directory beside `Saves/` and moves the result into place, so an archive

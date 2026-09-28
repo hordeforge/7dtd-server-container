@@ -52,9 +52,19 @@ CASE_SECONDS=10
 RUN_SECONDS=120
 MAX_REPORTED_VIOLATIONS=10
 
-# The command word set run.sh accepts, so require_command's contract is pinned
-# against the real one rather than a made-up list.
-COMMAND_WORDS='build|start|run|restart|install-only|stop|logs|status|config|backup|restore|version'
+# The command word set run.sh accepts, read out of run.sh rather than pinned
+# here: a copy in this file is how the list went stale when verify-backup was
+# added, and the oracle below is only worth anything while it is the real one.
+# The sed range matches run.sh's own text, so $COMMAND stays a literal there.
+# shellcheck disable=SC2016  # matching run.sh's source, not a variable
+COMMAND_WORDS="$(
+  sed -n '/^require_command "\$COMMAND"/,/usage$/p' "$ROOT/scripts/run.sh" |
+    grep -o "'[^']*'" | tr -d "'"
+)"
+[[ "$COMMAND_WORDS" == *'|'* ]] || {
+  echo "FATAL: could not read the command word list out of scripts/run.sh" >&2
+  exit 1
+}
 
 # Values a real .env line carries, plus the shapes that break a naive parser:
 # a quote character, an embedded '=', command substitution, a shell
@@ -135,6 +145,17 @@ oracle_reason() {
       ;;
   esac
   printf ''
+}
+
+# The domain oracle as an exit code, so the driver checks a refusal the way the
+# lib produces one. The reason string stays the oracle's own vocabulary; the
+# lib names the variable it refused and the value never reaches either stream.
+oracle_value_rc() { # 0 when the value domain accepts, 1 when it refuses
+  if [[ -n "$(oracle_reason "$1")" ]]; then
+    printf 1
+  else
+    printf 0
+  fi
 }
 
 oracle_length() { printf '%s' "$1" | wc -c | tr -d ' '; }
@@ -275,55 +296,25 @@ probe="$FUZZ_PROBE_VALUE"
 if [[ "$(ascii_length "$probe")" != "$FUZZ_LENGTH" ]]; then
   report "ascii_length does not count bytes"
 fi
-# reject_unsafe_value owns the domain now (it is what both the host scripts
-# and the entrypoint call), and it exits with a refusal on stderr rather than
-# printing a reason. Calling it in a subshell turns that exit back into the
-# oracle's verdict: a clean value is accepted silently, each refused class is
-# refused for its own reason, the refusal names the setting it refused, and
-# it carries neither the value nor a traceback.
-unsafe_err="$(scratch)"
-( reject_unsafe_value TELNET_PASSWORD "$probe" ) > /dev/null 2> "$unsafe_err"
-unsafe_rc=$?
-unsafe_msg="$( < "$unsafe_err" )"
-case "$unsafe_msg" in
-  *Traceback*) report "reject_unsafe_value leaked a traceback" ;;
-esac
-case "$FUZZ_REASON" in
-  '')
-    if (( unsafe_rc != 0 )); then
-      report "reject_unsafe_value refused a value the oracle accepts"
-    fi
-    [[ -z "$unsafe_msg" ]] ||
-      report "an accepted value still printed a refusal"
-    ;;
-  whitespace)
-    if (( unsafe_rc != 1 )); then
-      report "reject_unsafe_value exited $unsafe_rc on a whitespace value, expected 1"
-    fi
-    case "$unsafe_msg" in
-      *whitespace*) ;;
-      *) report "a whitespace refusal does not name the reason" ;;
-    esac
-    ;;
-  charset)
-    if (( unsafe_rc != 1 )); then
-      report "reject_unsafe_value exited $unsafe_rc on an unsafe-charset value, expected 1"
-    fi
-    case "$unsafe_msg" in
-      *"printable ASCII"*) ;;
-      *) report "a charset refusal does not name the reason" ;;
-    esac
-    ;;
-  *)
-    report "the oracle returned an unknown class: $FUZZ_REASON"
-    ;;
-esac
-if (( unsafe_rc != 0 )); then
-  case "$unsafe_msg" in
-    *TELNET_PASSWORD*) ;;
-    *) report "a value refusal does not name the setting" ;;
-  esac
-  no_leak "$unsafe_msg" "a value refusal"
+# The value domain is a refusal, not a printed reason: the contract is the exit
+# code against an oracle written from the same character class, the variable
+# named on the stream, and the value itself in neither stream nor message.
+value_err="$(scratch)"
+( reject_unsafe_value FUZZ_PROBE "$probe" ) > /dev/null 2> "$value_err"
+value_rc=$?
+if (( value_rc != FUZZ_VALUE_RC )); then
+  report "reject_unsafe_value exited $value_rc, expected $FUZZ_VALUE_RC"
+fi
+value_msg="$( < "$value_err" )"
+if (( value_rc == 0 )); then
+  [[ -z "$value_msg" ]] || report "an accepted value still printed $value_msg"
+else
+  case "$value_msg" in
+    *Traceback*) report "reject_unsafe_value leaked a traceback" ;;
+    *FUZZ_PROBE*) ;;
+    *) report "a value refusal does not name the variable" ;;
+  fi
+  no_leak "$value_msg" "the refusal"
 fi
 # A refusal that names the value it refused is the contract; one that leaks a
 # traceback or stays silent is not.
@@ -398,7 +389,7 @@ else
   fi
 fi
 
-rm -f "$err" "$out" "$keys_err" "$cmd_err" "$port_err" "$switch_err" "$argc_err"
+rm -f "$err" "$out" "$keys_err" "$cmd_err" "$port_err" "$switch_err" "$argc_err" "$value_err"
 DRIVER_EOF
 
 tmp="$(mktemp -d)"
@@ -714,7 +705,7 @@ write_expect() { # renders the expectations the driver sources into $1
     fi
     printf 'FUZZ_PROBE_VALUE=%q\n' "$probe"
     printf 'FUZZ_LENGTH=%s\n' "$(oracle_length "$probe")"
-    printf 'FUZZ_REASON=%q\n' "$(oracle_reason "$probe")"
+    printf 'FUZZ_VALUE_RC=%s\n' "$(oracle_value_rc "$probe")"
     printf 'FUZZ_PORT_RC=%s\n' "$(oracle_port_rc "$probe")"
     printf 'FUZZ_SWITCH_RC=%s\n' "$(oracle_switch_rc "$probe")"
     printf 'FUZZ_CMD_RC=%s\n' "$(oracle_command_rc "$probe")"
