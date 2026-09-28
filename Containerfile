@@ -3,7 +3,14 @@
 # config are all bind-mounted from the host (see scripts/run.sh and README).
 #
 # Build:  podman build -t localhost/7dtd-server:latest .
-FROM docker.io/steamcmd/steamcmd:latest
+# The base is a build arg so a release cut can build against a fixed digest
+# (podman build --build-arg BASE_IMAGE=docker.io/steamcmd/steamcmd@sha256:<id>)
+# without editing this file; podman records the resolved base in the image
+# config either way, so a digest build is traceable after the fact. The
+# default stays a floating tag for day-to-day builds, where a steamcmd
+# refresh is the point.
+ARG BASE_IMAGE=docker.io/steamcmd/steamcmd:latest
+FROM ${BASE_IMAGE}
 
 # OCI image metadata, so `podman inspect` and a registry report what the tree
 # ships without reading VERSION. org.opencontainers.image.version tracks the

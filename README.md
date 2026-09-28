@@ -77,6 +77,28 @@ cd ~/7dtd-server
 # daily use: ./start.sh and ./stop.sh are the shortcuts
 ```
 
+### Reproducible image builds
+
+`run.sh build` passes `SOURCE_DATE_EPOCH` to podman as `--timestamp`, so an
+exported value gives every layer the same fixed mtime and a second build of one
+tree can be diffed against the first instead of trusted:
+
+```bash
+SOURCE_DATE_EPOCH=1700000000 ./scripts/run.sh build
+```
+
+The base image is a build arg, so a build that must be repeatable from
+upstream's side pins it to a digest without editing the `Containerfile`:
+
+```bash
+podman build -t localhost/7dtd-server:latest \
+  --build-arg BASE_IMAGE=docker.io/steamcmd/steamcmd@sha256:<digest> .
+```
+
+The apt packages the image installs on top of the base are still resolved at
+build time, so a byte-identical image needs both: the digest and the same
+`SOURCE_DATE_EPOCH`.
+
 ## Ports
 
 | Port | Use |

@@ -35,6 +35,14 @@ before 1.1.1 are reconstructed from their GitHub release notes.
   telnet console. The probe opens a TCP connect only (no password), and a
   30 minute start period exempts the first boot's depot download. A red
   status is reported, never acted on.
+- `run.sh build` honors `SOURCE_DATE_EPOCH` and passes it to podman as
+  `--timestamp`, so exporting it yields an image whose layer mtimes all carry
+  that second and a rebuild can be diffed against the original. Unset, the
+  build is timestamped at build time as before; a malformed value fails before
+  podman runs.
+- The image base is the `BASE_IMAGE` build arg (default unchanged,
+  `docker.io/steamcmd/steamcmd:latest`), so a build that has to be repeatable
+  pins it to a digest with `--build-arg` instead of editing the `Containerfile`.
 
 ### Changed
 
@@ -50,10 +58,16 @@ before 1.1.1 are reconstructed from their GitHub release notes.
 
 ### Fixed
 
-- **`run.sh` runs every command again.** The stale-secret sweep was called
-  before its definition, so each invocation died with
-  `sweep_stale_secret_env_files: command not found` (exit 127).
-
+- **Every `run.sh` command died before doing anything.** The stale-secret
+  sweep ran above its own definition, so bash reported
+  `sweep_stale_secret_env_files: command not found` and `set -e` ended the run
+  at once. The definition now precedes the call.
+- **A failed staging run no longer wipes the enabled mods.** `stage_mods.sh`
+  pruned `mods/` down to the owned set before the replacement set was built,
+  so a run that then failed (no sibling dist staged, or a failed enable copy)
+  left the previously enabled mods deleted, contradicting the "left
+  unchanged" message it printed. The new set is now built entirely in the
+  staging dir and the swap is what drops a mod the set no longer names.
 - **Backup archive stamps are UTC.** `run.sh backup` named archives with the
   host wall clock while the prune read that name as the age order, so a
   fall-back DST transition could repeat a stamp (one archive overwriting the

@@ -94,15 +94,16 @@ for i in "${!NAMES[@]}"; do
   fi
 done
 
-# The new set is staged here and swapped in below, so a failed copy leaves the
-# previously enabled mods in place. Staging starts as a copy of the currently
-# enabled set, so sync_tree still finds an identical tree to skip on a
-# redeploy that changed no mod. Nothing touches $ROOT/mods before the swap:
-# wiping the stale entries or rewriting a named mod in place would destroy a
-# working enabled set on a run that then reports the failure, and the swap's
-# `rm -rf` already empties mods/ and drops whatever the new set does not name,
-# so a mod enabled by hand still survives only until the next successful
-# staging run.
+# The new set is built here, in a staging dir, and swapped in below, so a
+# failed copy leaves the previously enabled mods in place. Staging starts as a
+# copy of the currently enabled set, so sync_tree still finds an identical
+# tree to skip on a redeploy that changed no mod. Nothing in $ROOT/mods is
+# touched until every copy has succeeded: pruning the old tree before the new
+# one is complete (or rewriting a named mod in place) would destroy a working
+# enabled set on a run that then reports the failure, and the swap's
+# `rm -rf mods/*` already empties mods/ and drops whatever the new set does
+# not name, so a mod enabled by hand still survives only until the next
+# successful staging run.
 rm -rf "$enabled_staging"
 mkdir -p "$enabled_staging"
 for name in "${NAMES[@]}"; do

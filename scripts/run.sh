@@ -9,6 +9,7 @@
 # `--help` prints the command list without touching the environment or data/.
 # Env overrides: TELNET_PASSWORD, TELNET_PORT, WEBADMIN_PASSWORD,
 # STEAMCMD_UPDATE, STEAMCMD_ONLY, SEVENDTD_CONTAINER_NAME, SEVENDTD_IMAGE.
+# SOURCE_DATE_EPOCH pins the image mtimes for a reproducible `build`.
 # A git-ignored .env in this directory fills unset variables; variables
 # already present in the environment win over it, defaults come last.
 # Exit codes: 0 success, 2 usage error (unknown command or --help misuse),
@@ -44,6 +45,7 @@ Manage the 7dtd-server podman container; all runtime state lives in ./data
 
 Env overrides: TELNET_PASSWORD, TELNET_PORT, WEBADMIN_PASSWORD,
 STEAMCMD_UPDATE, STEAMCMD_ONLY, SEVENDTD_CONTAINER_NAME, SEVENDTD_IMAGE.
+SOURCE_DATE_EPOCH pins the image mtimes for a reproducible `build`.
 A git-ignored .env in this directory fills unset variables; variables
 already present in the environment win over it, defaults come last.
 EOF
@@ -164,10 +166,10 @@ trap 'exit 143' TERM
 # Reclaim env files stranded by a SIGKILLed previous run. Every command
 # sweeps, not just the ones that start a container: these files carry the
 # telnet and webadmin passwords, so a run that only stops or backs up must not
-# leave one sitting in $TMPDIR for the days before the next start.
-# Run the sweep for every command, including the ones that never mint a file.
-# Called here, before any command runs, so the sweep outlives the start-path
-# ownership in make_common below.
+# leave one sitting in $TMPDIR for the days before the next start. The
+# definition sits above this call because bash resolves a function at call
+# time, so a call placed before its definition dies with
+# `command not found`.
 sweep_stale_secret_env_files
 
 # Telnet values come from the environment or .env, get the shared lab defaults
@@ -517,8 +519,26 @@ restore() {
   echo "restored $archive into $USERDATA_DIR/Saves (start the server to load it)"
 }
 
+# podman stamps image layers and config with the wall-clock build time unless
+# --timestamp overrides it, so two builds of one tree never share a digest.
+# SOURCE_DATE_EPOCH is the reproducible-builds.org stamp: a caller that
+# exports it (a release cut, a rebuild of a reported digest) gets an image
+# whose mtimes all carry that second, so a rebuild can be diffed against the
+# original instead of trusted. Unset, the build keeps its current behavior.
+build_image() {
+  if [[ -z "${SOURCE_DATE_EPOCH:-}" ]]; then
+    podman build -t "$IMAGE" "$ROOT"
+    return
+  fi
+  if [[ ! "$SOURCE_DATE_EPOCH" =~ ^[0-9]+$ ]]; then
+    echo "FATAL: SOURCE_DATE_EPOCH must be whole seconds since the epoch, got '$SOURCE_DATE_EPOCH'" >&2
+    exit 1
+  fi
+  podman build --timestamp "$SOURCE_DATE_EPOCH" -t "$IMAGE" "$ROOT"
+}
+
 case "$COMMAND" in
-  build)        podman build -t "$IMAGE" "$ROOT" ;;
+  build)        build_image ;;
   # The one canonical version home (REPOSITORY_STANDARDS.md section 8); the
   # release workflow refuses a tag that disagrees with it.
   version)      cat "$ROOT/VERSION" ;;

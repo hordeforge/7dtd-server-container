@@ -78,7 +78,7 @@ lint: $(PYBIN)/ruff
 	test -x entrypoint.sh || { echo "entrypoint.sh is not executable" >&2; exit 1; }; \
 	while read -r kw; do \
 	  case "$$kw" in \
-	    FROM|RUN|COPY|ENTRYPOINT|USER|LABEL) ;; \
+	    FROM|RUN|COPY|ENTRYPOINT|USER|LABEL|ARG) ;; \
 	    *) echo "unknown Containerfile directive: $$kw" >&2; exit 1 ;; \
 	  esac; \
 	done < <(awk '/^[A-Z]+[[:space:]]/ {print $$1}' Containerfile | sort -u); \

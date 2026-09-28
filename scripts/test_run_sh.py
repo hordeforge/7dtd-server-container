@@ -57,6 +57,10 @@ newest-by-default and explicit-archive selection, a pre-restore snapshot of
 the replaced saves, and loud refusals (running server, no archives, corrupt
 or payload-free archive) that leave data/userdata untouched.
 
+build is the artifact command: podman stamps layer mtimes with the wall-clock
+time unless --timestamp says otherwise, so the build forwards SOURCE_DATE_EPOCH
+as --timestamp and rejects a malformed value before podman runs.
+
 Each failed check prints a FAIL line; the process exits nonzero if any failed.
 """
 
@@ -1020,5 +1024,59 @@ with tempfile.TemporaryDirectory() as tmp:
             proc.returncode == 2 and b"frobnicate" in proc.stderr,
         )
 
+# `build` is the one command that produces the artifact the server runs, and
+# podman stamps layer mtimes with the wall-clock time unless --timestamp says
+# otherwise, so an unpinned build can never be rebuilt to the same digest.
+# SOURCE_DATE_EPOCH is the reproducible-builds.org stamp for that; a value podman
+# would reject must fail before the build rather than produce a half-stamped
+# image.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    install_podman_stub(tmpdir, PODMAN_STUB)
+    run_sh = make_sandbox(tmpdir) / "scripts" / "run.sh"
+    log = tmpdir / "podman-argv.log"
+    epoch = "1700000000"
+
+    def run_build(epoch_value: str, *, expect_build: bool = True) -> tuple[int, bytes, list[bytes]]:
+        """run.sh build with the given SOURCE_DATE_EPOCH; returns rc, stderr, argv."""
+        log.unlink(missing_ok=True)
+        env = stub_env(tmpdir)
+        env["SOURCE_DATE_EPOCH"] = epoch_value
+        proc = subprocess.run(
+            [str(run_sh), "build"],
+            env=env,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+        records = stub_invocations(log) if log.exists() else []
+        if expect_build:
+            epoch_shown = epoch_value or "<unset>"
+            check(
+                f"run.sh build with SOURCE_DATE_EPOCH={epoch_shown} runs podman build once",
+                len(records) == 1 and records[0][:1] == [b"build"],
+            )
+        return proc.returncode, proc.stderr, records[0] if records else []
+
+    rc, _, stamped = run_build(epoch)
+    check("build with SOURCE_DATE_EPOCH exits 0", rc == 0)
+    check(
+        "SOURCE_DATE_EPOCH reaches podman as --timestamp",
+        b"--timestamp" in stamped and stamped[stamped.index(b"--timestamp") + 1] == epoch.encode(),
+    )
+    rc, _, plain = run_build("")
+    check("build without SOURCE_DATE_EPOCH exits 0", rc == 0)
+    check("no SOURCE_DATE_EPOCH leaves the build untimestamped", b"--timestamp" not in plain)
+    check(
+        "the build still names the image and the tree",
+        b"-t" in plain and plain[-1] == str(tmpdir).encode(),
+    )
+    rc, err, malformed = run_build("not-a-number", expect_build=False)
+    check(
+        "a malformed SOURCE_DATE_EPOCH fails loudly instead of building",
+        rc != 0 and b"FATAL" in err and b"not-a-number" in err,
+    )
+    check("a malformed SOURCE_DATE_EPOCH never reaches podman", b"--timestamp" not in malformed)
+
 exit_status()
-print("run.sh secret-transport contract OK")
+print("run.sh secret-transport and build contract OK")

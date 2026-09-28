@@ -9,7 +9,9 @@ badly on the host. Pin what a reader of the image alone can verify:
             LICENSE, the source is this repository, and the version label is
             the VERSION file (the release tag is gated against VERSION, so a
             bump that skips the label would otherwise ship mismatched metadata)
-  base      the base image is a named registry reference, not a bare name
+  base      the base image is one build arg (BASE_IMAGE) resolved to a
+            named registry reference, so a release cut can pin a digest
+            without editing the Containerfile
   entrypoint exec form only, so PID 1 is the script and signals reach it
   payload   the two files entrypoint.sh sources at boot are the two COPYs, and
             the entrypoint is executable in the tree
@@ -77,9 +79,17 @@ check(
 )
 
 froms = re.findall(r"^FROM\s+(\S+)", text, re.MULTILINE)
+check("exactly one FROM", len(froms) == 1)
+base_args = re.findall(r"^ARG\s+BASE_IMAGE=(\S+)", text, re.MULTILINE)
 check(
-    "base image is a fully qualified registry reference",
-    len(froms) == 1 and froms[0].count("/") >= 1 and ":" in froms[0],
+    "the base image is a single build arg the FROM consumes",
+    len(base_args) == 1 and bool(froms) and froms[0] in {"${BASE_IMAGE}", "$BASE_IMAGE"},
+)
+check(
+    "the default base image is a fully qualified registry reference",
+    bool(base_args)
+    and base_args[0].count("/") >= 1
+    and (":" in base_args[0] or "@" in base_args[0]),
 )
 
 entrypoints = re.findall(r"^ENTRYPOINT\s+(.*)$", text, re.MULTILINE)
