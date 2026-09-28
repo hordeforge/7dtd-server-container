@@ -257,19 +257,37 @@ check_telnet_port() {
   fi
 }
 
-# Fill unset TELNET_PASSWORD/TELNET_PORT with the committed lab defaults, then
+# Fill unset TELNET_PORT with the committed lab default, apply the committed
+# lab default TELNET_PASSWORD only when the operator opted into it, then
 # enforce the value rules above. One owner of both the defaults and the
 # validate step so host scripts and the container entrypoint cannot drift
 # apart. Call after load_env_file where a .env is in play.
 #
 # The lab default password is public (it ships in this repo), and a set
 # TelnetPassword makes the game listen for telnet on all interfaces, so a boot
-# that silently fell back to it would expose a console to everyone on the LAN.
-# Applying the default therefore warns on stderr every time, in the ops
-# scripts and in the container's captured boot log alike.
+# that fell back to it would expose a console to everyone on the LAN. A telnet
+# password is full server control (shutdown, admin add, setgamepref), so the
+# public default is opt-in: without ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD=1 a
+# boot that would use it fails here, on the host, before any container starts,
+# and the entrypoint fails the same way when the unit pins no password. The
+# opt-in is a {0,1} domain pin like init_steamcmd_env's, so a typo like
+# ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD=true is refused instead of silently
+# meaning "no".
 init_telnet_env() {
+  local allow="${ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD:-0}"
+  case "$allow" in
+    0|1) ;;
+    *)
+      echo "FATAL: ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD must be 0 or 1 (got '$allow')" >&2
+      exit 1
+      ;;
+  esac
   if [[ -z "${TELNET_PASSWORD:-}" ]]; then
-    echo "WARN: TELNET_PASSWORD unset; falling back to the public lab default. Set a private value in .env or the environment." >&2
+    if [[ "$allow" != "1" ]]; then
+      echo "FATAL: TELNET_PASSWORD unset. Set a private value in .env or the environment; the committed default is public and a set telnet password makes the game listen on every interface. Set ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD=1 only to run the lab on the public default." >&2
+      exit 1
+    fi
+    echo "WARN: TELNET_PASSWORD unset; falling back to the public lab default (opted in via ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD=1)." >&2
   fi
   TELNET_PASSWORD="${TELNET_PASSWORD:-retest}"
   TELNET_PORT="${TELNET_PORT:-8087}"

@@ -109,6 +109,14 @@ with tempfile.TemporaryDirectory() as tmp:
     check("a bad first file fails the batch too", r.returncode == 1)
     check("the batch stops at the first bad file", str(good).encode() not in r.stdout)
 
+    # A bad file must not cut the batch short: every file is reported, so the
+    # operator sees all the breakage in one run instead of one file per fix.
+    second_bad = tmpdir / "bad2.xml"
+    second_bad.write_text("<config><unclosed>")
+    r = run(str(malformed), str(second_bad), str(good))
+    check("every file in a failing batch is reported", b"bad2.xml" in r.stderr)
+    check("a good file after a bad one is still checked", str(good).encode() in r.stdout)
+
     # OSError path beyond a missing file: a directory opens but cannot be
     # parsed (IsADirectoryError); must exit 1 cleanly, not traceback.
     r = run(str(tmpdir))

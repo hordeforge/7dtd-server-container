@@ -12,6 +12,17 @@ import sys
 import xml.etree.ElementTree as ET
 
 
+def check(path: str) -> bool:
+    """Parse one file; report it on the right stream. True when well-formed."""
+    try:
+        ET.parse(path)
+    except (ET.ParseError, OSError) as exc:
+        print(f"{path}: NOT well-formed ({exc})", file=sys.stderr)
+        return False
+    print(path, "well-formed")
+    return True
+
+
 def main(argv: list[str]) -> int:
     # Help wins wherever it appears, like every common CLI parser.
     if any(a in ("-h", "--help") for a in argv[1:]):
@@ -21,14 +32,13 @@ def main(argv: list[str]) -> int:
     if not files:
         print(f"usage: {argv[0]} FILE [FILE ...]", file=sys.stderr)
         return 2
-    for f in files:
-        try:
-            ET.parse(f)
-        except (ET.ParseError, OSError) as exc:
-            print(f"{f}: NOT well-formed ({exc})", file=sys.stderr)
-            return 1
-        print(f, "well-formed")
-    return 0
+    # Every file in the batch is checked, not just the ones before the first
+    # bad one: a batch that stops at the first failure leaves the remaining
+    # files unvalidated while still exiting 1, so a later breakage surfaces
+    # only on the run after whoever fixes the first one. The results are
+    # materialized first because all() short-circuits on the first False.
+    results = [check(f) for f in files]
+    return 0 if all(results) else 1
 
 
 if __name__ == "__main__":

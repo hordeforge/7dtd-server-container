@@ -130,10 +130,15 @@ def run_entrypoint(root: Path, extra_env: dict[str, str]) -> subprocess.Complete
     # runnable fake server binary), so the run walks the whole boot path:
     # platform.cfg, render_config, seed_admin_file, sync_mods, exec. The fake
     # server exits 0 immediately, standing in for the exec boundary.
+    #
+    # The public default telnet password is opt-in, so these runs take the
+    # opt-in to reach the render/seed path at all; the refusal itself is
+    # covered by its own case below.
     env = {
         "PATH": f"{root / 'bin'}:/usr/bin:/bin",
         "TELNET_PORT": "8087",
         "STEAMCMD_UPDATE": "0",
+        "ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD": "1",
         **extra_env,
     }
     return subprocess.run(
@@ -319,6 +324,25 @@ with tempfile.TemporaryDirectory() as tmp:
         check(
             "boot never reached config render after steamcmd gave up",
             not (game / "serverconfig.xml").exists(),
+        )
+
+    # The quadlet path pins no TELNET_PASSWORD, so the entrypoint is the last
+    # place the public lab default can be refused: a set telnet password makes
+    # the game listen on every interface, and the default ships in this repo.
+    with tempfile.TemporaryDirectory() as no_default:
+        nd_root, nd_game, _ = make_sandbox(Path(no_default) / "nodefault", None)
+        nd_env = {"ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD": "0"}
+        proc = run_entrypoint(nd_root, nd_env)
+        nd_err = proc.stderr.decode(errors="replace")
+        check("boot without a telnet password exits nonzero", proc.returncode != 0)
+        check("the refusal names the missing value", "TELNET_PASSWORD unset" in nd_err)
+        check(
+            "the refusal points at the opt-in escape hatch",
+            "ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD=1" in nd_err,
+        )
+        check(
+            "the refused boot rendered no credential-bearing config",
+            not (nd_game / "serverconfig.xml").exists(),
         )
 
 # sync_mods: the per-boot Mods sync. The cases above run with /mods absent,

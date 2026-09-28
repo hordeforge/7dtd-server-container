@@ -143,6 +143,10 @@ def run_perf(
         env={
             "PATH": SANDBOX_PATH,
             "PERF_STUB_LOG": str(root / "restarts.log"),
+            # perf.sh runs init_telnet_env before it touches the config; the
+            # public default password is opt-in, so these runs supply a
+            # private one instead of a flag (lib-env.sh owns the rule).
+            "TELNET_PASSWORD": "s3cret-pass",
             **(extra_env or {}),
         },
         capture_output=True,

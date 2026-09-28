@@ -48,9 +48,11 @@ Workspace root guide: [`hordeforge/.github` AGENTS.md](https://github.com/hordef
 5. **All runtime data lives on the host under `data/`.** The container is
    disposable; deleting and recreating it must never lose saves or mods.
 6. **Secrets via env only** (`.env`, git-ignored): telnet password, webuser.
-   The committed defaults are test-only (same as the workspace lab). Secret
-   values are printable ASCII, enforced by `reject_unsafe_value` with its
-   character tests under `LC_ALL=C` so the host and the container agree
+   `TELNET_PASSWORD` is required; the committed `retest` default is public and
+   opt-in only, via `ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD=1` (same as the
+   workspace lab). The webadmin password is minted at first seed when unset.
+   Secret values are printable ASCII, enforced by `reject_unsafe_value` with
+   its character tests under `LC_ALL=C` so the host and the container agree
    whatever locale either runs under.
 7. **No AI attribution, no em dashes** in shipped text.
 8. Version pin: mods are built for V3.2.0. If a newer depot build ships and

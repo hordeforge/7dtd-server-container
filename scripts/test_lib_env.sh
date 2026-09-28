@@ -279,9 +279,10 @@ for bad in '' 'abc' '12a' 'a123' '-1' '+80' '0x50' ' 80' '0' '00' '000' '00000' 
 done
 echo "telnet port rules OK"
 
-# init_telnet_env: fills unset values with lab defaults, keeps provided ones,
-# and rejects an unsafe password or a bad port through the same path used by
-# run.sh, perf.sh, and the container entrypoint.
+# init_telnet_env: fills unset values with lab defaults under the opt-in,
+# refuses the public default without it, keeps provided ones, and rejects an
+# unsafe password or a bad port through the same path used by run.sh,
+# perf.sh, and the container entrypoint.
 (
   set -euo pipefail
   source "$ROOT/scripts/lib-env.sh"
@@ -290,17 +291,38 @@ echo "telnet port rules OK"
   # substitution would run init_telnet_env in a nested subshell and lose the
   # assignments this block asserts on.
   warn_file="$tmp/default-warn.txt"
-  init_telnet_env 2>"$warn_file"
+  ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD=1 init_telnet_env 2>"$warn_file"
   out="$( < "$warn_file" )"
   [[ "${TELNET_PASSWORD:-}" == "retest" && "${TELNET_PORT:-}" == "8087" ]] || {
     echo "FAIL: init_telnet_env did not apply defaults (got '${TELNET_PASSWORD-}'/'${TELNET_PORT-}')" >&2; exit 1; }
   # The default password is public (it ships in this repo) and a set telnet
-  # password makes the game listen on all interfaces, so the fallback must be
-  # visible on stderr instead of silent.
+  # password makes the game listen on all interfaces, so the opted-in
+  # fallback must be visible on stderr instead of silent.
   [[ "$out" == *WARN* ]] || {
     echo "FAIL: applying the default TELNET_PASSWORD must warn (got '$out')" >&2; exit 1; }
   echo "init_telnet_env defaults OK"
 )
+# The public default is a full-control credential on a LAN-reachable console,
+# so the fallback must be opt-in: no password and no opt-in is a hard failure
+# that names the fix, and the opt-in flag is pinned to {0,1} so a typo cannot
+# silently read as "not opted in".
+if ( unset TELNET_PASSWORD ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD; init_telnet_env ) 2>"$tmp/no-optin.txt"; then
+  echo "FAIL: init_telnet_env applied the public default without ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD=1" >&2; exit 1
+fi
+grep -q 'TELNET_PASSWORD unset' "$tmp/no-optin.txt" || {
+  echo "FAIL: refusing the public default must name the missing value (got '$( < "$tmp/no-optin.txt")')" >&2; exit 1; }
+if ( TELNET_PASSWORD='s3cret-pass' ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD=true init_telnet_env ) 2>/dev/null; then
+  echo "FAIL: init_telnet_env accepted ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD outside {0,1}" >&2; exit 1
+fi
+if ( TELNET_PASSWORD='s3cret-pass' ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD=0 init_telnet_env ) 2>"$tmp/optin-zero.txt"; then
+  :
+else
+  echo "FAIL: an explicit 0 opt-in must not block a private TELNET_PASSWORD" >&2; exit 1
+fi
+if [[ -s "$tmp/optin-zero.txt" ]]; then
+  echo "FAIL: a private TELNET_PASSWORD must be silent (got '$( < "$tmp/optin-zero.txt")')" >&2; exit 1
+fi
+echo "init_telnet_env public-default opt-in OK"
 (
   set -euo pipefail
   source "$ROOT/scripts/lib-env.sh"

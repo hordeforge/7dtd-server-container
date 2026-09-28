@@ -387,5 +387,28 @@ with tempfile.TemporaryDirectory() as tmp:
         and not (project / "mods-available").exists(),
     )
 
+# The three SEVENDTD_* values land in ssh/rsync argv, where a token starting
+# with '-' is an option, not a destination: '-oProxyCommand=...' would run a
+# command on the deploy workstation. The shape check must refuse that before
+# anything is staged or transferred.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    for var, hostile in (
+        ("SEVENDTD_SERVER_HOST", "-oProxyCommand=touch /tmp/pwned"),
+        ("SEVENDTD_SERVER_USER", "-oProxyCommand=touch /tmp/pwned"),
+        ("SEVENDTD_SERVER_DIR", "~/7dtd-server; touch /tmp/pwned"),
+    ):
+        project, env = make_sandbox(tmpdir / var, timeout_name=None)
+        env[var] = hostile
+        proc = run_deploy(project, env)
+        out = proc.stdout + proc.stderr
+        check(f"{var} rejects an argv-injection shape", proc.returncode == 2)
+        check(f"{var} rejection names the variable", var.encode() in out)
+        check(
+            f"{var} rejection transferred nothing",
+            invocations(Path(env["DEPLOY_TEST_RSYNC_LOG"])) == []
+            and invocations(Path(env["DEPLOY_TEST_SSH_LOG"])) == [],
+        )
+
 exit_status()
 print("deploy.sh remote-restart contract OK")

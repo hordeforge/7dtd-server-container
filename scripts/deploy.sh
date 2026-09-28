@@ -3,6 +3,7 @@
 # server host is never touched (it is created and owned by run.sh there).
 # Env overrides: SEVENDTD_SERVER_HOST (default 192.168.0.100),
 # SEVENDTD_SERVER_USER (default maci), SEVENDTD_SERVER_DIR (default ~/7dtd-server).
+# Each is shape-checked before staging, because they reach ssh/rsync argv.
 #
 #   ./scripts/deploy.sh            # push project + mods
 #   ./scripts/deploy.sh --restart  # push, then restart the container so the
@@ -51,6 +52,25 @@ case "${1:-}" in
     exit 2
     ;;
 esac
+
+# All three SEVENDTD_* values reach ssh/rsync argv, and ssh reads any token
+# starting with '-' as an option rather than a destination: a host or user of
+# '-oProxyCommand=touch /tmp/pwn' becomes an option that runs that command on
+# the deploy workstation. Pin the shape at the boundary instead of trusting the
+# environment. A host or user is a DNS label, IPv4 literal, or dotted/underscore
+# name; a destination is an absolute path built from the same safe set. This
+# rejects an IPv6 literal (it needs brackets), which no configured host here
+# uses. Checked before staging, so a bad value touches nothing.
+reject_deploy_target() { # name value pattern
+  local name="$1" value="$2" pattern="$3"
+  if [[ ! "$value" =~ $pattern ]]; then
+    echo "FATAL: $name must match $pattern (got '$value')" >&2
+    exit 2
+  fi
+}
+reject_deploy_target SEVENDTD_SERVER_HOST "$HOST" '^[A-Za-z0-9][A-Za-z0-9._-]*$'
+reject_deploy_target SEVENDTD_SERVER_USER "$SSH_USER" '^[A-Za-z0-9][A-Za-z0-9._-]*$'
+reject_deploy_target SEVENDTD_SERVER_DIR "$DEST_DIR" '^/[A-Za-z0-9._/-]*$'
 
 "$ROOT/scripts/stage_mods.sh"
 

@@ -147,16 +147,30 @@ Defaults are the stock serverconfig with minimal changes:
 - `WebDashboardEnabled` true (APM panel), telnet on
 - All difficulty/rule properties untouched (stock defaults)
 
-Overrides (all optional):
+Overrides:
 
 ```bash
-export TELNET_PASSWORD=change-me            # telnet console password (default retest)
+export TELNET_PASSWORD=change-me            # telnet console password; required,
+                                            # there is no default (see below)
 export TELNET_PORT=8087                     # telnet port (default 8087)
 export WEBADMIN_PASSWORD=change-me          # dashboard webuser password; if unset a
                                             # random one is minted at first seed and
                                             # written to data/userdata/Saves/.webadmin-password
 export STEAMCMD_UPDATE=0                    # skip steamcmd validate on next start
 ```
+
+`TELNET_PASSWORD` is required. The committed lab default (`retest`) is public
+and a set telnet password makes the game listen on every interface, so a boot
+without one stops with a `FATAL` instead of falling back. To run the lab on the
+public default, opt in explicitly:
+
+```bash
+export ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD=1
+```
+
+The telnet console is full server control (`shutdown`, `admin add`,
+`setgamepref`); on a LAN-reachable listener the public default is a takeover
+waiting to happen.
 
 The dashboard webuser password is never stored in the repo: at first seed the
 entrypoint takes `WEBADMIN_PASSWORD` (min 8 chars) or generates a random value,
