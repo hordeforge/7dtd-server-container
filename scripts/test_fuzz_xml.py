@@ -264,7 +264,9 @@ def misdeclared(raw: bytes) -> list[bytes]:
     hand-edited config on a workstation produces.
     """
     body = DECLARATION_RE.sub(b"", raw, count=1)
-    return [b'<?xml version="1.0" encoding="' + name + b'?>' + body for name in MISDECLARED_ENCODINGS]
+    return [
+        b'<?xml version="1.0" encoding="' + name + b"?>" + body for name in MISDECLARED_ENCODINGS
+    ]
 
 
 def seed_corpus(rng: random.Random) -> list[bytes]:
