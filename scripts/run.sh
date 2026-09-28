@@ -568,6 +568,14 @@ make_common() {
   } >"$secret_env_file"
   COMMON=(
     --network host
+    # The game, steamcmd and the entrypoint all run as container root (see
+    # the Containerfile), so root here is the design, not a grant the mod set
+    # needs. no-new-privileges keeps it that way: nothing in this image uses a
+    # setuid binary, so the flag costs the container nothing and denies a
+    # hostile mod or a game process that turns on the one escalation route a
+    # root process still has. The quadlet unit passes the same flag for the
+    # same reason, so both lifecycles of the same container agree.
+    --security-opt no-new-privileges
     --env-file "$secret_env_file"
     -e TELNET_PORT="$TELNET_PORT"
     -e STEAMCMD_UPDATE="$STEAMCMD_UPDATE"
@@ -697,12 +705,16 @@ stop() {
       echo "telnet not reachable on $TELNET_PORT; falling back to forced stop"
     fi
     # Event-driven exit wait: one blocking `podman wait` instead of spawning
-    # a rootless `podman inspect` on an interval. timeout(1) exits 124 only
-    # when the 90s budget runs out with the container still up, which is the
-    # force-stop signal; any other failure (e.g. container already gone)
-    # falls through silently to the idempotent stop below.
+    # a rootless `podman inspect` on an interval. run_bounded (the shared
+    # helper, same one the telnet sessions and deploy.sh use) supplies the
+    # time bound, so this resolves gtimeout(1) on the macOS workstations where
+    # coreutils installs that name: a bare `timeout` there is a command-not-found
+    # that returns 127 at once, and the save the telnet request just asked for
+    # would be cut short by the podman stop a line below. The bound expires as
+    # 124, which is the force-stop signal; any other failure (e.g. the
+    # container already gone) falls through silently to the idempotent stop.
     local wait_rc=0
-    timeout 90 podman wait "$NAME" >/dev/null 2>&1 || wait_rc=$?
+    run_bounded 90 podman wait "$NAME" >/dev/null 2>&1 || wait_rc=$?
     if [[ "$wait_rc" == 124 ]]; then
       echo "container still running after telnet shutdown; forcing stop"
       # The server accepted the session but did not shut down (rejected
@@ -864,12 +876,12 @@ backup() {
   archive_saves
 }
 
-# Is this archive restorable? Readable gzip/tar, a Saves/ payload, and no
-# entry that writes outside the archive root. Shared by restore(), which must
-# not touch data/userdata until the archive passes, and verify_backup(), so
-# the periodic check a green backup gets is the same check the restore path
-# applies. Names the reason on stderr and returns nonzero; the caller decides
-# what refusing means.
+# Is this archive restorable? Readable gzip/tar, a Saves/ payload, no link
+# member, and no entry that writes outside the archive root. Shared by
+# restore(), which must not touch data/userdata until the archive passes, and
+# verify_backup(), so the periodic check a green backup gets is the same check
+# the restore path applies. Names the reason on stderr and returns nonzero; the
+# caller decides what refusing means.
 check_archive_payload() { # archive
   local archive="$1"
   # tar's own diagnostic is left on stderr rather than discarded: a corrupt
@@ -878,9 +890,29 @@ check_archive_payload() { # archive
   # guess which one they are holding. It is not merged into $listing, because
   # the loop below treats every line of that as an archive entry and a warning
   # line would then read as a path outside the archive root.
-  local listing entry has_saves=0
+  local listing verbose entry has_saves=0
   if ! listing="$(tar -tzf "$archive")"; then
     echo "FATAL: $archive is not a readable tar.gz (truncated or corrupt). tar's own diagnostic is on the line above." >&2
+    return 1
+  fi
+  # Link members, refused outright. The name walk below only sees paths, and a
+  # link's path is inside Saves/ like anything else: an archive holding
+  # `Saves/escape -> /etc` and `Saves/escape/cron.d/x` lists two ordinary
+  # Saves/ entries, passes every name test, and then extraction writes through
+  # the symlink to a path outside the archive root (tar extracts members in
+  # archive order, so the link is in place before the entry behind it). A world
+  # save holds regular files and directories and nothing else, so a link member
+  # is never legitimate here and there is no shape worth trying to resolve
+  # safely. The mode is the first field of `tar -tv` output, ahead of the name,
+  # so a member named `l...` cannot be mistaken for one; the herestring keeps
+  # the listing out of a pipeline, where a grep exiting at the first match
+  # would SIGPIPE tar and, under pipefail, fail the check it was asked for.
+  if ! verbose="$(tar -tvzf "$archive" 2>/dev/null)"; then
+    echo "FATAL: $archive cannot be listed with its member types; refusing it" >&2
+    return 1
+  fi
+  if LC_ALL=C grep -Eq '^[lh]' <<<"$verbose"; then
+    echo "FATAL: $archive holds a symlink or hard link member; refusing it (a link is how an archive writes outside its own root, and a world save has none)" >&2
     return 1
   fi
   while IFS= read -r entry; do

@@ -71,6 +71,7 @@ from __future__ import annotations
 import contextlib
 import datetime
 import fcntl
+import io
 import os
 import re
 import shutil
@@ -248,6 +249,13 @@ with tempfile.TemporaryDirectory() as tmp:
     check(
         "the health start period covers the depot download",
         "--health-start-period" in run_args_text,
+    )
+    # The game and steamcmd run as container root by design, so the flag that
+    # keeps them from gaining anything more is the point: nothing in the image
+    # is setuid, and the quadlet unit passes the same one.
+    check(
+        "start runs the container with no-new-privileges",
+        "--security-opt no-new-privileges" in run_args_text,
     )
 
     envfile_args = envfile_paths(invocations)
@@ -1138,6 +1146,70 @@ with tempfile.TemporaryDirectory() as tmp:
     check(
         "the escaping restore left the saves alone",
         (saves / "r.0.0.region").read_bytes() == b"current-world",
+    )
+
+
+# A link member is the same escape by another route. Every name in the archive
+# sits inside Saves/, so the path walk accepts it, and extraction writes
+# through the symlink to whatever it points at: the victim file below is the
+# proof, and it has to come back unchanged.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    make_sandbox(tmpdir)
+    install_podman_stub(tmpdir, PODMAN_STUB)
+    saves = tmpdir / "data" / "userdata" / "Saves" / "region"
+    saves.mkdir(parents=True)
+    (saves / "r.0.0.region").write_bytes(b"current-world")
+    (tmpdir / "backups").mkdir(parents=True)
+    victim_dir = tmpdir / "victim"
+    victim_dir.mkdir()
+    (victim_dir / "secret").write_bytes(b"original")
+    crafted = tmpdir / "backups" / "7dtd-saves-20200101-000000.tar.gz"
+    with tarfile.open(crafted, "w:gz") as tf:
+        saves_dir = tarfile.TarInfo("Saves")
+        saves_dir.type = tarfile.DIRTYPE
+        saves_dir.mode = 0o755
+        tf.addfile(saves_dir)
+        link = tarfile.TarInfo("Saves/escape")
+        link.type = tarfile.SYMTYPE
+        link.linkname = str(victim_dir)
+        tf.addfile(link)
+        link_bytes = b"written through the link"
+        member = tarfile.TarInfo("Saves/escape/secret")
+        member.size = len(link_bytes)
+        tf.addfile(member, io.BytesIO(link_bytes))
+    crafted.chmod(0o600)
+    env = stub_env(tmpdir)
+    proc = subprocess.run(
+        [str(tmpdir / "scripts" / "run.sh"), "restore"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    out = proc.stdout + proc.stderr
+    check(
+        "restore of an archive carrying a link member refuses",
+        proc.returncode != 0 and b"link" in out,
+    )
+    check(
+        "the link archive wrote nothing outside the archive root",
+        (victim_dir / "secret").read_bytes() == b"original",
+    )
+    check(
+        "the refusing restore left the saves alone",
+        (saves / "r.0.0.region").read_bytes() == b"current-world",
+    )
+    verify = subprocess.run(
+        [str(tmpdir / "scripts" / "run.sh"), "verify-backup", str(crafted)],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    check(
+        "verify-backup calls the same archive un-restorable",
+        verify.returncode != 0 and b"FAIL" in verify.stdout,
     )
 
 

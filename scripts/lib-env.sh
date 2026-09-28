@@ -27,7 +27,7 @@
 # the probe cannot drift from the port init_telnet_env owns.
 DEFAULT_TELNET_PORT=8087
 DEFAULT_TELNET_PASSWORD=retest
-require_argc() { # max_args extra_argv usage_fn
+require_argc() { # max_args usage_fn extra_argv
   local max="$1" usage_fn="$2" extra="$3"
   if [[ -n "$extra" ]]; then
     echo "FATAL: unexpected argument '$extra' ($0 takes at most $max argument(s))" >&2
@@ -340,42 +340,48 @@ sweep_stale_staging() { # dir...
 # (so the MD5 the dashboard stores and the password an operator types agree,
 # with no NFC/NFD pair to normalize), and the rendered XML attribute is
 # well-formed in whatever encoding the game reads it as.
-# Why a value is refused, or nothing at all when it passes. The classifier the
-# error message is built on, split out so a rule can be asked about a value
-# without having it exit the calling shell (the seeded fuzz harness checks this
-# contract on every case it generates).
-printable_ascii_check() { # value; prints 'whitespace', 'charset', or nothing
-  local LC_ALL=C
+# The value rules as a predicate: prints the reason a value is refused
+# ('whitespace', 'charset') and returns nonzero, or prints nothing and returns
+# 0 when the value is accepted. The classifier the error message is built on,
+# split out so a rule can be asked about a value without having it exit the
+# calling shell, and the one owner of the rules, so reject_unsafe_value below is
+# the only thing that turns a refusal into an exit and a message, and so a
+# caller that wants the verdict without dying (the fuzz oracle, a future config
+# report) reads the same contract the gate enforces.
+printable_ascii_check() { # value
+  local LC_ALL=C reason
   # Leading or trailing whitespace would not survive the trip through the
   # podman --env-file renderer in run.sh (its parser trims each line), so the
   # value the container sees would silently differ from the one validated
   # here; reject both edges up front. Interior whitespace is kept.
+  # The patterns below match each forbidden character literally; the escaped
+  # quote inside one is the only way to write a literal single quote in a
+  # pattern.
+  # shellcheck disable=SC1003  # intentional literal-quote case patterns
   case "$1" in
-    [[:space:]]*|*[[:space:]]) printf 'whitespace'; return 0 ;;
+    [[:space:]]*|*[[:space:]]) reason=whitespace ;;
+    *'\'*|*'|'*|*'&'*|*"'"*|*'"'*|*'$'*|*'`'*|*'<'*|*'>'*|*[![:print:]]*)
+      reason=charset ;;
+    *) return 0 ;;
   esac
-  # The pattern matches each forbidden character literally; the escaped quote
-  # inside it is the only way to write a literal single quote in a pattern.
-  # shellcheck disable=SC1003  # intentional literal-quote case pattern
-  case "$1" in
-    *'\'*|*'|'*|*'&'*|*"'"*|*'"'*|*'$'*|*'`'*|*'<'*|*'>'*|*[![:print:]]*) printf 'charset'; return 0 ;;
-  esac
-  printf ''
+  printf '%s' "$reason"
+  return 1
 }
 
 reject_unsafe_value() { # name value
-  local name="$1" reason
-  reason="$(printable_ascii_check "$2")"
+  local reason
+  if reason="$(printable_ascii_check "$2")"; then
+    return 0
+  fi
   case "$reason" in
-    '') ;;
     whitespace)
-      echo "FATAL: $name must not start or end with whitespace" >&2
-      exit 1
+      echo "FATAL: $1 must not start or end with whitespace" >&2
       ;;
     *)
-      echo "FATAL: $name must be printable ASCII: no backslash, |, &, ', \", \$, backtick, <, >, control characters, or non-ASCII characters" >&2
-      exit 1
+      echo "FATAL: $1 must be printable ASCII: no backslash, |, &, ', \", \$, backtick, <, >, control characters, or non-ASCII characters" >&2
       ;;
   esac
+  exit 1
 }
 
 # Character count under LC_ALL=C. bash counts characters in a multibyte
