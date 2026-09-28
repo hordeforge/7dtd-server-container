@@ -58,7 +58,7 @@ import os
 import sys
 
 with open(os.environ["DEPLOY_TEST_RSYNC_LOG"], "ab") as f:
-    f.write(b"\\0".join(a.encode() for a in sys.argv[1:]) + b"\\0\\0")
+    f.write(b"\\0".join(a.encode("utf-8") for a in sys.argv[1:]) + b"\\0\\0")
 """
 
 SSH_STUB = """#!/usr/bin/env python3
@@ -66,7 +66,7 @@ import os
 import sys
 
 with open(os.environ["DEPLOY_TEST_SSH_LOG"], "ab") as f:
-    f.write(b"\\0".join(a.encode() for a in sys.argv[1:]) + b"\\0\\0")
+    f.write(b"\\0".join(a.encode("utf-8") for a in sys.argv[1:]) + b"\\0\\0")
 with open(os.environ["DEPLOY_TEST_SSH_STDIN"], "ab") as f:
     f.write(sys.stdin.buffer.read())
 sys.exit(int(os.environ.get("DEPLOY_TEST_SSH_RC", "0")))
@@ -78,7 +78,7 @@ import sys
 
 argv = sys.argv[1:]
 with open(os.environ["DEPLOY_TEST_TIMEOUT_LOG"], "ab") as f:
-    f.write(b"\\0".join(a.encode() for a in argv) + b"\\0\\0")
+    f.write(b"\\0".join(a.encode("utf-8") for a in argv) + b"\\0\\0")
 os.execvp(argv[1], argv[1:])
 """
 
@@ -158,7 +158,9 @@ def make_sandbox(
     if with_dists:
         for mod, sibling in SIBLING_DIST.items():
             (tmpdir / sibling / "dist" / mod / "Config").mkdir(parents=True)
-            (tmpdir / sibling / "dist" / mod / "Config" / "config.json").write_text(mod)
+            (tmpdir / sibling / "dist" / mod / "Config" / "config.json").write_text(
+                mod, encoding="utf-8"
+            )
 
     bindir = tmpdir / "bin"
     bindir.mkdir()

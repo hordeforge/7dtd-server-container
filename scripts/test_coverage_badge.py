@@ -108,7 +108,7 @@ def failing(content: str, out_name: str = "badge.svg") -> int:
         check(f"failure names the input ({content!r})", "cobertura.xml" in err.getvalue())
         check(
             f"failed render left the destination untouched ({content!r})",
-            dst.read_text() == STALE_BADGE,
+            dst.read_text(encoding="utf-8") == STALE_BADGE,
         )
         return rc
 

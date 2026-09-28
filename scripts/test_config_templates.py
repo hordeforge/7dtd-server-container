@@ -93,7 +93,12 @@ def render_with_entrypoint_sed(text: str) -> str | None:
             for arg in ("-e", f"s|@{token}@|{EXPR_VALUES[var]}|g")
         ),
     ]
-    r = subprocess.run(args, input=text, capture_output=True, text=True, check=False)
+    # encoding="utf-8", never text=True: the templates are UTF-8 (one carries
+    # "m²" in a stock comment) and text=True would put the locale encoding on
+    # both ends of the pipe, so a C-locale host raises UnicodeEncodeError
+    # feeding sed and, on a single-byte locale, decodes its output into
+    # mojibake that the well-formedness check below happily passes.
+    r = subprocess.run(args, input=text, capture_output=True, encoding="utf-8", check=False)
     return r.stdout if r.returncode == 0 else None
 
 
@@ -138,6 +143,21 @@ for tmpl_name, expected_tokens in sorted(EXPECTED.items()):
     check(
         f"rendered {tmpl_name} carries the substituted values",
         rendered is not None and all(SUBSTITUTIONS[token] in rendered for token in expected_tokens),
+    )
+    # The whole render, byte for byte: sed must change the @TOKEN@ slots and
+    # nothing else, so every other character of the template survives the trip
+    # through the pipe unchanged. Well-formedness cannot see this (a mis-decoded
+    # "m²" is still a legal character in an attribute-free comment) and neither
+    # can a substring check, so the expectation is computed here from the
+    # template itself: this is what pins the encoding on the subprocess hop
+    # above, and it fails the moment a locale codec mangles a pass-through
+    # character.
+    expected_render = text
+    for token in expected_tokens:
+        expected_render = expected_render.replace(f"@{token}@", SUBSTITUTIONS[token])
+    check(
+        f"rendered {tmpl_name} is byte-identical to the template outside its tokens",
+        rendered == expected_render,
     )
 
 check(

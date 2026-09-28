@@ -106,7 +106,10 @@ def stub_invocations(log: Path) -> list[list[bytes]]:
 def envfile_paths(records: list[list[bytes]]) -> list[str]:
     """Paths passed to --env-file across invocations, in order."""
     return [
-        rec[i + 1].decode() for rec in records for i, arg in enumerate(rec) if arg == b"--env-file"
+        rec[i + 1].decode("utf-8")
+        for rec in records
+        for i, arg in enumerate(rec)
+        if arg == b"--env-file"
     ]
 
 
@@ -122,7 +125,7 @@ import sys
 
 argv = sys.argv[1:]
 with open(os.environ["STUB_LOG"], "ab") as log:
-    log.write(b"\\0".join(a.encode() for a in argv) + b"\\0\\0")
+    log.write(b"\\0".join(a.encode("utf-8") for a in argv) + b"\\0\\0")
 if "ps" in argv:
     sys.stdout.write(os.environ.get("STUB_PS_OUTPUT", ""))
 if "--env-file" in argv:
@@ -227,7 +230,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # installs a depot before the game listens must sit inside the start
     # period.
     run_args = [a for rec in invocations if rec[:1] == [b"run"] for a in rec]
-    run_args_text = b" ".join(run_args).decode()
+    run_args_text = b" ".join(run_args).decode("utf-8")
     check(
         "start passes a health probe that calls the shipped lib",
         "--health-cmd" in run_args_text and "health_check" in run_args_text,
@@ -426,7 +429,7 @@ def start_fake_telnet(output: Path) -> Iterator[str]:
     )
     assert proc.stdout is not None
     try:
-        yield proc.stdout.readline().decode().strip()
+        yield proc.stdout.readline().decode("utf-8").strip()
     finally:
         proc.kill()
         proc.wait()
@@ -1332,7 +1335,7 @@ with tempfile.TemporaryDirectory() as tmp:
     proc = subprocess.run(
         [str(run_sh), "config"], env=env, capture_output=True, check=False, timeout=30
     )
-    report = proc.stdout.decode()
+    report = proc.stdout.decode("utf-8")
     check("config exits 0", proc.returncode == 0)
     check(
         "config reports the .env value and attributes it to the file",
@@ -1377,6 +1380,29 @@ with tempfile.TemporaryDirectory() as tmp:
     check(
         "a misspelled .env key is refused",
         proc.returncode == 1 and b"unknown key 'TELEMET_PORT'" in proc.stderr,
+    )
+    (tmpdir / ".env").unlink()
+
+    # A line the loader skips must not be credited to the file. Leading
+    # whitespace makes the key invalid, so the loader warns and the committed
+    # default is what runs; a report answering ".env" here would send the
+    # operator to edit a setting that never took effect.
+    (tmpdir / ".env").write_text("  TELNET_PORT=9099\n", encoding="utf-8")
+    # TELNET_PORT out of the environment: an environment value wins over the
+    # file and the report would say "environment" whichever way the .env line
+    # is spelled, which is not the question here.
+    portless_env = {k: v for k, v in env.items() if k != "TELNET_PORT"}
+    proc = subprocess.run(
+        [str(run_sh), "config"], env=portless_env, capture_output=True, check=False, timeout=30
+    )
+    port_line = next(
+        (ln for ln in proc.stdout.decode("utf-8").splitlines() if ln.startswith("TELNET_PORT")),
+        "",
+    )
+    check("a .env line the loader skipped is named as skipped", b"invalid key" in proc.stderr)
+    check(
+        f"config does not attribute the default to a skipped .env line (got {port_line!r})",
+        proc.returncode == 0 and port_line.endswith("(default)"),
     )
     (tmpdir / ".env").unlink()
 

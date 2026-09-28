@@ -318,7 +318,13 @@ show_config() { # verdict
       # committed defaults are exactly the values a .env line would carry for
       # these keys, so a key absent from the file is the default. The file was
       # already read (and key-checked) above when it exists.
-      if [[ -f "$ROOT/.env" ]] && grep -qE "^[[:space:]]*(export[[:space:]]+)?${key}=" "$ROOT/.env"; then
+      #
+      # env_file_supplies, not a pattern spelled out here: it replays the
+      # loader's own line walk, so a line the loader skipped (leading
+      # whitespace before the key, say) is not credited to the file. A local
+      # grep with a looser pattern reports the committed default as coming
+      # from .env, which is the one answer this report must never get wrong.
+      if env_file_supplies "$ROOT/.env" "$key"; then
         source='.env'
       else
         source='default'

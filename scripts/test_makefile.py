@@ -14,7 +14,7 @@ import subprocess
 
 from harness import ROOT, check, exit_status
 
-MAKEFILE = (ROOT / "Makefile").read_text()
+MAKEFILE = (ROOT / "Makefile").read_text(encoding="utf-8")
 
 
 def dry_run(*args: str) -> str:
@@ -23,7 +23,7 @@ def dry_run(*args: str) -> str:
         ["make", "-n", *args],
         cwd=ROOT,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
         check=True,
     ).stdout
 

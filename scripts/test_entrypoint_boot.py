@@ -51,7 +51,7 @@ CONFIG = ROOT / "config"
 
 def digest(pw: str) -> str:
     """The exact md5-base64 form the dashboard expects (see lib-env.sh)."""
-    return base64.b64encode(hashlib.md5(pw.encode()).digest()).decode()
+    return base64.b64encode(hashlib.md5(pw.encode("utf-8")).digest()).decode()
 
 
 def webadmin_pass(adm_xml: str) -> str | None:

@@ -95,7 +95,7 @@ def make_bsd_sed_stub(root: Path) -> Path:
     bindir = root / "bsdbin"
     bindir.mkdir()
     stub = bindir / "sed"
-    stub.write_text(BSD_SED_STUB)
+    stub.write_text(BSD_SED_STUB, encoding="utf-8")
     stub.chmod(0o755)
     return bindir
 
@@ -144,7 +144,7 @@ def expect(name: str, proc: subprocess.CompletedProcess[bytes], stdout: str, rc:
     # These commands print exactly one line, so compare the whole stream: a
     # substring match would accept a duplicated or prefixed line and would not
     # notice a command that started printing more than it should.
-    ok = proc.returncode == rc and proc.stdout.decode() == f"{stdout}\n"
+    ok = proc.returncode == rc and proc.stdout.decode("utf-8") == f"{stdout}\n"
     check(f"{name} (rc={proc.returncode}, out={proc.stdout.decode(errors='replace')!r})", ok)
 
 

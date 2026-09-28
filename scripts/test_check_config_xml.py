@@ -115,7 +115,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # A bad file must not cut the batch short: every file is reported, so the
     # operator sees all the breakage in one run instead of one file per fix.
     second_bad = tmpdir / "bad2.xml"
-    second_bad.write_text("<config><unclosed>")
+    second_bad.write_text("<config><unclosed>", encoding="utf-8")
     r = run(str(malformed), str(second_bad), str(good))
     check("every file in a failing batch is reported", b"bad2.xml" in r.stderr)
     check("a good file after a bad one is still checked", str(good).encode() in r.stdout)

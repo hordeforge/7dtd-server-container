@@ -331,7 +331,9 @@ with tempfile.TemporaryDirectory() as tmp:
     # A restart that fails leaves the restaged mods on disk and the running
     # container on the old set: the run must say so rather than exit on
     # run.sh's bare status and read as a completed restage.
-    stub.write_text("#!/usr/bin/env bash\nprintf 'restart\\n' >> \"$UPD_STUB_LOG\"\nexit 3\n")
+    stub.write_text(
+        "#!/usr/bin/env bash\nprintf 'restart\\n' >> \"$UPD_STUB_LOG\"\nexit 3\n", encoding="utf-8"
+    )
     proc = run_script(scripts / "update_mods.sh", cwd=root, env={"UPD_STUB_LOG": str(stub_log)})
     err = proc.stderr.decode(errors="replace")
     check("a failed restart exits nonzero", proc.returncode != 0)
@@ -343,10 +345,12 @@ with tempfile.TemporaryDirectory() as tmp:
         "the restage still happened before the failed restart",
         (mods / "BotMod" / "Config" / "config.json").read_text(encoding="utf-8") == "bot-new",
     )
-    stub.write_text("#!/usr/bin/env bash\nprintf 'restart\\n' >> \"$UPD_STUB_LOG\"\n")
+    stub.write_text(
+        "#!/usr/bin/env bash\nprintf 'restart\\n' >> \"$UPD_STUB_LOG\"\n", encoding="utf-8"
+    )
     # The usage scenarios below count restarts from a clean log: the failing
     # restart above is its own scenario, not part of the successful run.
-    stub_log.write_text("")
+    stub_log.write_text("", encoding="utf-8")
     restarts_before = stub_log.read_text(encoding="utf-8")
 
     # Same usage contract as stage_mods.sh: help wins over extra words,
@@ -388,7 +392,9 @@ with tempfile.TemporaryDirectory() as tmp:
     shutil.copy2(SCRIPTS / "update_mods.sh", scripts / "update_mods.sh")
     stub_log = root / "restarts.log"
     stub = scripts / "run.sh"
-    stub.write_text('#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$UPD_STUB_LOG"\n')
+    stub.write_text(
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$UPD_STUB_LOG"\n', encoding="utf-8"
+    )
     stub.chmod(0o755)
     mods = root / "mods"
     seeded_mod(mods, "EfficientServer", "untouched")

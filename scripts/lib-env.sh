@@ -95,6 +95,38 @@ SEVENDTD_CONTAINER_NAME SEVENDTD_IMAGE SEVENDTD_SERVER_DIR \
 SEVENDTD_SERVER_HOST SEVENDTD_SERVER_USER STEAMCMD_ONLY STEAMCMD_UPDATE \
 TELNET_PASSWORD TELNET_PORT WEBADMIN_PASSWORD"
 
+# The one key-shape test every .env reader applies, so the loader, the
+# unknown-key check and run.sh's provenance report cannot disagree about which
+# lines the loader actually took. A line the loader skips is a line that
+# supplied nothing, and anything reading .env back must say so the same way.
+is_env_key() { # key; true when the loader would accept this key
+  [[ "$1" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]
+}
+
+# Did this .env actually supply this key? Replays the loader's own line walk
+# (blank and comment lines skipped, one optional 'export ' stripped, the key
+# side taken up to the first '=') and asks is_env_key about the result, so the
+# answer is exactly the set of keys load_env_file went on to apply. A looser
+# pattern here is how `run.sh config` ends up reporting ".env" as the source
+# of a value the loader refused to read, which is the one answer the report
+# must never get wrong. Whether the value won over the environment is the
+# caller's own question, answered by its pre-load snapshot.
+env_file_supplies() { # file key
+  local file="$1" want="$2" line key
+  [[ -r "$file" ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      ''|'#'*) continue ;;
+      'export '*) line="${line#'export '}" ;;
+    esac
+    case "$line" in *=*) ;; *) continue ;; esac
+    key="${line%%=*}"
+    is_env_key "$key" || continue
+    [[ "$key" == "$want" ]] && return 0
+  done < "$file"
+  return 1
+}
+
 # Reject a key this project does not configure, before any value is applied.
 # A misspelled key (TELNET_PORTT=9099) is otherwise a line the loader accepts
 # and every script ignores, so the operator's setting silently has no effect
@@ -120,7 +152,7 @@ check_env_file_keys() { # file
     key="${line%%=*}"
     # Same key-shape test load_env_file applies; an invalid key is its warning
     # to raise, not an unknown-key failure.
-    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    is_env_key "$key" || continue
     case " $ENV_FILE_KEYS " in
       *" $key "*) continue ;;
     esac
@@ -152,7 +184,7 @@ load_env_file() {
         ;;
     esac
     key="${line%%=*}"
-    if [[ ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+    if ! is_env_key "$key"; then
       # Name the key side only ('key' stops at the first '='): a malformed
       # line can still carry a secret value that must stay out of the log.
       echo "WARN: $1: ignoring line with invalid key '$key'" >&2
