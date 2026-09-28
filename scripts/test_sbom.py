@@ -90,7 +90,7 @@ class Document(TypedDict):
 
 
 def parse(text: str) -> Document:
-    return cast(Document, json.loads(text))
+    return cast("Document", json.loads(text))
 
 
 def component(doc: Document, name: str) -> Component:
@@ -150,7 +150,7 @@ with tempfile.TemporaryDirectory() as tmp:
         and parse((Path(tmp) / "again.json").read_text(encoding="utf-8")) == doc,
     )
 
-    root_component = cast(Component, doc["metadata"]["component"])
+    root_component = cast("Component", doc["metadata"]["component"])
     check(
         "root component carries VERSION and the repo license",
         root_component["version"] == (ROOT / "VERSION").read_text(encoding="utf-8").strip()
@@ -163,7 +163,7 @@ with tempfile.TemporaryDirectory() as tmp:
             for ref in root_component["externalReferences"]
         ),
     )
-    meta_props = cast(list[Prop], doc["metadata"]["properties"])
+    meta_props = cast("list[Prop]", doc["metadata"]["properties"])
     check(
         "the inventory says it is dev-only and ships in no image",
         any(

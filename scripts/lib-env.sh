@@ -121,10 +121,29 @@ is_env_key() { # key; true when the loader would accept this key
   [[ "$1" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]
 }
 
-# The keys this .env actually supplies, one per line. Replays the loader's
-# own line walk (blank and comment lines skipped, one optional 'export '
-# stripped, the key side taken up to the first '=') and asks is_env_key about
-# the result, so the answer is exactly the set of keys load_env_file went on
+# The key one .env line supplies, written to reply_var; nonzero (and reply_var
+# untouched) when the line supplies none: a blank or comment line, a line
+# without '=', or a key shape is_env_key refuses. One owner of that walk, so
+# the loader, check_env_file_keys and run.sh's provenance report below cannot
+# drift into answering a different question about the same line. The caller
+# reads reply_var, not stdout, so the walk costs no fork per line.
+env_line_key() { # reply_var line
+  local reply_var="$1" line="$2"
+  case "$line" in
+    ''|'#'*) return 1 ;;
+    'export '*) line="${line#'export '}" ;;
+  esac
+  case "$line" in
+    *=*) ;;
+    *) return 1 ;;
+  esac
+  line="${line%%=*}"
+  is_env_key "$line" || return 1
+  printf -v "$reply_var" '%s' "$line"
+}
+
+# The keys this .env actually supplies, one per line. Asks env_line_key about
+# every line, so the answer is exactly the set of keys load_env_file went on
 # to apply. A looser pattern here is how `run.sh config` ends up reporting
 # ".env" as the source of a value the loader refused to read, which is the one
 # answer the report must never get wrong. One pass per file, so a caller
@@ -135,14 +154,9 @@ env_file_keys() { # file; prints one supplied key per line
   local file="$1" line key
   [[ -r "$file" ]] || return 1
   while IFS= read -r line || [[ -n "$line" ]]; do
-    case "$line" in
-      ''|'#'*) continue ;;
-      'export '*) line="${line#'export '}" ;;
-    esac
-    case "$line" in *=*) ;; *) continue ;; esac
-    key="${line%%=*}"
-    is_env_key "$key" || continue
-    printf '%s\n' "$key"
+    if env_line_key key "$line"; then
+      printf '%s\n' "$key"
+    fi
   done < "$file"
 }
 
@@ -163,15 +177,11 @@ check_env_file_keys() { # file
     exit 1
   fi
   while IFS= read -r line || [[ -n "$line" ]]; do
-    case "$line" in
-      ''|'#'*) continue ;;
-      'export '*) line="${line#'export '}" ;;
-    esac
-    case "$line" in *=*) ;; *) continue ;; esac
-    key="${line%%=*}"
-    # Same key-shape test load_env_file applies; an invalid key is its warning
-    # to raise, not an unknown-key failure.
-    is_env_key "$key" || continue
+    # env_line_key applies the loader's own key-shape test; an invalid key is
+    # the loader's warning to raise, not an unknown-key failure.
+    if ! env_line_key key "$line"; then
+      continue
+    fi
     case " $ENV_FILE_KEYS " in
       *" $key "*) continue ;;
     esac
@@ -181,7 +191,7 @@ check_env_file_keys() { # file
 }
 
 load_env_file() {
-  local line key value q
+  local line key raw_key value q
   # An unreadable file would otherwise abort the caller with a bare redirect
   # error naming neither the operation nor which script asked for the file.
   if [[ ! -r "$1" ]]; then
@@ -193,7 +203,6 @@ load_env_file() {
     lineno=$(( lineno + 1 ))
     case "$line" in
       ''|'#'*) continue ;;
-      'export '*) line="${line#'export '}" ;;
     esac
     case "$line" in
       *=*) ;;
@@ -206,13 +215,16 @@ load_env_file() {
         continue
         ;;
     esac
-    key="${line%%=*}"
-    if ! is_env_key "$key"; then
+    # env_line_key owns the walk (comment, optional 'export ', key shape); the
+    # branch below only turns its refusal into the named warning.
+    if ! env_line_key key "$line"; then
       # Name the first word of the key side only (the key side stops at the
       # first '='), plus the line number: 'TELNET_PASSWORD hunter2=x' is an
       # invalid key whose key side still carries the secret, so neither the
       # whole key side nor the line can go to the log.
-      echo "WARN: $1: line $lineno: ignoring line with invalid key '${key%% *}'" >&2
+      raw_key="${line#'export '}"
+      raw_key="${raw_key%%=*}"
+      echo "WARN: $1: line $lineno: ignoring line with invalid key '${raw_key%% *}'" >&2
       continue
     fi
     if [[ -n "${!key+x}" ]]; then
