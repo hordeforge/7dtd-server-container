@@ -17,6 +17,9 @@ import xml.etree.ElementTree as ET
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
 
+ZERO = Decimal(0)
+ONE = Decimal(1)
+
 
 def colour(pct: int) -> str:
     if pct >= 90:
@@ -64,6 +67,13 @@ def main(argv: list[str]) -> int:
             # Infinity fails later inside quantize. Reject both here so every
             # bad value takes the one clean failure path.
             msg = f"line-rate must be finite, got '{rate}'"
+            raise InvalidOperation(msg)
+        # The ratio domain is closed, so a value outside it is a malformed
+        # report, not a number to render: line-rate="-5" would otherwise draw
+        # "-500%" and "9"*400 a 400-digit percentage, both of which a reader
+        # takes as a coverage figure.
+        if not ZERO <= rate <= ONE:
+            msg = f"line-rate must be 0..1, got '{rate}'"
             raise InvalidOperation(msg)
         pct = int((rate * 100).quantize(Decimal(1), rounding=ROUND_HALF_UP))
         Path(argv[2]).write_text(badge(pct, colour(pct)), encoding="utf-8")

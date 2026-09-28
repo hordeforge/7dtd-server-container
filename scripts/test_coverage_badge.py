@@ -6,8 +6,9 @@ Methodology: pin the rendering contract at its boundaries.
              (the documented binary-float distortion case), the missing-
              attribute default, the usage-error exit code, and clean
              nonzero failures (with a named-input message) for malformed
-             XML, non-numeric and non-finite (NaN/infinite) line-rate
-             values, and unwritable outputs
+             XML, non-numeric, non-finite (NaN/infinite) and out-of-domain
+             (negative or over-unity) line-rate values, and unwritable
+             outputs
   colour()   every threshold inclusive; one step below drops to the next band
   badge SVG  well-formed XML whose text nodes carry label + percentage and
             whose value rect carries the band colour
@@ -122,6 +123,14 @@ check("empty line-rate exits 1", failing('<coverage line-rate=""/>') == 1)
 # ValueError traceback. Both non-finite forms must take the clean path.
 check("NaN line-rate exits 1", failing('<coverage line-rate="NaN"/>') == 1)
 check("infinite line-rate exits 1", failing('<coverage line-rate="Infinity"/>') == 1)
+# A ratio outside 0..1 is a malformed report: rendering it draws "-500%" (or a
+# 400-digit number) as if it were a coverage figure.
+check("negative line-rate exits 1", failing('<coverage line-rate="-5"/>') == 1)
+check("over-unity line-rate exits 1", failing('<coverage line-rate="1.5"/>') == 1)
+check(
+    "huge line-rate exits 1",
+    failing('<coverage line-rate="%s"/>' % ("9" * 400)) == 1,
+)
 # An encoding declaration expat cannot honor fails outside ParseError: an
 # unknown codec name raises LookupError, a multi-byte encoding expat refuses
 # raises ValueError. Both reach the same clean exit 1, not a traceback.

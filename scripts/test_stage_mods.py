@@ -217,9 +217,11 @@ with tempfile.TemporaryDirectory() as tmp:
     # already enabled under that name, and still succeeds on the rest. A mod
     # inside NAMES is the enabled set, and an unbuilt or moved sibling repo is
     # not a staging run's decision to act on, so the copy survives the swap
-    # exactly like an unchanged mod does. A mod that was never enabled is still
-    # not enabled here: the missing-dist case above starts from an empty mods/,
-    # so nothing is enabled yet and that branch is unreachable there.
+    # exactly like an unchanged mod does (the swap would otherwise wipe it as
+    # outside the new set). The warning names the mod so the operator sees what
+    # is running unbuilt. A mod that was never enabled is still not enabled
+    # here: the missing-dist case above starts from an empty mods/, so nothing
+    # is enabled yet and that branch is unreachable there.
     root = make_stage_sandbox(tmpdir / "unstaged", ["EfficientServer"])
     seeded_mod(root / "mods", "BotMod", "live-bot")
     proc = run_script(root / "scripts" / "stage_mods.sh", cwd=root, env={})
