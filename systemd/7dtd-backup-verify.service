@@ -1,0 +1,25 @@
+# Periodic proof that the save archives are still readable, and that the
+# backup schedule is still running. Installed next to 7dtd-backup.{service,timer}:
+#
+#   cp systemd/7dtd-backup-verify.{service,timer} ~/.config/containers/systemd/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now 7dtd-backup-verify.timer
+#
+# A backup is only a backup if it can be read back. run.sh backup exiting 0
+# says the tar it just wrote completed; it says nothing about the file a week
+# later, on a filesystem that dropped a tail or a copy that was truncated in
+# transit. This service runs the same preflight restore() applies, without
+# restoring, and exits nonzero when an archive is unreadable or the newest is
+# older than the daily schedule allows, so systemd's unit state and the
+# journal are the alarm, exactly as for the backup timer itself.
+[Unit]
+Description=7 Days to Die backup readability check (scripts/run.sh verify-backup)
+Documentation=man:systemd.timer(5)
+
+[Service]
+Type=oneshot
+ExecStart=%h/7dtd-server/scripts/run.sh verify-backup
+# Reads and lists every archive in backups/ (BACKUP_KEEP, default 7). It
+# extracts nothing and never stops the server, so it is safe to run while the
+# world is live; the timeout only bounds a hung filesystem.
+TimeoutStartSec=300

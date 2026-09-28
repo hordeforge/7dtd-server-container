@@ -41,6 +41,17 @@ password character domain, below), so it is a **major** release: 1.1.3 to
 
 ### Added
 
+- **A scheduled readability check on the save archives.** A backup that exited
+  0 is a claim about the file it wrote that day, not proof the file is still
+  good; a truncated off-host copy, a dropped tail or an archive nobody pruned
+  in was invisible until a restore needed it. `./scripts/run.sh verify-backup`
+  runs the same preflight `restore` applies (readable gzip/tar, a `Saves/`
+  payload, no entry outside the archive root) without restoring anything or
+  stopping the server, prints each archive's size and age, and exits nonzero
+  when an archive is unreadable or the newest is older than three days (the
+  backup schedule not running). `systemd/7dtd-backup-verify.{service,timer}`
+  runs it weekly, so a bad archive leaves the unit failed where the backup
+  timer's failure already does.
 - **A discoverable local loop.** `make` prints the task list, `make test-one
   SUITE=<name>` runs a single suite instead of all twelve, and `make check`
   runs lint and test in CI's order. A missing `uv` or `shellcheck` now fails

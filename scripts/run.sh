@@ -3,9 +3,10 @@
 # host networking). All runtime state lives in ./data on the host; the
 # container itself is disposable.
 #
-# Usage: run.sh {build|start|run|restart|install-only|stop|logs|status|config|backup|restore|version}
-# (`run` is an alias of `start`; `backup` archives the world saves and
-# `restore [archive]` puts one back, defaulting to the newest.)
+# Usage: run.sh {build|start|run|restart|install-only|stop|logs|status|config|backup|restore|verify-backup|version}
+# (`run` is an alias of `start`; `backup` archives the world saves,
+# `restore [archive]` puts one back, defaulting to the newest, and
+# `verify-backup [archive]` checks the archives are still restorable.)
 # `--help` prints the command list without touching the environment or data/.
 # Env overrides: TELNET_PASSWORD, TELNET_PORT, WEBADMIN_PASSWORD,
 # STEAMCMD_UPDATE, STEAMCMD_ONLY, BACKUP_KEEP, SEVENDTD_CONTAINER_NAME,
@@ -24,7 +25,7 @@ source "$ROOT/scripts/lib-env.sh"
 
 usage() {
   cat <<'EOF'
-usage: run.sh {build|start|run|restart|install-only|stop|logs|status|config|backup|restore|version}
+usage: run.sh {build|start|run|restart|install-only|stop|logs|status|config|backup|restore|verify-backup|version}
 
 Manage the 7dtd-server podman container; all runtime state lives in ./data
 (the container itself is disposable).
@@ -48,6 +49,10 @@ Manage the 7dtd-server podman container; all runtime state lives in ./data
                  archive, and one that already holds it is a no-op);
                  archives the current saves first, so a
                  restore is itself reversible
+  verify-backup  check that the archives in backups/ are still readable
+                 and restorable, without restoring one (no argument =
+                 every archive, otherwise just the named one), and fail
+                 when the newest is older than the daily schedule allows
   version        print the VERSION file (the canonical version home)
 
 Env overrides: TELNET_PASSWORD, TELNET_PORT, WEBADMIN_PASSWORD,
@@ -79,11 +84,11 @@ esac
 # (guards live in scripts/lib-env.sh, shared with the other ops scripts).
 COMMAND="${1:-status}"
 require_command "$COMMAND" \
-  'build|start|run|restart|install-only|stop|logs|status|config|backup|restore|version' usage
-# restore alone takes an archive path; every other command takes none, so a
-# stray second word is still the usage error it was before.
+  'build|start|run|restart|install-only|stop|logs|status|config|backup|restore|verify-backup|version' usage
+# restore and verify-backup alone take an archive path; every other command
+# takes none, so a stray second word is still the usage error it was before.
 case "$COMMAND" in
-  restore) require_optional_arg usage "${@:2}" ;;
+  restore|verify-backup) require_optional_arg usage "${@:2}" ;;
   *)       require_argc 0 usage "${2:-}" ;;
 esac
 
@@ -144,6 +149,15 @@ PRERESTORE_SUFFIX=prerestore
 # past a real race; anything that still cannot be claimed is a create failure
 # no further suffix will fix, and the retry must end rather than spin.
 ARCHIVE_CLAIM_TRIES=100
+# Ceiling on BACKUP_KEEP, well past any host's worth of daily archives, and
+# comfortably inside the machine word so the prune arithmetic never overflows
+# on an operator typo.
+MAX_BACKUP_KEEP=100000
+# How old the newest archive may be before verify-backup calls the backup
+# schedule broken. Two daily runs plus a day of slack: past this, the timer
+# is not running, not merely late, and the RPO is whatever the oldest
+# surviving archive says.
+BACKUP_STALE_SECS=259200
 # The archive archive_saves last wrote, left for its callers: restore() names
 # it when a later extraction fails, so the operator is handed the path of the
 # saves the failed restore replaced instead of having to look for it.
@@ -295,6 +309,17 @@ check_backup_keep() {
   fi
   if (( KEEP_BACKUPS < BACKUP_KEEP_MIN )); then
     echo "FATAL: BACKUP_KEEP must be at least $BACKUP_KEEP_MIN (got '$KEEP_BACKUPS')" >&2
+    exit 1
+  fi
+  # Bounded by digit count first, arithmetic second: a value past the machine
+  # word ("99999999999999999999") makes `(( ))` abort the whole run on an
+  # overflow error, which reads as a failed backup rather than a rejected
+  # value, and the daily timer would then carry a broken BACKUP_KEEP for a
+  # day. Equal length means both sides fit a machine word, so the numeric
+  # compare below is safe.
+  if (( ${#KEEP_BACKUPS} > ${#MAX_BACKUP_KEEP} )) ||
+    { (( ${#KEEP_BACKUPS} == ${#MAX_BACKUP_KEEP} )) && (( 10#$KEEP_BACKUPS > 10#$MAX_BACKUP_KEEP )); }; then
+    echo "FATAL: BACKUP_KEEP must be at most $MAX_BACKUP_KEEP (got '$KEEP_BACKUPS')" >&2
     exit 1
   fi
 }
@@ -709,6 +734,108 @@ backup() {
   archive_saves
 }
 
+# Is this archive restorable? Readable gzip/tar, a Saves/ payload, and no
+# entry that writes outside the archive root. Shared by restore(), which must
+# not touch data/userdata until the archive passes, and verify_backup(), so
+# the periodic check a green backup gets is the same check the restore path
+# applies. Names the reason on stderr and returns nonzero; the caller decides
+# what refusing means.
+check_archive_payload() { # archive
+  local archive="$1"
+  # tar's own diagnostic is left on stderr rather than discarded: a corrupt
+  # archive fails here for many reasons (short read, bad gzip trailer, an
+  # unreadable file) and "truncated or corrupt" alone leaves the operator to
+  # guess which one they are holding. It is not merged into $listing, because
+  # the loop below treats every line of that as an archive entry and a warning
+  # line would then read as a path outside the archive root.
+  local listing entry has_saves=0
+  if ! listing="$(tar -tzf "$archive")"; then
+    echo "FATAL: $archive is not a readable tar.gz (truncated or corrupt). tar's own diagnostic is on the line above." >&2
+    return 1
+  fi
+  while IFS= read -r entry; do
+    # Escape first, payload second. A case takes the first pattern that
+    # matches, and every escaping path under the payload root also matches
+    # Saves/*: with the order reversed, `Saves/../../escape` and `Saves/..`
+    # were counted as payload and never reached the rejection, so an archive
+    # whose only Saves/ entries climb out of the tree was accepted and
+    # extracted.
+    case "$entry" in
+      /*|../*|*/../*|*/..)
+        echo "FATAL: $archive holds an entry outside the archive root ('$entry'); refusing it" >&2
+        return 1
+        ;;
+      Saves|Saves/*) has_saves=1 ;;
+    esac
+  done <<<"$listing"
+  if (( has_saves == 0 )); then
+    echo "FATAL: $archive contains no Saves/ payload; refusing it" >&2
+    return 1
+  fi
+}
+
+# Human age of a file from its mtime ("2d 3h", "18h", "4m"), for the RPO an
+# operator reads off the archives. Whole minutes at the bottom: a backup that
+# just ran reads "0m", which is what it is.
+format_age() { # seconds
+  local secs="$1"
+  if (( secs >= 86400 )); then
+    printf '%dd %dh\n' $(( secs / 86400 )) $(( secs % 86400 / 3600 ))
+  elif (( secs >= 3600 )); then
+    printf '%dh\n' $(( secs / 3600 ))
+  else
+    printf '%dm\n' $(( secs / 60 ))
+  fi
+}
+
+verify_backup() { # [archive]
+  # Prove the archives are still readable without restoring one, and say how
+  # old the newest is. A backup that exited 0 can still be unreadable later
+  # (a truncated copy off-host, a filesystem that dropped a tail, bit rot),
+  # and without this the only evidence a backup works is the exit code of the
+  # run that wrote it. Runs restore()'s own preflight, so a pass here is the
+  # same verdict the restore path would give.
+  local archive="${1:-}" archives=() now age failed=0 newest_age=-1
+  now="$(date -u +%s)"
+  if [[ -n "$archive" ]]; then
+    archives=("$archive")
+  else
+    shopt -s nullglob
+    archives=("$BACKUP_DIR"/7dtd-saves-*.tar.gz)
+    shopt -u nullglob
+    if (( ${#archives[@]} == 0 )); then
+      echo "FATAL: no backup archive in $BACKUP_DIR to verify; the world has no backup at all" >&2
+      exit 1
+    fi
+  fi
+  for archive in "${archives[@]}"; do
+    if [[ ! -f "$archive" ]]; then
+      echo "FAIL: no such backup archive: $archive"
+      failed=1
+      continue
+    fi
+    if ! check_archive_payload "$archive"; then
+      echo "FAIL: $archive is not restorable (reason above); an incident today would not recover from it"
+      failed=1
+      continue
+    fi
+    # mtime, not the stamp in the name: a hand-placed or rsynced archive
+    # carries a name its copy date never earned, and the age of the data is
+    # what the RPO claim rests on.
+    age=$(( now - $(stat -c %Y "$archive") ))
+    (( age < 0 )) && age=0
+    echo "OK: $archive ($(du -h "$archive" | cut -f1), written $(format_age "$age") ago)"
+    if (( newest_age < 0 || age < newest_age )); then
+      newest_age=$age
+    fi
+  done
+  (( failed == 0 )) || exit 1
+  if (( newest_age > BACKUP_STALE_SECS )); then
+    echo "FATAL: the newest archive was written $(format_age "$newest_age") ago, over the $BACKUP_STALE_SECS limit; the backup schedule is not running, so the RPO is unbounded" >&2
+    exit 1
+  fi
+}
+
 restore() {
   # Put a backup archive back into data/userdata/Saves. This is the other
   # half of backup(): without it a backup is a hypothesis nobody has tested.
@@ -741,36 +868,9 @@ restore() {
     exit 1
   fi
   # Preflight before touching data/userdata: a truncated or corrupt archive
-  # must fail here, not halfway through a half-replaced Saves/. Listing it
-  # also rejects an archive that would write outside the tree.
-  local listing entry has_saves=0
-  # tar's own diagnostic is left on stderr rather than discarded: a corrupt
-  # archive fails here for many reasons (short read, bad gzip trailer, an
-  # unreadable file) and "truncated or corrupt" alone leaves the operator to
-  # guess which one they are holding. It is not merged into $listing, because
-  # the loop below treats every line of that as an archive entry and a warning
-  # line would then read as a path outside the archive root.
-  if ! listing="$(tar -tzf "$archive")"; then
-    echo "FATAL: $archive is not a readable tar.gz (truncated or corrupt); nothing was changed. tar's own diagnostic is on the line above." >&2
-    exit 1
-  fi
-  while IFS= read -r entry; do
-    # Escape first, payload second. A case takes the first pattern that
-    # matches, and every escaping path under the payload root also matches
-    # Saves/*: with the order reversed, `Saves/../../escape` and `Saves/..`
-    # were counted as payload and never reached the rejection, so an archive
-    # whose only Saves/ entries climb out of the tree was accepted and
-    # extracted.
-    case "$entry" in
-      /*|../*|*/../*|*/..)
-        echo "FATAL: $archive holds an entry outside the archive root ('$entry'); refusing to extract" >&2
-        exit 1
-        ;;
-      Saves|Saves/*) has_saves=1 ;;
-    esac
-  done <<<"$listing"
-  if (( has_saves == 0 )); then
-    echo "FATAL: $archive contains no Saves/ payload; refusing to restore it" >&2
+  # must fail here, not halfway through a half-replaced Saves/.
+  if ! check_archive_payload "$archive"; then
+    echo "FATAL: refusing to restore $archive; nothing was changed." >&2
     exit 1
   fi
   # container_running, not a `podman ps | grep -Fxq` pipeline: grep -q exits at
@@ -885,6 +985,7 @@ case "$COMMAND" in
   stop)         stop ;;
   backup)       backup ;;
   restore)      restore "${2:-}" ;;
+  verify-backup) verify_backup "${2:-}" ;;
   logs)         podman logs -f "$NAME" ;;
   # Anchor the name filter: podman treats it as a regex, and unanchored it
   # would also list the $NAME-install pre-warm container.

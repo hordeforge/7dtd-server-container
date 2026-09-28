@@ -17,7 +17,8 @@ and disposable.
 Running in production on the LAN host. Working: image build, steamcmd
 install/validate with bounded retries, config render and admin seed, mod
 staging and per-boot sync, graceful stop that saves the world first, save
-backups with retention and a verified restore path, and the quadlet service.
+backups with retention, a verified restore path, and a scheduled readability
+check on the archives, and the quadlet service.
 `make lint` and `make test` gate every push.
 
 Partial: coverage is measured for `scripts/lib-env.sh` only, so the badge
@@ -42,7 +43,7 @@ exposing this host beyond a trusted LAN.
 | `scripts/stage_mods.sh` | Copy built mods from sibling `dist/` into `mods-available/`, recreate the enabled copies |
 | `scripts/deploy.sh` | Stage mods + rsync this project to the server host (`--restart` also restarts the container) |
 | `scripts/update_mods.sh` | Server-side: restage enabled mods + restart container (no image rebuild) |
-| `scripts/run.sh` | Container lifecycle on the server host (build/start/install-only/logs/stop/backup/restore/status/config/version; `--help` lists them) |
+| `scripts/run.sh` | Container lifecycle on the server host (build/start/install-only/logs/stop/backup/restore/verify-backup/status/config/version; `--help` lists them) |
 | `scripts/perf.sh` | EfficientServer toggle (`on`/`off`/`status`) + telnet `apm status` snapshot (`measure`) |
 | `scripts/lib-env.sh` | Shared `.env` loader, telnet value validation, telnet session helper (sourced by the ops scripts) |
 | `start.sh` / `stop.sh` | Top-level daily shortcuts: start / graceful stop (wrap `run.sh`) |
@@ -302,6 +303,20 @@ Restoring:
 ./start.sh
 ```
 
+Checking the backups before you need them:
+
+```bash
+./scripts/run.sh verify-backup                                   # every archive in backups/
+./scripts/run.sh verify-backup backups/7dtd-saves-20260901-120000.tar.gz
+```
+
+`verify-backup` runs the same preflight `restore` applies (readable gzip/tar,
+a `Saves/` payload, no entry outside the archive root) without restoring
+anything or stopping the server, and prints each archive's size and age. It
+exits 1 when an archive is unreadable or the newest one is older than three
+days, which means the backup schedule stopped running. The exit code of the
+`backup` run that wrote a file is not evidence the file is still good.
+
 `restore` verifies the archive (readable gzip/tar, carries a `Saves/`
 payload, no entry escaping the archive root) before it touches anything, and
 refuses while the server runs, because the game would write over the restored
@@ -334,9 +349,11 @@ restored files keep the owner-only mode the archives use
 podman build -t localhost/7dtd-server:latest .
 cp systemd/7dtd-server.container ~/.config/containers/systemd/
 cp systemd/7dtd-backup.{service,timer} ~/.config/containers/systemd/
+cp systemd/7dtd-backup-verify.{service,timer} ~/.config/containers/systemd/
 systemctl --user daemon-reload
 systemctl --user enable --now 7dtd-server
 systemctl --user enable --now 7dtd-backup.timer
+systemctl --user enable --now 7dtd-backup-verify.timer
 loginctl enable-linger maci
 ```
 
@@ -345,6 +362,14 @@ loginctl enable-linger maci
 nothing bounds the RPO: the world is only as safe as the last time you
 remembered. A failed run leaves the unit failed, visible in
 `systemctl --user status 7dtd-backup.service` and the journal.
+
+`7dtd-backup-verify.timer` runs `./scripts/run.sh verify-backup` weekly
+(Monday 05:23, plus up to 10 minutes of jitter, and a missed week runs at the
+next boot). It re-reads every archive `backups/` still holds and fails the
+unit when one is unreadable or the newest is older than three days, so a
+truncated archive or a backup schedule that stopped running shows up in
+`systemctl --user status 7dtd-backup-verify.service` instead of at the next
+restore.
 
 Stops and restarts of the service go through the same graceful path as
 `./stop.sh` (telnet save + shutdown before the container is killed), via the

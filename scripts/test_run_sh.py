@@ -1592,5 +1592,135 @@ with tempfile.TemporaryDirectory() as tmp:
         bool(snapshot_names) and snapshot_names[0].encode() in out,
     )
 
+
+# verify-backup: the periodic proof that a backup is still readable. A backup
+# job that exited 0 is a hypothesis about the file it wrote, and a truncated
+# copy, a bit-rotted tail or a pruned archive is invisible until a restore
+# needs it. The check runs the same preflight restore() runs, exits nonzero on
+# an unreadable archive, and fails on a stale schedule (nothing new to restore
+# from is the disaster this command exists to catch early).
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    make_sandbox(tmpdir)
+    install_podman_stub(tmpdir, PODMAN_STUB)
+    saves = tmpdir / "data" / "userdata" / "Saves" / "region"
+    saves.mkdir(parents=True)
+    (saves / "r.0.0.region").write_bytes(b"current-world")
+    backups = tmpdir / "backups"
+    backups.mkdir()
+    plant_archive(backups / "7dtd-saves-20200101-000000.tar.gz", b"old-world")
+    env = stub_env(tmpdir)
+    run = tmpdir / "scripts" / "run.sh"
+
+    proc = subprocess.run(
+        [str(run), "verify-backup"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    out = proc.stdout + proc.stderr
+    check("verify-backup exits 0 on a readable archive", proc.returncode == 0)
+    check("verify-backup names the archive it checked", b"7dtd-saves-20200101-000000.tar.gz" in out)
+    check(
+        "verify-backup reports the archive's age (the RPO)",
+        re.search(rb"written \S+ ago", out) is not None,
+    )
+    check(
+        "verify-backup never touches the saves",
+        (saves / "r.0.0.region").read_bytes() == b"current-world",
+    )
+    check("verify-backup wrote no archive of its own", len(list(backups.glob("*.tar.gz"))) == 1)
+
+    # A corrupt archive is the case the command exists for: the backup that
+    # wrote it exited 0, and only reading the file back catches it.
+    (backups / "7dtd-saves-20200101-000000.tar.gz").write_bytes(b"not-a-tarball")
+    proc = subprocess.run(
+        [str(run), "verify-backup"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    out = proc.stdout + proc.stderr
+    check(
+        "verify-backup fails on an unreadable archive",
+        proc.returncode == 1 and b"not a readable tar.gz" in out,
+    )
+    check(
+        "the failed verify says the archive would not save an incident",
+        b"not restorable" in out,
+    )
+    check(
+        "the failed verify carries tar's own diagnostic",
+        b"tar:" in out or b"gzip:" in out,
+    )
+
+    # A named archive is verified on its own, so an operator can check one
+    # copy without the rest of backups/.
+    plant_archive(backups / "7dtd-saves-20200101-000000.tar.gz", b"old-world")
+    proc = subprocess.run(
+        [str(run), "verify-backup", "backups/7dtd-saves-20200101-000000.tar.gz"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    check("verify-backup accepts one named archive", proc.returncode == 0)
+    check(
+        "the named-archive verify checked only that archive",
+        proc.stdout.count(b"OK:") == 1,
+    )
+    proc = subprocess.run(
+        [str(run), "verify-backup", "backups/7dtd-saves-19990101-000000.tar.gz"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    check(
+        "verify-backup fails on a named archive that is not there",
+        proc.returncode == 1 and b"no such backup archive" in proc.stdout,
+    )
+
+    # A readable archive nobody has refreshed: the backup schedule is not
+    # running, and the world is only as safe as the oldest surviving archive.
+    stale = backups / "7dtd-saves-20200101-000000.tar.gz"
+    old = time.time() - 30 * 86400
+    os.utime(stale, (old, old))
+    proc = subprocess.run(
+        [str(run), "verify-backup"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    out = proc.stdout + proc.stderr
+    check("verify-backup fails on a stale archive set", proc.returncode == 1)
+    check("the stale failure names the RPO", b"RPO is unbounded" in out)
+
+# An empty backups/ is the state a host is in before the first backup ever
+# ran: loud, not a silent pass over zero archives.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    make_sandbox(tmpdir)
+    install_podman_stub(tmpdir, PODMAN_STUB)
+    saves = tmpdir / "data" / "userdata" / "Saves" / "region"
+    saves.mkdir(parents=True)
+    (saves / "r.0.0.region").write_bytes(b"current-world")
+    (tmpdir / "backups").mkdir()
+    proc = subprocess.run(
+        [str(tmpdir / "scripts" / "run.sh"), "verify-backup"],
+        env=stub_env(tmpdir),
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    out = proc.stdout + proc.stderr
+    check(
+        "verify-backup with no archives refuses loudly",
+        proc.returncode == 1 and b"no backup archive" in out,
+    )
+
 exit_status()
 print("run.sh secret-transport and build contract OK")

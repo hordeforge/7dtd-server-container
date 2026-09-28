@@ -24,6 +24,7 @@ Workspace root guide: [`hordeforge/.github` AGENTS.md](https://github.com/hordef
 | Threat model (entry points, boundaries, controls, ranked gaps) | `docs/THREAT_MODEL.md` |
 | Rootless systemd service unit | `systemd/7dtd-server.container` |
 | Daily save-backup schedule | `systemd/7dtd-backup.service`, `systemd/7dtd-backup.timer` (runs `run.sh backup`) |
+| Weekly archive readability check | `systemd/7dtd-backup-verify.service`, `systemd/7dtd-backup-verify.timer` (runs `run.sh verify-backup`) |
 | Version (canonical home) + changelog + tag gate | `VERSION` (`run.sh version`), `CHANGELOG.md`, `.github/workflows/release.yml` (tag must match `VERSION` *and* have a dated `## [X.Y.Z]` section); the image's `org.opencontainers.image.version` label copies it and `scripts/test_containerfile.py` fails the gate when they drift |
 
 ## Does not own
@@ -87,7 +88,8 @@ Workspace root guide: [`hordeforge/.github` AGENTS.md](https://github.com/hordef
 ```
 
 Durable service: quadlet in `systemd/` (see its header). The save backup
-runs daily from `systemd/7dtd-backup.timer`; `backups/` stays on this
+runs daily from `systemd/7dtd-backup.timer` and is re-read weekly by
+`systemd/7dtd-backup-verify.timer`; `backups/` stays on this
 host, so copy it off-host if losing the host must not cost the world
 (README "Recovering state" states the RPO/RTO). Load a mod: copy the
 mod dir into `mods/` (real copies, not symlinks: `mods/` is bind-mounted and

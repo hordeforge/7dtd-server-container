@@ -178,5 +178,49 @@ check(
 calendars = re.findall(r"^OnCalendar=(.*)$", backup_timer, re.MULTILINE)
 check("the timer has a daily schedule", len(calendars) == 1 and "-*-*" in calendars[0])
 
+# The readability check is the other half: a backup nobody can read back is a
+# hypothesis, and the daily timer's exit code only speaks for the run that
+# wrote the file. The weekly verify runs the same command an operator runs by
+# hand, exits nonzero when an archive is unreadable or the newest is older
+# than the daily schedule allows, and so leaves the unit failed where
+# systemd's status and the journal can see it, like the backup timer does.
+verify_service = (ROOT / "systemd" / "7dtd-backup-verify.service").read_text(encoding="utf-8")
+verify_timer = (ROOT / "systemd" / "7dtd-backup-verify.timer").read_text(encoding="utf-8")
+
+check(
+    "the verify timer runs scripts/run.sh verify-backup",
+    re.findall(r"^ExecStart=(.*)$", verify_service, re.MULTILINE)
+    == ["%h/7dtd-server/scripts/run.sh verify-backup"],
+)
+check(
+    "the verify service is a oneshot (no daemon to supervise)",
+    re.findall(r"^Type=(.*)$", verify_service, re.MULTILINE) == ["oneshot"],
+)
+check(
+    "a missed verify runs at the next boot (Persistent=true)",
+    re.findall(r"^Persistent=(.*)$", verify_timer, re.MULTILINE) == ["true"],
+)
+check(
+    "the verify timer targets the verify service",
+    re.findall(r"^Unit=(.*)$", verify_timer, re.MULTILINE) == ["7dtd-backup-verify.service"],
+)
+check(
+    "the verify timer is installed into timers.target",
+    re.findall(r"^WantedBy=(.*)$", verify_timer, re.MULTILINE) == ["timers.target"],
+)
+verify_calendars = re.findall(r"^OnCalendar=(.*)$", verify_timer, re.MULTILINE)
+check(
+    "the verify timer has a weekly schedule",
+    len(verify_calendars) == 1 and "Mon" in verify_calendars[0],
+)
+check(
+    "the verify never runs at the same minute as the daily backup",
+    verify_calendars[0].split()[-1].split(":")[0] != calendars[0].split()[-1].split(":")[0],
+)
+check(
+    "the verify service never stops the server (it only reads archives)",
+    "stop" not in verify_service.split("ExecStart=", 1)[1].splitlines()[0],
+)
+
 exit_status()
-print("backup timer contract OK")
+print("backup and verify timer contract OK")

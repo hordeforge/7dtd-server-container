@@ -1,0 +1,25 @@
+# Schedule for 7dtd-backup-verify.service. Weekly is the right cadence for a
+# readability check: an unreadable archive is dead the moment it is written
+# (the next restore would already fail), so the value here is catching a
+# schedule that stopped running and a copy that rotted in place, both of which
+# are visible a week later at no extra cost.
+#
+#   cp systemd/7dtd-backup-verify.{service,timer} ~/.config/containers/systemd/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now 7dtd-backup-verify.timer
+[Unit]
+Description=Weekly 7 Days to Die backup readability check
+
+[Timer]
+# Monday 05:23, off the hour and away from the 04:17 daily backup so the two
+# jobs never contend for the same archives on the same host.
+OnCalendar=Mon *-*-* 05:23:00
+# A host that was off at the check time runs it at the next boot rather than
+# skipping the week; the check is what says the schedule is alive, so a missed
+# one must not read as a healthy one.
+Persistent=true
+RandomizedDelaySec=600
+Unit=7dtd-backup-verify.service
+
+[Install]
+WantedBy=timers.target
