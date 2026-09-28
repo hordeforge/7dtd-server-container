@@ -107,7 +107,10 @@ with tempfile.TemporaryDirectory() as tmp:
     check("the good file ahead of the bad one was reported", str(good).encode() in r.stdout)
     r = run(str(malformed), str(good))
     check("a bad first file fails the batch too", r.returncode == 1)
-    check("a bad first file does not cut the batch short", str(good).encode() in r.stdout)
+    # The batch does not stop at the first bad file (the contract the script's
+    # own comment and the three-file case below both pin): a good file behind a
+    # bad one is still checked, so one run surfaces every breakage.
+    check("a bad first file does not stop the batch", str(good).encode() in r.stdout)
 
     # A bad file must not cut the batch short: every file is reported, so the
     # operator sees all the breakage in one run instead of one file per fix.
@@ -125,6 +128,28 @@ with tempfile.TemporaryDirectory() as tmp:
         "directory input named in the script's error",
         f"{tmpdir}: NOT well-formed".encode() in r.stderr,
     )
+
+    # An encoding declaration is a statement about the file, and expat fails
+    # two ways on it outside ParseError: an unknown codec name raises
+    # LookupError, a multi-byte encoding expat refuses raises ValueError. Both
+    # are well-formedness verdicts, so both take the report path instead of
+    # the traceback the old except tuple let out.
+    for name, decl in (
+        ("unknown-encoding.xml", "x-unknown-codec"),
+        ("multi-byte-encoding.xml", "utf-7"),
+        ("registry-codec.xml", "base64_codec"),
+    ):
+        declared = tmpdir / name
+        declared.write_text(
+            f"<?xml version='1.0' encoding='{decl}'?><config><prop name='a'>1</prop></config>",
+            encoding="utf-8",
+        )
+        r = run(str(declared))
+        check(f"{decl} declaration exits 1", r.returncode == 1)
+        check(
+            f"{decl} declaration reported as not well-formed, not a traceback",
+            f"{declared}: NOT well-formed".encode() in r.stderr and b"Traceback" not in r.stderr,
+        )
 
 exit_status()
 print("check-config-xml rules OK")

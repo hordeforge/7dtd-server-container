@@ -46,6 +46,21 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   under `Unreleased`, so the release shipped without a changelog section.
   `.github/workflows/release.yml` now also requires a dated
   `## [X.Y.Z] - <date>` heading for the tag.
+- **`scripts/test_fuzz_xml.py`, a seeded fuzz harness for the XML config
+  parsers**, run by `make test`. It assembles structure-aware XML cases
+  (elements, attributes, CDATA, comments, PIs, DTD and entity fragments,
+  encoding declarations, truncation, NUL, control bytes, overlong UTF-8) seeded
+  from the two committed config templates, and drives `check-config-xml.py`
+  and `coverage_badge.py` through the same entry points CI uses. The
+  assertions pin the invariants, not just the absence of a crash: a verdict
+  reaches the documented stream, the CI batch agrees with the single-file
+  check, a badge renders identically twice with a percentage that matches its
+  own label, and a case that exceeds its time or wall-clock budget fails
+  (which is what pins the entity-amplification guard). Fixed seeds and a
+  bounded case count keep the gate deterministic; Atheris is not a dependency
+  of this repo and the analyzer closure stays hash-pinned.
+
+
 - OCI labels on the image (title, description, source, license, version) so
   `podman inspect` reports what it ships. The version label copies `VERSION`,
   and `scripts/test_containerfile.py` fails the gate on a release bump that
@@ -121,6 +136,20 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   a shutdown and a boot for no change.
 
 ### Fixed
+
+- **A config file with an unusable encoding declaration crashed the XML
+  parsers.** `encoding='x-mac-roman'` (an editor that wrote a Mac Roman
+  declaration) or `encoding='utf-7'` fails outside `ParseError`: an unknown
+  codec name raises `LookupError`, a multi-byte encoding expat refuses raises
+  `ValueError`. `check-config-xml.py` and `coverage_badge.py` let both out as a
+  traceback instead of a verdict, so the CI gate died on the one input it
+  exists to report. Both now take the same clean failure path as a syntax
+  error, with the offending file named.
+- **`check-config-xml.py` batch test pinned the opposite of the batch
+  contract.** One case asserted the batch stops at the first bad file, which
+  the script's own comment, the other two batch cases, and the shipped
+  behavior all contradict: every file in a batch is checked so one run
+  surfaces every breakage. The stale assertion now pins the real contract.
 
 - **A failed staging run no longer wipes the enabled mods.** `stage_mods.sh`
   pruned `mods/` down to the owned set before the replacement set was built,

@@ -52,8 +52,11 @@ def main(argv: list[str]) -> int:
             raise InvalidOperation(msg)
         pct = int((rate * 100).quantize(Decimal(1), rounding=ROUND_HALF_UP))
         Path(argv[2]).write_text(badge(pct, colour(pct)), encoding="utf-8")
-    except (OSError, ET.ParseError, ArithmeticError) as exc:
+    except (OSError, ET.ParseError, ArithmeticError, LookupError, ValueError) as exc:
         # InvalidOperation (a non-numeric line-rate) is an ArithmeticError.
+        # LookupError and ValueError are the encoding-declaration failures
+        # ET.parse raises outside ParseError: an unknown codec name and a
+        # multi-byte encoding expat refuses.
         print(f"{argv[0]}: cannot render badge from {argv[1]}: {exc}", file=sys.stderr)
         return 1
     return 0

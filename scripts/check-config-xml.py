@@ -13,10 +13,20 @@ import xml.etree.ElementTree as ET
 
 
 def check(path: str) -> bool:
-    """Parse one file; report it on the right stream. True when well-formed."""
+    """Parse one file; report it on the right stream. True when well-formed.
+
+    Every parse failure is a report, never an exception: the batch keeps
+    going and the gate exits 1 with the offending path named.
+    """
     try:
         ET.parse(path)
-    except (ET.ParseError, OSError) as exc:
+    except (ET.ParseError, OSError, LookupError, ValueError) as exc:
+        # LookupError and ValueError are the two ways an XML *declaration*
+        # escapes ParseError: an encoding name no codec registry knows
+        # ("x-mac-roman", a config edited on a workstation) and a multi-byte
+        # encoding expat refuses ("utf-7", "UTF-32"). Both are statements
+        # about the file, so the file is not well-formed as declared and takes
+        # the same report path as a syntax error instead of a traceback.
         print(f"{path}: NOT well-formed ({exc})", file=sys.stderr)
         return False
     print(path, "well-formed")

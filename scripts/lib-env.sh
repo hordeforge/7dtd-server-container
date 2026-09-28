@@ -518,11 +518,18 @@ request_telnet() { # reply_var command timeout_secs
 
 # Container health probe: is the game actually serving its telnet console
 # right now. Exits 0 when the endpoint accepts a connection, nonzero
-# otherwise. Sources its own port from init_telnet_port so a container started
-# with no telnet environment (the quadlet unit pins none) still probes the
-# port the entrypoint defaulted to, and so a probe never depends on a password
-# the probe never sends: telnet_probe only opens a TCP connect, so the
-# password never leaves the container on this path.
+# otherwise, so a container started with no telnet environment (the quadlet
+# unit pins none) still probes the port the entrypoint defaulted to.
+#
+# Only the port default is applied here, never init_telnet_env's password
+# policy: init_telnet_env exits 1 when no password is pinned and the public
+# default is not opted into, and a subshell that exits there takes the probe
+# with it, so a health check on a healthy endpoint would report unhealthy.
+# Refusing to boot without a password is init_telnet_env's job at start; this
+# function answers whether the console answers. init_telnet_port owns the
+# default so the probe and the entrypoint cannot drift, and a probe never
+# depends on a password the probe never sends: telnet_probe only opens a TCP
+# connect, so the password never leaves the container on this path.
 health_check() { # timeout_seconds (default 5)
   local timeout_secs="${1:-5}"
   init_telnet_port

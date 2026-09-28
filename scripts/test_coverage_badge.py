@@ -110,6 +110,17 @@ check("empty line-rate exits 1", failing('<coverage line-rate=""/>') == 1)
 # ValueError traceback. Both non-finite forms must take the clean path.
 check("NaN line-rate exits 1", failing('<coverage line-rate="NaN"/>') == 1)
 check("infinite line-rate exits 1", failing('<coverage line-rate="Infinity"/>') == 1)
+# An encoding declaration expat cannot honor fails outside ParseError: an
+# unknown codec name raises LookupError, a multi-byte encoding expat refuses
+# raises ValueError. Both reach the same clean exit 1, not a traceback.
+check(
+    "unknown declared encoding exits 1",
+    failing("<?xml version='1.0' encoding='x-unknown-codec'?><coverage line-rate='0.5'/>") == 1,
+)
+check(
+    "multi-byte declared encoding exits 1",
+    failing("<?xml version='1.0' encoding='utf-7'?><coverage line-rate='0.5'/>") == 1,
+)
 
 # Unwritable output directory: OSError must surface as exit 1, not a crash.
 with tempfile.TemporaryDirectory() as tmp:
