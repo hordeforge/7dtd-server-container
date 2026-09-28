@@ -179,11 +179,13 @@ def run_entrypoint(root: Path, extra_env: dict[str, str]) -> subprocess.Complete
     )
 
 
-def no_temp_files(*dirs: Path) -> bool:
+def no_temp_files(*dirs: Path, keep: tuple[str, ...] = ()) -> bool:
     # Every staging name either path uses carries ".tmp" (".serverconfig.xml.tmp",
     # ".<mod>.tmp.$$", ".<mod>.tmp.retired.$$"): a suffix-only test passes on a
-    # Mods dir littered with exactly the artifacts it claims to exclude.
-    return all(".tmp" not in p.name for d in dirs for p in d.iterdir())
+    # Mods dir littered with exactly the artifacts it claims to exclude. `keep`
+    # names the entries a live owner still holds, which the sweep must leave
+    # alone, so the check after a sweep-over-litter is about dead owners only.
+    return all(".tmp" not in p.name or p.name in keep for d in dirs for p in d.iterdir())
 
 
 # The entrypoint's own lines, in the one shape it writes them
@@ -517,7 +519,10 @@ with tempfile.TemporaryDirectory() as tmp:
         "no dead owner's staging entry is left in the game's Mods",
         sorted(p.name for p in game_mods.glob(".*.tmp.*")) == [in_flight.name],
     )
-    check("the sweep left no temp litter", no_temp_files(game_mods))
+    check(
+        "the sweep left no temp litter beyond the live owner's",
+        no_temp_files(game_mods, keep=(in_flight.name,)),
+    )
 
 # The boot's own log lines are the only record of a boot that ended badly, and
 # under --restart unless-stopped several boots share one container log. So every

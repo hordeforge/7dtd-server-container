@@ -6,6 +6,17 @@
 # stable releases satisfying what mypy and yamllint declare at runtime.
 # Extras (dmypy, mypyc, dev, ...) are not installed. When bumping any
 # version here, regenerate its hashes from pypi.org/pypi/<pkg>/<ver>/json.
+#
+# License of the closure, read from each installed dist-info METADATA:
+# ruff, mypy, mypy_extensions, ast-serialize, librt and pyyaml are MIT;
+# typing_extensions is PSF-2.0; pathspec is MPL-2.0; yamllint is
+# GPL-3.0-or-later. tomli is pinned for the python<3.11 marker only and is not
+# installed at the .python-version pin, so no gate runs it. None of this ships:
+# the venv is git-ignored and the image copies only entrypoint.sh and
+# scripts/lib-env.sh, so the copyleft yamllint never reaches a distributed
+# artifact and the MIT license of this repo is unaffected. Re-read the
+# METADATA on every bump: a license line changing here is the signal to look
+# again at whether the tool should run anywhere near a shipped image.
 ruff==0.16.6 \
     --hash=sha256:0700580ed5303723cb3c11c2f1d2a8913ce77b7ea86646dddb887f5417a9ba70 \
     --hash=sha256:0b87d9d16fcb63e8018423ca1d50b7260f15cb2da33e30db4baad4183a948c25 \

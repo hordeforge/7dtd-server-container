@@ -514,6 +514,23 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   1-second per-attempt bound, short enough that a loaded machine could land
   the kill before the stub recorded its attempt and make the test report a
   missing retry. The bound is 3s now, still far below the real one.
+- `scripts/test_entrypoint_boot.py` asserted that a boot's staging sweep left
+  no `.tmp` entry in the game's `Mods` dir, one line after asserting that a
+  live owner's `.BotMod.tmp.$$` entry survives that same sweep. The two
+  cannot both hold, so the suite was red on a clean tree. `no_temp_files` takes
+  the entries a live owner holds and the check is about dead owners only.
+- `scripts/test_stage_mods.py` asserted that an enabled mod whose sibling dist
+  was gone keeps its previously enabled tree, which `stage_mods.sh` has never
+  done: the warning it prints says the server will start without that mod, and
+  the swap drops it. Carrying the old bytes forward would ship a stale mod
+  under the name of one that no longer builds, so the test now asserts the
+  drop and names the contract in the comment.
+- The license of every package in the pinned analyzer closure is recorded in
+  the `requirements-lint.txt` header, read from the installed metadata.
+  `yamllint` is the only copyleft in it (GPL-3.0-or-later, against this
+  repository's MIT); it is a dev tool the image never copies, so nothing
+  shipped is affected. The record makes a license change visible in the diff
+  of the bump that causes it.
 
 ## [1.1.3] - 2026-09-21
 

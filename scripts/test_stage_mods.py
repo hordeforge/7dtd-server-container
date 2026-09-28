@@ -213,8 +213,11 @@ with tempfile.TemporaryDirectory() as tmp:
         sorted(p.name for p in (root / "mods").iterdir()) == ["EfficientServer"],
     )
 
-    # An enabled mod whose sibling dist is gone: the run warns, keeps the
-    # previously enabled tree, and still succeeds. The missing-dist case above
+    # An enabled mod whose sibling dist is gone: the run warns, drops that mod
+    # from the enabled set, and still succeeds on the rest. A tree carried over
+    # from an earlier run would be stale bytes shipped to the server under the
+    # name of a mod that no longer builds, so the warning says the server
+    # starts without it and the swap honors that. The missing-dist case above
     # starts from an empty mods/, so nothing is enabled yet and this branch is
     # unreachable there.
     root = make_stage_sandbox(tmpdir / "unstaged", ["EfficientServer"])
@@ -227,9 +230,8 @@ with tempfile.TemporaryDirectory() as tmp:
         "WARN" in err and "enabled mod BotMod not staged" in err,
     )
     check(
-        "the unstaged mod kept its previously enabled content",
-        (root / "mods" / "BotMod" / "Config" / "config.json").read_text(encoding="utf-8")
-        == "live-bot",
+        "the unstaged mod is dropped rather than carried over stale",
+        sorted(p.name for p in (root / "mods").iterdir()) == ["EfficientServer"],
     )
     check(
         "the restaged mod is still enabled",
