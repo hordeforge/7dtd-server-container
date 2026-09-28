@@ -13,6 +13,8 @@ the cause. Pin the contract here:
                entrypoint.sh substitutes no token outside this contract
   rendered     applying entrypoint.sh's substitutions leaves no '@' behind
                and passes scripts/check-config-xml.py (the CI gate)
+  no ids       the committed admin seed carries no platform user id, and the
+               seeded webuser holds a name and a password and nothing else
 Each failed check prints a FAIL line; the process exits nonzero if any failed.
 """
 
@@ -44,6 +46,11 @@ SUBSTITUTIONS: dict[str, str] = {
     # Any non-empty stand-in proves rendering, never a real credential.
     "WEBADMIN_PASSWORD_HASH": "KilgoreTrout==",
 }
+
+# Attributes in the admin seed that hold a platform account identifier, and so
+# identify a person. Kept in one place so adding a new element type is one
+# line here, not a hunt through the template.
+ID_ATTRS = ("userid", "steamID", "crossuserid")
 
 failed_checks: list[str] = []
 
@@ -105,6 +112,36 @@ for tmpl_name, expected_tokens in sorted(EXPECTED.items()):
 check(
     "entrypoint.sh substitutes nothing outside the contract",
     placeholders(entrypoint_code) == set().union(*EXPECTED.values()),
+)
+
+# A tracked file outlives the host it was cloned on and reaches every reader
+# of the repo, so the seed may not carry an individual's platform identifier:
+# a SteamID64 resolves to a Steam profile and an EOS id links the same person
+# across services. Each host owns that identity in its own
+# Saves/serveradmin.xml. The stock TFP examples stay put: they sit in
+# comments, which ET drops, and a real id would come back as an element
+# attribute.
+seed_root = ET.fromstring((CONFIG / "serveradmin_seed.xml").read_text(encoding="utf-8"))
+committed_ids = [
+    f"{el.tag}[{attr}={el.get(attr)!r}]"
+    for el in seed_root.iter()
+    for attr in ID_ATTRS
+    if el.get(attr)
+]
+check(
+    "serveradmin_seed.xml commits no platform user id"
+    + (f": {', '.join(committed_ids)}" if committed_ids else ""),
+    not committed_ids,
+)
+
+# The seeded webuser authenticates by password alone, so it carries a name
+# and a pass and nothing else; a platform attribute here is where a personal
+# id sneaks back in.
+webusers = seed_root.find("webusers")
+seeded_users = [] if webusers is None else list(webusers)
+check(
+    "seeded webuser carries no platform attributes",
+    all(set(u.attrib) == {"name", "pass"} for u in seeded_users if u.tag == "user"),
 )
 
 if failed_checks:

@@ -51,12 +51,16 @@
 	EVERYTHING BETWEEN <!- - and - -> IS COMMENTED OUT! THE ENTRIES BELOW ARE EXAMPLES THAT ARE NOT ACTIVE!!!
 -->
 <adminTools>
-  <!-- Name in any entries is optional for display purposes only -->
+  <!-- Name in any entries is optional for display purposes only.
+       No individual belongs here: a platform userid is a stable identifier
+       that resolves to a person (and, for EOS, links their activity across
+       services), so this template ships empty and each host adds its own
+       operator with `admin add <platform> <id> 0` on the telnet console
+       (README) or the dashboard. The seed's job is the dashboard webuser
+       below, not an identity. -->
   <users>
     <!-- <user platform="Steam" userid="76561198021925107" name="Hint on who this user is" permission_level="0" /> -->
     <!-- <group steamID="103582791434672565" name="Steam Universe" permission_level_default="1000" permission_level_mod="0" /> -->
-    <user platform="Steam" userid="76561198055688007" name="maci" permission_level="0" />
-    <user platform="EOS" userid="00022b9cbf4b4e23ae412f26de6b1640" name="maci" permission_level="0" />
   </users>
   <whitelist>
     <!-- ONLY PUT ITEMS IN WHITELIST IF YOU WANT WHITELIST ONLY ENABLED!!! -->
@@ -109,7 +113,11 @@
   <webusers>
     <!-- pass is rendered by the container entrypoint from WEBADMIN_PASSWORD
          (or a random value minted at first seed) as the MD5 digest the
-         dashboard expects; the placeholder must never ship with a real hash. -->
-    <user name="admin" pass="@WEBADMIN_PASSWORD_HASH@" platform="Steam" userid="76561198055688007" crossplatform="EOS" crossuserid="00022b9cbf4b4e23ae412f26de6b1640" />
+         dashboard expects; the placeholder must never ship with a real hash.
+         No platform userid: this webuser authenticates with its password
+         only, so no individual's Steam or EOS identifier is committed here.
+         A host that wants Steam login adds its own entry with `createwebuser`
+         on the telnet console (permission_level 0, see <commands> above). -->
+    <user name="admin" pass="@WEBADMIN_PASSWORD_HASH@" />
   </webusers>
 </adminTools>

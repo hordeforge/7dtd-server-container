@@ -141,8 +141,11 @@ seed_admin_file() {
     fi
     return 0
   fi
-  # The server regenerates an empty serveradmin.xml on fresh saves; re-seed the
-  # dashboard admin + webuser once so the APM panel is reachable after wipes.
+  # The server regenerates an empty serveradmin.xml on fresh saves; re-seed
+  # the dashboard webuser once so the APM panel is reachable after wipes. The
+  # template carries no per-host identity: a Steam or EOS userid names a
+  # person, so each host adds its own admins with the `admin` and
+  # `createwebuser` console commands, into the file this seed writes.
   # The webuser credential never ships in the image or repo: WEBADMIN_PASSWORD
   # wins when set, otherwise a random value is minted for this seed. Only the
   # MD5 digest the dashboard expects is written to serveradmin.xml. A minted
