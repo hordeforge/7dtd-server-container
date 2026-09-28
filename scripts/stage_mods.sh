@@ -144,12 +144,22 @@ fi
 # yet touched the enabled set. The per-entry renames below are atomic, and each
 # mod is either its old tree or its new one, never a half-written mix. The
 # directory is bind-mounted, so the swap is per entry rather than one rename of
-# mods/ itself.
+# mods/ itself. What atomicity does not cover is a rename that fails: see the
+# loop for what that leaves behind.
 rm -rf "$ROOT/mods/"*
+# A rename that fails (disk full, permissions) lands between mods, and the old
+# trees are already gone by then, so the mods not yet moved exist only here.
+# The next run's sweep reclaims $enabled_staging (this PID is gone by then), so
+# a bare mv error would leave a half-enabled tree whose missing mods are then
+# deleted. Name the state, the directory holding the rest, and the way out.
 for d in "$enabled_staging"/*/; do
   [[ -d "$d" ]] || continue
   entry="${d%/}"
-  mv "$entry" "$ROOT/mods/${entry##*/}"
+  name="${entry##*/}"
+  if ! mv "$entry" "$ROOT/mods/$name"; then
+    echo "FATAL: failed to enable $name (mv '$entry' -> '$ROOT/mods/$name'); $ROOT/mods holds only the mods moved before this one, and the rest is in $enabled_staging, which the next staging run sweeps -- re-run $0" >&2
+    exit 1
+  fi
 done
 rm -rf "$enabled_staging"
 

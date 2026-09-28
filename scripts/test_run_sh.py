@@ -1371,5 +1371,122 @@ with tempfile.TemporaryDirectory() as tmp:
         and b"values rejected: FATAL: BACKUP_KEEP must be numeric" in proc.stdout,
     )
 
+
+# A backup directory no archive can be claimed in (unwritable here; a full
+# disk or a filesystem that refuses the create behaves the same way) must
+# fail with the cause named. The claim loop used to retry suffixes with no
+# bound, so the run spun forever instead of reporting the one failure no
+# further suffix can fix, and the daily timer never came back.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    make_sandbox(tmpdir)
+    install_podman_stub(tmpdir, PODMAN_STUB)
+    saves = tmpdir / "data" / "userdata" / "Saves" / "region"
+    saves.mkdir(parents=True)
+    (saves / "r.0.0.region").write_bytes(b"chunkdata")
+    backups = tmpdir / "backups"
+    backups.mkdir()
+    backups.chmod(0o500)
+    env = stub_env(tmpdir)
+    try:
+        proc = subprocess.run(
+            [str(tmpdir / "scripts" / "run.sh"), "backup"],
+            env=env,
+            capture_output=True,
+            check=False,
+            timeout=60,
+        )
+    finally:
+        backups.chmod(0o700)
+    out = proc.stdout + proc.stderr
+    check(
+        "backup into an unclaimable backups/ fails instead of spinning",
+        proc.returncode == 1 and b"cannot create a backup archive" in out,
+    )
+    check(
+        "the failed claim names the directory and the cause",
+        b"backups" in out and b"nothing was archived" in out,
+    )
+    check("the failed backup wrote no archive", not list(backups.glob("*.tar.gz")))
+
+
+# A corrupt archive fails restore's preflight. tar's own diagnostic has to
+# reach the operator: "truncated or corrupt" alone does not say whether the
+# file is a short gzip stream, an unreadable path, or something else, and the
+# restore preflight is exactly where that question is answered.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    make_sandbox(tmpdir)
+    install_podman_stub(tmpdir, PODMAN_STUB)
+    saves = tmpdir / "data" / "userdata" / "Saves" / "region"
+    saves.mkdir(parents=True)
+    (saves / "r.0.0.region").write_bytes(b"current-world")
+    backups = tmpdir / "backups"
+    backups.mkdir()
+    (backups / "7dtd-saves-20200101-000000.tar.gz").write_bytes(b"not-a-tarball")
+    env = stub_env(tmpdir)
+    proc = subprocess.run(
+        [str(tmpdir / "scripts" / "run.sh"), "restore"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    out = proc.stdout + proc.stderr
+    check(
+        "restore of a corrupt archive still refuses",
+        proc.returncode != 0 and b"not a readable tar.gz" in out,
+    )
+    check(
+        "the corrupt-archive refusal carries tar's own diagnostic",
+        b"tar:" in out or b"gzip:" in out,
+    )
+
+
+# An archive that lists cleanly and then fails mid-extraction (here: an entry
+# nested under a path the archive already stored as a file) is the one
+# restore failure that has already removed the saves it was replacing. The
+# failure message must name the pre-restore snapshot holding them, because
+# that archive is the only copy and the operator cannot know its name
+# without reading backups/ by hand.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    make_sandbox(tmpdir)
+    install_podman_stub(tmpdir, PODMAN_STUB)
+    saves = tmpdir / "data" / "userdata" / "Saves" / "region"
+    saves.mkdir(parents=True)
+    (saves / "r.0.0.region").write_bytes(b"current-world")
+    backups = tmpdir / "backups"
+    backups.mkdir()
+    broken = backups / "7dtd-saves-20200101-000000.tar.gz"
+    with tempfile.TemporaryDirectory() as stage:
+        (Path(stage) / "Saves").mkdir()
+        (Path(stage) / "Saves" / "region").write_bytes(b"not-a-directory")
+        with tarfile.open(broken, "w:gz") as tf:
+            # Both entries list as Saves/... so the preflight accepts them;
+            # extracting nests a file under a file, which tar refuses.
+            tf.add(Path(stage) / "Saves" / "region", arcname="Saves/region")
+            tf.add(Path(stage) / "Saves", arcname="Saves/region/inner")
+    broken.chmod(0o600)
+    env = stub_env(tmpdir)
+    proc = subprocess.run(
+        [str(tmpdir / "scripts" / "run.sh"), "restore"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    out = proc.stdout + proc.stderr
+    check("a half-extractable archive fails the restore", proc.returncode != 0)
+    snapshot_names = [p.name for p in backups.glob("7dtd-saves-*-prerestore*.tar.gz")]
+    check(
+        "the failed restore left a pre-restore snapshot behind",
+        len(snapshot_names) == 1,
+    )
+    check(
+        "the extraction failure names that snapshot",
+        bool(snapshot_names) and snapshot_names[0].encode() in out,
+    )
+
 exit_status()
 print("run.sh secret-transport and build contract OK")

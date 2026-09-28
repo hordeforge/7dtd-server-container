@@ -92,9 +92,17 @@ esac
 # into a failure. A running container would read as stopped, and stop() would
 # take the forced-stop path with no world save. podman's own error text still
 # reaches the operator: only stdout is captured.
+#
+# A failed probe is not the same answer as an empty set, and the callers act on
+# the difference: stop() skips the telnet save and forces a stop, backup()
+# archives without a fresh saveworld. So the failure is named on stderr rather
+# than answered as a plain "not running"; podman's own diagnostic follows.
 container_running() {
   local names n
-  names="$(podman ps --format '{{.Names}}')" || return 1
+  if ! names="$(podman ps --format '{{.Names}}')"; then
+    echo "WARN: 'podman ps' failed; $NAME treated as not running (stop skips the world save, backup skips saveworld). podman's own error is on the line above." >&2
+    return 1
+  fi
   while IFS= read -r n; do
     if [[ "$n" == "$NAME" ]]; then
       return 0
@@ -108,7 +116,10 @@ container_running() {
 # harmless already-gone case.
 container_exists() {
   local names n
-  names="$(podman ps -a --format '{{.Names}}')" || return 1
+  if ! names="$(podman ps -a --format '{{.Names}}')"; then
+    echo "WARN: 'podman ps -a' failed; $NAME treated as absent, so a failed 'podman stop' cannot be told apart from the already-gone case. podman's own error is on the line above." >&2
+    return 1
+  fi
   while IFS= read -r n; do
     if [[ "$n" == "$NAME" ]]; then
       return 0
@@ -127,6 +138,15 @@ BACKUP_DIR="$ROOT/backups"
 # repeated recovery must never produce. Undoing a restore stays possible by
 # naming the archive explicitly.
 PRERESTORE_SUFFIX=prerestore
+# How many suffixes archive_saves tries while claiming a free archive name.
+# A collision costs one name per second, so this is many orders of magnitude
+# past a real race; anything that still cannot be claimed is a create failure
+# no further suffix will fix, and the retry must end rather than spin.
+ARCHIVE_CLAIM_TRIES=100
+# The archive archive_saves last wrote, left for its callers: restore() names
+# it when a later extraction fails, so the operator is handed the path of the
+# saves the failed restore replaced instead of having to look for it.
+ARCHIVE_PATH=""
 
 # The keys `config` reports, and which of them were already in the
 # environment before the .env load below. The snapshot has to happen here:
@@ -524,7 +544,22 @@ archive_saves() {
   # each run then pruned as if it were its own. noclobber opens with O_EXCL, so
   # exactly one run wins a name and the loser moves on to the next. tar
   # truncates the reserved inode; the umask 077 above already gave it 0600.
-  while ! ( set -o noclobber; : > "$archive" ) 2>/dev/null; do
+  #
+  # Bounded: a name that cannot be claimed at all (BACKUP_DIR unwritable, disk
+  # full, a filesystem that refuses the create) fails the same way for every
+  # suffix, so an open-ended loop spins forever appending names, a hang
+  # standing in for the failure the claim exists to report. ARCHIVE_CLAIM_TRIES
+  # suffixes is far past any real collision (a name per second) and turns the
+  # one cause the retry cannot fix into a named failure.
+  local claim_err=""
+  while :; do
+    if claim_err="$( set -o noclobber; : > "$archive" ) 2>&1"; then
+      break
+    fi
+    if (( n >= ARCHIVE_CLAIM_TRIES )); then
+      echo "FATAL: cannot create a backup archive in $BACKUP_DIR after $n name(s); nothing was archived: ${claim_err:-<no error text>}" >&2
+      exit 1
+    fi
     n=$(( n + 1 ))
     archive="$BACKUP_DIR/$stem-$n.tar.gz"
   done
@@ -556,6 +591,7 @@ archive_saves() {
     fi
   done
   echo "archive written: $archive (keeping the newest $KEEP_BACKUPS in $BACKUP_DIR)"
+  ARCHIVE_PATH="$archive"
 }
 
 backup() {
@@ -624,8 +660,14 @@ restore() {
   # must fail here, not halfway through a half-replaced Saves/. Listing it
   # also rejects an archive that would write outside the tree.
   local listing entry has_saves=0
-  if ! listing="$(tar -tzf "$archive" 2>/dev/null)"; then
-    echo "FATAL: $archive is not a readable tar.gz (truncated or corrupt); nothing was changed" >&2
+  # tar's own diagnostic is left on stderr rather than discarded: a corrupt
+  # archive fails here for many reasons (short read, bad gzip trailer, an
+  # unreadable file) and "truncated or corrupt" alone leaves the operator to
+  # guess which one they are holding. It is not merged into $listing, because
+  # the loop below treats every line of that as an archive entry and a warning
+  # line would then read as a path outside the archive root.
+  if ! listing="$(tar -tzf "$archive")"; then
+    echo "FATAL: $archive is not a readable tar.gz (truncated or corrupt); nothing was changed. tar's own diagnostic is on the line above." >&2
     exit 1
   fi
   while IFS= read -r entry; do
@@ -654,6 +696,7 @@ restore() {
     echo "FATAL: $NAME is running; stop it first (./scripts/run.sh stop) so the game cannot write over the restored saves" >&2
     exit 1
   fi
+  local prerestore_archive=""
   if [[ -d "$USERDATA_DIR/Saves" ]]; then
     # Pre-restore snapshot: the state the restore is about to discard must
     # itself be recoverable, and it lands in the same owner-only archives the
@@ -662,6 +705,7 @@ restore() {
     # instead of undoing itself.
     echo "archiving the current saves before overwriting them ..."
     archive_saves prerestore
+    prerestore_archive="$ARCHIVE_PATH"
   fi
   # Owner-only extraction (umask 077 applies to the restored files too, so
   # serveradmin.xml and the webadmin record stay ungroup-readable), and
@@ -670,7 +714,15 @@ restore() {
   umask 077
   rm -rf "$USERDATA_DIR/Saves"
   if ! tar -xzf "$archive" --no-same-owner -C "$USERDATA_DIR"; then
-    echo "FATAL: extraction of $archive failed; $USERDATA_DIR/Saves is incomplete" >&2
+    # The replacement is already gone by this point, so the failure message
+    # carries the way back: the snapshot taken a line ago holds exactly the
+    # saves the rm removed, and naming it is the difference between a named
+    # recovery and an operator guessing which archive in backups/ it was.
+    if [[ -n "$prerestore_archive" ]]; then
+      echo "FATAL: extraction of $archive failed; $USERDATA_DIR/Saves is incomplete -- the saves it replaced are in $prerestore_archive" >&2
+    else
+      echo "FATAL: extraction of $archive failed; $USERDATA_DIR/Saves is incomplete" >&2
+    fi
     exit 1
   fi
   echo "restored $archive into $USERDATA_DIR/Saves (start the server to load it)"

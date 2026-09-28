@@ -412,5 +412,29 @@ with tempfile.TemporaryDirectory() as tmp:
             and invocations(Path(env["DEPLOY_TEST_SSH_LOG"])) == [],
         )
 
+# Staging is the first of the three deploy phases, and its failure gets the
+# same treatment the rsync and restart phases already had: the stage's own
+# cause plus the phase and the fact that nothing was pushed. Without it the
+# operator reads a FATAL from stage_mods.sh and has to guess which step of the
+# deploy produced it.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    # No sibling dist/ dirs: stage_mods.sh stages nothing and refuses rather
+    # than wiping the enabled set.
+    project, env = make_sandbox(tmpdir / "nostage", timeout_name="timeout", with_dists=False)
+    proc = run_deploy(project, env)
+    out = proc.stdout + proc.stderr
+    check("a failed staging fails the deploy", proc.returncode == 1)
+    check("the failed staging names its phase", b"mod staging failed" in out)
+    check(
+        "the failed staging reports that nothing was pushed",
+        b"nothing was pushed" in out,
+    )
+    check(
+        "a failed staging transfers nothing",
+        invocations(Path(env["DEPLOY_TEST_RSYNC_LOG"])) == []
+        and invocations(Path(env["DEPLOY_TEST_SSH_LOG"])) == [],
+    )
+
 exit_status()
 print("deploy.sh remote-restart contract OK")

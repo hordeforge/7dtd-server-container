@@ -76,7 +76,17 @@ reject_deploy_target SEVENDTD_SERVER_HOST "$HOST" '^[A-Za-z0-9][A-Za-z0-9._-]*$'
 reject_deploy_target SEVENDTD_SERVER_USER "$SSH_USER" '^[A-Za-z0-9][A-Za-z0-9._-]*$'
 reject_deploy_target SEVENDTD_SERVER_DIR "$DEST_DIR" '^/[A-Za-z0-9._/-]*$'
 
-"$ROOT/scripts/stage_mods.sh"
+# Staging is a phase of this deploy, and its failure gets the same treatment
+# the rsync and restart phases below do: stage_mods.sh names its own cause, and
+# this line names the phase and the fact that nothing reached the server host.
+# A bare set -e exit here would leave the operator reading a FATAL from another
+# script with no idea which step of the deploy produced it.
+stage_rc=0
+"$ROOT/scripts/stage_mods.sh" || stage_rc=$?
+if (( stage_rc != 0 )); then
+  echo "FATAL: mod staging failed (exit $stage_rc); nothing was pushed to ${SSH_USER}@${HOST}:${DEST_DIR}" >&2
+  exit 1
+fi
 
 # Bound the network waits: ConnectTimeout stops a dead host from hanging the
 # TCP connect, --timeout aborts a stalled transfer after 60s of no data.

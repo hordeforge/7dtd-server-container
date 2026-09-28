@@ -171,6 +171,31 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   `version` input each run resolved whatever uv was current, so a change in
   what it resolved with showed up as a gate difference with nothing to trace.
   Both jobs now pin `version: "0.12.14"`.
+- **`run.sh backup` spun forever when no archive name could be claimed.** The
+  name claim retries with a new suffix, because a backup and a pre-restore
+  archive inside the same second would otherwise gzip into one path, but the
+  loop had no bound. An unwritable `backups/`, a full disk, or a filesystem
+  that refuses the create fails the same way for every suffix, so the run
+  appended names until it was killed and the daily timer never came back. The
+  claim is now bounded and reports the directory and the create error.
+- **A failed `podman ps` was answered as "not running".** The running and
+  existing probes returned 1 on a podman failure as well as on an empty set,
+  and the callers act on the difference: `stop` skipped the telnet world save
+  and forced a stop, `backup` archived without a fresh `saveworld`, and the
+  run reported success either way. Both probes now name the probe failure on
+  stderr, so the degraded path is visible instead of silent.
+- **A failed restore did not name the saves it had already deleted.** The
+  pre-restore snapshot is the only copy of the world once the extraction
+  starts, and the failure message said only that `Saves` was incomplete. It
+  now names the snapshot, and the corrupt-archive preflight keeps tar's own
+  diagnostic instead of discarding it.
+- **A rename failure in the `stage_mods.sh` swap left a half-enabled
+  `mods/`.** The per-entry renames are atomic, but a failure lands between
+  entries, after the old trees are gone: the mods not yet moved existed only
+  in the staging directory the next run sweeps. The failure now names the
+  staging directory and the way out. A failed `stage_mods.sh` also reached
+  the operator as a bare `deploy.sh` exit, unlike the rsync and restart
+  phases, so it now names its phase and reports that nothing was pushed.
 
 - **A config file with an unusable encoding declaration crashed the XML
   parsers.** `encoding='x-mac-roman'` (an editor that wrote a Mac Roman
