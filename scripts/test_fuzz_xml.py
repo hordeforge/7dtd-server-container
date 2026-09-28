@@ -39,6 +39,7 @@ import contextlib
 import importlib.util
 import io
 import random
+import re
 import sys
 import time
 import xml.etree.ElementTree as ET
@@ -243,17 +244,37 @@ BILLION_LAUGHS = (
 )
 
 
+# The declaration a real document carries, in either quote style, and the
+# names that do not match the bytes the templates actually hold. Both
+# templates are UTF-8 (one carries "m²" in a stock comment), so every name
+# below is a mismatch a hand-edited config produces: a latin-1 editor writes
+# x-mac-roman or iso-8859-1, a Windows editor writes windows-1252, a UTF-16
+# save carries a BOM. expat must answer with a verdict for each, and the
+# verdict must be the same one the CI batch and a direct re-parse give.
+DECLARATION_RE = re.compile(rb"<\?xml[^>]*\?>")
+MISDECLARED_ENCODINGS = (b"x-mac-roman", b"windows-1252", b"iso-8859-1", b"utf-16", b"utf-7")
+
+
+def misdeclared(raw: bytes) -> list[bytes]:
+    """The document under a declaration that names an encoding it is not in.
+
+    Any declaration the template carries is stripped first, so this covers a
+    template that declares UTF-8 and one that declares nothing: both end up
+    read under an encoding their bytes do not match, which is the case a
+    hand-edited config on a workstation produces.
+    """
+    body = DECLARATION_RE.sub(b"", raw, count=1)
+    return [b'<?xml version="1.0" encoding="' + name + b'?>' + body for name in MISDECLARED_ENCODINGS]
+
+
 def seed_corpus(rng: random.Random) -> list[bytes]:
-    """Committed templates, plus truncated and encoding-swapped variants."""
+    """Committed templates, plus truncated and mis-declared variants."""
     corpus: list[bytes] = []
     for path in SEED_FILES:
         raw = path.read_bytes()
         corpus.append(raw)
         corpus.append(raw[: len(raw) // 2])
-        declared = raw.split(b"<?xml version='1.0' encoding='", 1)
-        if len(declared) == 2:
-            _, rest = declared
-            corpus.append(b"<?xml version='1.0' encoding='" + rest)
+        corpus.extend(misdeclared(raw))
         corpus.append(raw.replace(b"value=", b"value=" + rng.choice(NOISE), 1))
     corpus.append(BILLION_LAUGHS)
     return corpus

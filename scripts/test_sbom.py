@@ -107,11 +107,28 @@ def tree(tmp: Path, manifest: str) -> Path:
     return root
 
 
+def plant_metadata(root: Path, stem: str, name: str, licence: str) -> None:
+    """A dist-info beside the tree, shaped like one the installed venv holds."""
+    # Any python* directory name works: the script globs the one it finds and
+    # this fixture only has to look like the shape it globs for.
+    site = root / ".venv" / "lib" / "python9.9" / "site-packages"
+    dist = site / f"{stem}-1.0.dist-info"
+    dist.mkdir(parents=True)
+    (dist / "METADATA").write_text(
+        f"Metadata-Version: 2.4\nName: {name}\nVersion: 1.0\nLicense: {licence}\n",
+        encoding="utf-8",
+    )
+
+
 def run(root: Path) -> subprocess.CompletedProcess[str]:
+    # encoding="utf-8", never text=True: the document is written with
+    # ensure_ascii=False out of UTF-8 metadata, so a locale codec on the pipe
+    # either raises on a non-ASCII component or decodes it into mojibake that
+    # still parses as JSON.
     return subprocess.run(
         [sys.executable, str(root / "scripts" / "sbom.py")],
         capture_output=True,
-        text=True,
+        encoding="utf-8",
         cwd="/",
         check=False,
     )
@@ -232,6 +249,39 @@ with tempfile.TemporaryDirectory() as tmp:
             == sorted((c["name"], c["version"]) for c in doc["components"]),
         )
 
+    # Non-ASCII text on the way in, out through both sinks, and out through a
+    # pipe: a pin name, a license field and a marker all reach the document
+    # verbatim, and the document is written with ensure_ascii=False, so this is
+    # where a locale codec on either end of the pipe shows up. The names stand
+    # in for whatever non-ASCII text a manifest or an installed METADATA
+    # carries; what is pinned is the hop, not the particular string. The bytes
+    # are compared, not the decoded text: a mojibake round trip decodes to
+    # something JSON still parses.
+    with tempfile.TemporaryDirectory() as uni:
+        uni_root = tree(
+            Path(uni),
+            f'spätzle==1.0; python_version < "3.11" <café> \\\n    --hash=sha256:{"0" * 64}\n',
+        )
+        plant_metadata(uni_root, "spätzle", "spätzle", "Café Proprietary")
+        uni_out = Path(uni) / "sbom.cdx.json"
+        check("a non-ASCII pin renders to a file", sbom.main([str(SBOM), str(uni_out)]) == 0)
+        uni_bytes = uni_out.read_bytes()
+        uni_text = uni_bytes.decode("utf-8")
+        uni_doc = parse(uni_text)
+        uni_comp = uni_doc["components"][0]
+        check(
+            "the component name, license and marker survive the render verbatim",
+            uni_comp["name"] == "spätzle"
+            and uni_comp["licenses"] == [{"license": {"id": "Café Proprietary"}}]
+            and uni_comp["properties"][0]["value"] == 'python_version < "3.11" <café>',
+        )
+        check("the document is written as UTF-8", uni_bytes.decode("utf-8") == uni_text)
+        result = run(uni_root)
+        check(
+            "stdout is the same UTF-8 document, byte for byte",
+            result.returncode == 0 and result.stdout.encode("utf-8") == uni_bytes,
+        )
+
     with tempfile.TemporaryDirectory() as bad:
         bad_root = tree(Path(bad), "ruff==0.16.6\n")
         result = run(bad_root)
@@ -263,7 +313,7 @@ with tempfile.TemporaryDirectory() as tmp:
         )
 
     result = subprocess.run(
-        [sys.executable, str(SBOM)], capture_output=True, text=True, check=False
+        [sys.executable, str(SBOM)], capture_output=True, encoding="utf-8", check=False
     )
     check("stdout carries the same document as the file", parse(result.stdout) == doc)
     with contextlib.redirect_stdout(io.StringIO()) as help_out:
