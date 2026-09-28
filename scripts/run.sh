@@ -150,6 +150,11 @@ BACKUP_DIR="$ROOT/backups"
 # repeated recovery must never produce. Undoing a restore stays possible by
 # naming the archive explicitly.
 PRERESTORE_SUFFIX=prerestore
+# How many digits BACKUP_KEEP may carry: the documented range in .env.example
+# is 1 to 999999999. bash arithmetic is signed 64-bit and wraps silently past
+# it, so a wider value would pass the range check and reach the prune loop as a
+# count nobody typed.
+BACKUP_KEEP_MAX_DIGITS=9
 # How many suffixes archive_saves tries while claiming a free archive name.
 # A collision costs one name per second, so this is many orders of magnitude
 # past a real race; anything that still cannot be claimed is a create failure
@@ -216,19 +221,24 @@ BACKUP_KEEP_MAX=999999999
 # check_backup_keep, called from check_env_values, so the `config` report
 # survives a rejected value the way it does for every other key it reports.
 KEEP_BACKUPS="${BACKUP_KEEP:-7}"
-# A leading zero is padding, not an octal literal, and bash does not agree:
-# (( 08 < 1 )) is an arithmetic error, not a comparison, so the value slipped
-# past the rules below and then failed inside the prune arithmetic, leaving
-# the excess unset and every archive kept. Strip the padding here, in the main
-# shell, so the value the report prints, the check accepts and the prune
-# subtracts are one number. All zeros collapse to 0, below the minimum, and a
-# non-numeric value is left alone so check_backup_keep can name what the
-# operator actually wrote.
-normalize_backup_keep() {
-  KEEP_BACKUPS="${KEEP_BACKUPS#"${KEEP_BACKUPS%%[!0]*}"}"
-  KEEP_BACKUPS="${KEEP_BACKUPS:-0}"
-}
-normalize_backup_keep
+# Read in base 10 here, in the main shell, not only inside check_backup_keep:
+# `config` runs the value rules in a subshell, so a padded count would be
+# reported in the form the run itself never uses. A leading zero is padding,
+# not an octal literal, and bash does not agree: (( 08 < 1 )) is an arithmetic
+# error, not a comparison, so the value would slip past the rules below and
+# then fail inside the prune arithmetic, leaving the excess unset and every
+# archive kept. A value the rules reject is left alone here and named by the
+# report.
+case "$KEEP_BACKUPS" in
+  '' | *[!0-9]*) ;;
+  *)
+    # An over-wide value is left as typed: 10# would wrap it to a count
+    # nobody set, and check_backup_keep refuses it by name instead.
+    if (( ${#KEEP_BACKUPS} <= BACKUP_KEEP_MAX_DIGITS )); then
+      KEEP_BACKUPS=$(( 10#$KEEP_BACKUPS ))
+    fi
+    ;;
+esac
 
 NAME="${SEVENDTD_CONTAINER_NAME:-7dtd-server}"
 IMAGE="${SEVENDTD_IMAGE:-localhost/7dtd-server:latest}"
@@ -306,27 +316,21 @@ check_backup_keep() {
   # Bound the digits before any arithmetic. bash reads an integer as 64-bit
   # and wraps a longer one silently, so 18446744073709551617 is 1 there: a
   # 20-digit value would reach the comparison as a small one and pass a
-  # ceiling no count could justify. The length test comes first and || stops
-  # the arithmetic from running on what it rejected, so the value handed to
-  # (( )) is at most as many digits as the ceiling itself.
-  if (( ${#KEEP_BACKUPS} > ${#BACKUP_KEEP_MAX} )) ||
-     (( KEEP_BACKUPS > BACKUP_KEEP_MAX )); then
+  # ceiling no count could justify. This also keeps `(( ))` from aborting the
+  # whole run on the overflow error a value past the machine word
+  # ("99999999999999999999") raises, which reads as a failed backup rather
+  # than a rejected value. Equal-or-fewer digits than the ceiling itself
+  # means both sides fit a machine word, so the numeric compare below is safe.
+  if (( ${#KEEP_BACKUPS} > ${#BACKUP_KEEP_MAX} )); then
+    echo "FATAL: BACKUP_KEEP must be at most $BACKUP_KEEP_MAX (got '$KEEP_BACKUPS')" >&2
+    exit 1
+  fi
+  if (( KEEP_BACKUPS > BACKUP_KEEP_MAX )); then
     echo "FATAL: BACKUP_KEEP must be at most $BACKUP_KEEP_MAX (got '$KEEP_BACKUPS')" >&2
     exit 1
   fi
   if (( KEEP_BACKUPS < BACKUP_KEEP_MIN )); then
     echo "FATAL: BACKUP_KEEP must be at least $BACKUP_KEEP_MIN (got '$KEEP_BACKUPS')" >&2
-    exit 1
-  fi
-  # Bounded by digit count first, arithmetic second: a value past the machine
-  # word ("99999999999999999999") makes `(( ))` abort the whole run on an
-  # overflow error, which reads as a failed backup rather than a rejected
-  # value, and the daily timer would then carry a broken BACKUP_KEEP for a
-  # day. Equal length means both sides fit a machine word, so the numeric
-  # compare below is safe.
-  if (( ${#KEEP_BACKUPS} > ${#MAX_BACKUP_KEEP} )) ||
-    { (( ${#KEEP_BACKUPS} == ${#MAX_BACKUP_KEEP} )) && (( 10#$KEEP_BACKUPS > 10#$MAX_BACKUP_KEEP )); }; then
-    echo "FATAL: BACKUP_KEEP must be at most $MAX_BACKUP_KEEP (got '$KEEP_BACKUPS')" >&2
     exit 1
   fi
 }

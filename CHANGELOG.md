@@ -197,6 +197,26 @@ password character domain, below), so it is a **major** release: 1.1.3 to
 
 ### Fixed
 
+- **A `BACKUP_KEEP` with a leading zero was read as an octal literal, and an
+  absurdly long one was read as a plausible count.** `(( KEEP_BACKUPS < 1 ))`
+  reads `08` as an invalid octal number, so a padded retention value silently
+  failed the range check, and bash wraps a 64-bit signed integer, so
+  `BACKUP_KEEP=99999999999999999999` passed it and reached the prune loop as
+  7766279631452241919. The value is now normalized in base 10 where it is
+  read, and a value wider than the documented `1` to `999999999` range is
+  refused by name before any command acts on it.
+- **A host with no MD5 tool rendered an empty dashboard password digest.**
+  `webadmin_password_digest` ran `md5_hex` in a command substitution and
+  discarded its status, so the "no MD5 digest tool" guard never reached the
+  caller and `base64` of an empty hex (the empty string) was written into
+  `serveradmin.xml` as a password the dashboard would accept. The status is
+  propagated now, and an empty digest is refused with the same loud failure.
+- **`deploy.sh` let the shell expand its own rsync exclude pattern.** The
+  `--exclude .scratch*` argument was unquoted, so a deploy run from a
+  directory that happens to hold a `.scratch*` entry replaced the pattern with
+  that filename and stopped excluding the scratch trees the pattern exists for.
+  It is quoted now.
+
 - **The quadlet unit tried to pull an image nobody publishes.** The image is
   built on the server host and is never pushed to a registry, but the unit
   carried no `Pull=`, so quadlet's `missing` default stayed quiet only while

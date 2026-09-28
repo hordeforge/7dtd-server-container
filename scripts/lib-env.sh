@@ -625,7 +625,14 @@ md5_hex() {
 # path and its test vector, so the two cannot drift apart.
 webadmin_password_digest() { # password; digest on stdout
   local hex
-  hex="$(printf '%s' "$1" | md5_hex)"
+  # md5_hex's own status, not a discarded one: without it a missing digest
+  # tool yields an empty hex, and base64 of nothing is the empty digest the
+  # dashboard would accept as a blank password.
+  hex="$(printf '%s' "$1" | md5_hex)" || return 1
+  if [[ -z "$hex" ]]; then
+    echo "FATAL: MD5 digest of the password came back empty" >&2
+    return 1
+  fi
   hex="${hex%% *}"
   printf '%b' "$(printf '%s' "$hex" | sed 's/\(..\)/\\x\1/g')" | base64
 }

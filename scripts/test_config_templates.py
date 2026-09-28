@@ -187,12 +187,21 @@ check(
 
 # The seeded webuser authenticates by password alone, so it carries a name
 # and a pass and nothing else; a platform attribute here is where a personal
-# id sneaks back in.
+# id sneaks back in. The user is counted as well as inspected: a `webusers`
+# element that lost its user passes an all() over nothing, and the dashboard
+# would then be unreachable with nothing in the suite to say so.
 webusers = seed_root.find("webusers")
-seeded_users = [] if webusers is None else list(webusers)
+seeded_users = [] if webusers is None else [u for u in webusers if u.tag == "user"]
 check(
-    "seeded webuser carries no platform attributes",
-    all(set(u.attrib) == {"name", "pass"} for u in seeded_users if u.tag == "user"),
+    "the seed carries exactly one dashboard webuser",
+    len(seeded_users) == 1,
+)
+check(
+    "seeded webuser carries a name, a pass, and no platform attribute",
+    len(seeded_users) == 1
+    and set(seeded_users[0].attrib) == {"name", "pass"}
+    and bool(seeded_users[0].get("name"))
+    and bool(seeded_users[0].get("pass")),
 )
 
 exit_status()

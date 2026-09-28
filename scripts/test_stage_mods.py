@@ -171,7 +171,26 @@ with tempfile.TemporaryDirectory() as tmp:
     # cases below start from a clean tree.
     shutil.rmtree(live)
     shutil.rmtree(retired)
-    check("staging litter swept from both directories", litter_gone(mods, mods_available))
+    # The run's own staging directory (mods/.enabled.tmp.$$) must be gone
+    # afterwards, named by the shape the script builds, not by "no dot
+    # entries": that predicate is true of a tree the run never wrote into, so
+    # it passes whether or not the swap finished.
+    check(
+        "the run's staging dir was removed",
+        not any(p.name.startswith(".enabled.tmp.") for p in mods.iterdir()),
+    )
+    # The operator-facing summary is what says which set is enabled; the run
+    # can exit 0 while printing nothing at all. list_dir prints one name per
+    # line, so each summary is its slice of stdout between its label and the
+    # next one.
+    stdout = proc.stdout.decode(errors="replace")
+    reports = stdout.split("enable another mod persistently:")[0]
+    enabled_reported = reports.split("enabled:")[1].split("available:")[0].split()
+    available_reported = reports.split("available:")[1].split()
+    check(
+        "the summary names the enabled set",
+        sorted(enabled_reported) == sorted(NAMES) and sorted(available_reported) == sorted(NAMES),
+    )
 
     # A missing sibling dist warns but must not block the other mods.
     root = make_stage_sandbox(tmpdir / "missing", ["EfficientServer"])
@@ -185,6 +204,30 @@ with tempfile.TemporaryDirectory() as tmp:
     check(
         "only present dists were enabled",
         sorted(p.name for p in (root / "mods").iterdir()) == ["EfficientServer"],
+    )
+
+    # An enabled mod whose sibling dist is gone: the run warns, keeps the
+    # previously enabled tree, and still succeeds. The missing-dist case above
+    # starts from an empty mods/, so nothing is enabled yet and this branch is
+    # unreachable there.
+    root = make_stage_sandbox(tmpdir / "unstaged", ["EfficientServer"])
+    seeded_mod(root / "mods", "BotMod", "live-bot")
+    proc = run_script(root / "scripts" / "stage_mods.sh", cwd=root, env={})
+    err = proc.stderr.decode(errors="replace")
+    check("stage with an unstaged enabled mod exits 0", proc.returncode == 0)
+    check(
+        "the unstaged enabled mod is named on stderr",
+        "WARN" in err and "enabled mod BotMod not staged" in err,
+    )
+    check(
+        "the unstaged mod kept its previously enabled content",
+        (root / "mods" / "BotMod" / "Config" / "config.json").read_text(encoding="utf-8")
+        == "live-bot",
+    )
+    check(
+        "the restaged mod is still enabled",
+        (root / "mods" / "EfficientServer" / "Config" / "config.json").read_text(encoding="utf-8")
+        == "marker-EfficientServer-0",
     )
 
 # A redeploy that changed no mod is the common case, and it must not rewrite
@@ -241,6 +284,7 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     check("a hand-enabled mod is still swept on a redeploy", not (mods / "OldMod").exists())
     check("staging litter swept on a redeploy", litter_gone(mods))
+
 
 # The enabled set is the one thing staging must never lose: deploy.sh pushes
 # whatever mods/ holds, so a run that fails part way (or stages nothing at all)
@@ -300,7 +344,13 @@ with tempfile.TemporaryDirectory() as tmp:
         == "live-efficient"
         and (mods / "BotMod" / "Config" / "config.json").read_text(encoding="utf-8") == "live-bot",
     )
-    check("a failed enable copy swept its staging dir", litter_gone(mods))
+    check(
+        "a failed enable copy swept its staging dir",
+        # The named shape, not "no dot entries": litter_gone is also true of a
+        # staging dir that was never created, so it cannot see the leftover
+        # this failure is supposed to remove.
+        not any(p.name.startswith(".enabled.tmp.") for p in mods.iterdir()),
+    )
 
 # NAMES and SRCS are read by index: a mod listed in one and not the other would
 # stage a sibling's dist under another mod's name, so the script must refuse
@@ -317,7 +367,16 @@ with tempfile.TemporaryDirectory() as tmp:
     proc = run_script(script, cwd=root, env={})
     err = proc.stderr.decode(errors="replace")
     check("mismatched NAMES/SRCS exits 1", proc.returncode == 1)
-    check("mismatch names both sides on stderr", "FATAL" in err and "SRCS" in err)
+    # Both sides of the pair and both counts, not just the word SRCS: the
+    # enabled-set names are the only useful part of the diagnostic to whoever
+    # added a mod to one array, and a message naming neither still passed.
+    check(
+        "mismatch names both sides on stderr",
+        "FATAL" in err
+        and "SRCS" in err
+        and all(n in err for n in NAMES)
+        and f"({len(NAMES)} vs {len(NAMES) - 1})" in err,
+    )
     mods = root / "mods"
     check(
         "the mismatched run staged nothing",

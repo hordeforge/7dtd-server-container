@@ -25,6 +25,8 @@ Scenarios:
               300s, and the destination reaches ssh via stdin only
   degraded    --restart with neither timeout nor gtimeout: exit 0, WARN
               names the lost bound, ssh still carries the restart
+  transfer    a nonzero rsync: the run stops after the partial tree, names
+              the phase and the way out, and never opens the restart session
   failing     --restart whose ssh exits nonzero: deploy exits nonzero and
               the FATAL names phase, host, and the deployed-tree/stale-mods
               state plus the recovery command
@@ -59,6 +61,7 @@ import sys
 
 with open(os.environ["DEPLOY_TEST_RSYNC_LOG"], "ab") as f:
     f.write(b"\\0".join(a.encode("utf-8") for a in sys.argv[1:]) + b"\\0\\0")
+sys.exit(int(os.environ.get("DEPLOY_TEST_RSYNC_RC", "0")))
 """
 
 SSH_STUB = """#!/usr/bin/env python3
@@ -139,7 +142,7 @@ EXPECTED_RSYNC_ARGV = [
     b"--exclude",
     b"coverage.cobertura.xml",
     b"--exclude",
-    b".scratch*",
+    b".scratch*",  # quoted in deploy.sh: unquoted, the deploy's own cwd glob-expands it
 ]
 
 
@@ -329,6 +332,29 @@ with tempfile.TemporaryDirectory() as tmp:
         got_stdin == f"{DEST_DIR}\n".encode(),
     )
 
+# Failing transfer: rsync --delete applies deletions as it goes, so a nonzero
+# exit leaves the server host with a partial tree. The run must stop there and
+# say so, rather than dying on rsync's bare exit code or restarting the server
+# on top of a tree it never finished writing.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    project, env = make_sandbox(tmpdir, timeout_name="timeout")
+    env["DEPLOY_TEST_RSYNC_RC"] = "23"
+    proc = run_deploy(project, env, "--restart")
+    raw_err = proc.stderr
+    check("a failed transfer exits 1", proc.returncode == 1)
+    check(
+        f"the failed transfer names the phase and the partial tree (stderr: {raw_err!r})",
+        b"FATAL: rsync of " in raw_err
+        and f"{HOST}".encode() in raw_err
+        and b"the tree there is partial" in raw_err
+        and b"re-run" in raw_err,
+    )
+    check(
+        "a failed transfer never restarts the server",
+        invocations(Path(env["DEPLOY_TEST_SSH_LOG"])) == [],
+    )
+
 # Failing remote restart: rsync already pushed the tree, so a bare nonzero
 # exit would leave the operator guessing which phase broke and whether the
 # server host is now inconsistent. The failure must name the host and phase
@@ -401,16 +427,37 @@ with tempfile.TemporaryDirectory() as tmp:
 with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
     for var, hostile in (
-        ("SEVENDTD_SERVER_HOST", "-oProxyCommand=touch /tmp/pwned"),
-        ("SEVENDTD_SERVER_USER", "-oProxyCommand=touch /tmp/pwned"),
-        ("SEVENDTD_SERVER_DIR", "~/7dtd-server; touch /tmp/pwned"),
+        ("SEVENDTD_SERVER_HOST", "-oProxyCommand=touch {sentinel}"),
+        ("SEVENDTD_SERVER_USER", "-oProxyCommand=touch {sentinel}"),
+        ("SEVENDTD_SERVER_DIR", "~/7dtd-server; touch {sentinel}"),
     ):
-        project, env = make_sandbox(tmpdir / var, timeout_name=None)
-        env[var] = hostile
+        case = tmpdir / var
+        # The sentinel lands inside this case's own directory, so the check
+        # that it is absent is about this run and not a path some other run on
+        # the host could have written.
+        sentinel = case / "pwned"
+        project, env = make_sandbox(case, timeout_name=None)
+        # Positive control in the same sandbox: the stubs do run and do write
+        # here, so the empty log after the hostile run below means the deploy
+        # refused before reaching them. Without it, a stub that never execs at
+        # all (a sandbox that cannot run it) reads the same as a refusal.
+        control = run_deploy(project, env)
+        rsync_log = Path(env["DEPLOY_TEST_RSYNC_LOG"])
+        ssh_log = Path(env["DEPLOY_TEST_SSH_LOG"])
+        if not check(
+            f"{var} case: the control run reaches the transfer stubs",
+            control.returncode == 0
+            and len(invocations(rsync_log)) == 1
+            and invocations(ssh_log) == [],
+        ):
+            fail_stderr(control)
+        rsync_log.unlink()
+        env[var] = hostile.format(sentinel=sentinel)
         proc = run_deploy(project, env)
         out = proc.stdout + proc.stderr
         check(f"{var} rejects an argv-injection shape", proc.returncode == 2)
         check(f"{var} rejection names the variable", var.encode() in out)
+        check(f"{var} rejection ran no injected command", not sentinel.exists())
         check(
             f"{var} rejection transferred nothing",
             invocations(Path(env["DEPLOY_TEST_RSYNC_LOG"])) == []

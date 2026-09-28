@@ -42,7 +42,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from harness import ROOT, SCRIPTS, check, exit_status
+from harness import ROOT, SCRIPTS, check, exit_status, resolved_bin_path
 
 ENTRYPOINT = ROOT / "entrypoint.sh"
 LIB_ENV = SCRIPTS / "lib-env.sh"
@@ -136,7 +136,34 @@ def run_entrypoint(root: Path, extra_env: dict[str, str]) -> subprocess.Complete
     # opt-in to reach the render/seed path at all; the refusal itself is
     # covered by its own case below.
     env = {
-        "PATH": f"{root / 'bin'}:/usr/bin:/bin",
+        # The tools the boot path shells out to, resolved from the running
+        # host: /usr/bin:/bin is not where coreutils lives on NixOS, a
+        # brew-only prefix, or a slim test image, and a missing diff alone
+        # would silently change which sync_tree branch runs.
+        "PATH": ":".join(
+            (
+                str(root / "bin"),
+                resolved_bin_path(
+                    "bash",
+                    "sed",
+                    "grep",
+                    "od",
+                    "tr",
+                    "base64",
+                    "md5sum",
+                    "timeout",
+                    "diff",
+                    "cp",
+                    "mv",
+                    "rm",
+                    "mkdir",
+                    "head",
+                    "chmod",
+                    "cat",
+                    "cut",
+                ),
+            )
+        ),
         "TELNET_PORT": "8087",
         "STEAMCMD_UPDATE": "0",
         "ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD": "1",
@@ -152,7 +179,10 @@ def run_entrypoint(root: Path, extra_env: dict[str, str]) -> subprocess.Complete
 
 
 def no_temp_files(*dirs: Path) -> bool:
-    return all(not p.name.endswith(".tmp") for d in dirs for p in d.iterdir())
+    # Every staging name either path uses carries ".tmp" (".serverconfig.xml.tmp",
+    # ".<mod>.tmp.$$", ".<mod>.tmp.retired.$$"): a suffix-only test passes on a
+    # Mods dir littered with exactly the artifacts it claims to exclude.
+    return all(".tmp" not in p.name for d in dirs for p in d.iterdir())
 
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -198,9 +228,12 @@ with tempfile.TemporaryDirectory() as tmp:
             "serverconfig.xml points Saves at the rendered userdata dir",
             props.get("UserDataFolder") == str(userdata),
         )
+        # All three lines, not just the first: the LAN/Local joins are the
+        # reason the file exists, and startswith would pass on the header alone.
         check(
             "platform.cfg written",
-            (game / "platform.cfg").read_text(encoding="utf-8").startswith("platform=Steam"),
+            (game / "platform.cfg").read_text(encoding="utf-8")
+            == "platform=Steam\ncrossplatform=None\nserverplatforms=Steam,LAN,Local,\n",
         )
         adm = userdata / "Saves" / "serveradmin.xml"
         record = userdata / "Saves" / ".webadmin-password"
@@ -223,14 +256,15 @@ with tempfile.TemporaryDirectory() as tmp:
             f"rendered credential files are owner-only (modes: {modes})",
             all(mode == 0o600 for mode in modes.values()),
         )
-        check(
-            "temp files stranded by a killed previous boot were swept",
-            not (game / ".serverconfig.xml.tmp").exists()
-            and not (saves / ".serveradmin.xml.tmp").exists()
-            and not (saves / ".webadmin-password.tmp").exists(),
-        )
-
     # Existing seed + operator password: skip visibly, keep the old record.
+    # Stranding the two Saves temps again here is the load-bearing half of
+    # the sweep check: this boot writes neither one (the seed returns early
+    # and no password is minted), so only the up-front sweep can remove them.
+    # The first boot's copy is vacuous, since its own render and seed write
+    # and rename those same names.
+    (saves / ".serveradmin.xml.tmp").write_text("<xml", encoding="utf-8")
+    (saves / ".webadmin-password.tmp").write_text("half-written", encoding="utf-8")
+    old_adm = (userdata / "Saves" / "serveradmin.xml").read_bytes()
     old_record = (userdata / "Saves" / ".webadmin-password").read_bytes()
     proc = run_entrypoint(root, {"WEBADMIN_PASSWORD": "operator-pass-1"})
     out2 = proc.stdout.decode(errors="replace")
@@ -245,6 +279,16 @@ with tempfile.TemporaryDirectory() as tmp:
     check(
         "existing credential record untouched",
         (userdata / "Saves" / ".webadmin-password").read_bytes() == old_record,
+    )
+    check(
+        "existing seeded serveradmin.xml untouched",
+        (userdata / "Saves" / "serveradmin.xml").read_bytes() == old_adm,
+    )
+    check(
+        "temp files stranded by a killed previous boot were swept",
+        not (game / ".serverconfig.xml.tmp").exists()
+        and not (saves / ".serveradmin.xml.tmp").exists()
+        and not (saves / ".webadmin-password.tmp").exists(),
     )
 
     # Reseed under an operator password: new digest, stale record removed.

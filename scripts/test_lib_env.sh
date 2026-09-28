@@ -7,6 +7,10 @@
 #   check_webadmin_password  character rules plus the 8-character minimum
 #   webadmin_password_digest  the md5-base64 form the dashboard expects
 #   init_telnet_env    default fill + validation wiring (host and container)
+#   init_telnet_port   the probe's own port: default fill, value rules, and an
+#                      explicit port left alone
+#   list_dir           the mod-set report: "(empty)" for a directory with no
+#                      entries, basenames otherwise, nullglob handed back
 #   init_steamcmd_env  default fill + strict {0,1} domain for both switches
 #   check_telnet_port  numeric/range boundaries incl. the octal leading-zero bug
 #   telnet_probe       bad ports refused, a listening endpoint reported up
@@ -230,12 +234,16 @@ done
 echo "env provenance rule OK"
 # Every key the loader accepts must be documented in .env.example, and every
 # key .env.example documents must be one the loader accepts: the template and
-# the value list are the same list, and neither may drift.
+# the value list are the same list, and neither may drift. Both lists are
+# checked non-empty first, because the two loops below iterate zero times over
+# an empty list and would pass a template that lost every documented key.
+[[ -n "$ENV_FILE_KEYS" ]] || { echo "FAIL: ENV_FILE_KEYS is empty" >&2; exit 1; }
 for key in $ENV_FILE_KEYS; do
   grep -qE "^#?[[:space:]]*(export[[:space:]]+)?${key}=" "$ROOT/.env.example" || {
     echo "FAIL: ENV_FILE_KEYS lists '$key', which .env.example does not document" >&2; exit 1; }
 done
 documented_keys="$(sed -nE 's/^#?[[:space:]]*(export[[:space:]]+)?([A-Z][A-Z0-9_]*)=.*/\2/p' "$ROOT/.env.example" | sort -u)"
+[[ -n "$documented_keys" ]] || { echo "FAIL: .env.example documents no keys" >&2; exit 1; }
 for key in $documented_keys; do
   case " $ENV_FILE_KEYS " in
     *" $key "*) ;;
@@ -330,10 +338,25 @@ chmod +x "$tmp/bsdpath/md5"
 b64_bsd="$(PATH="$tmp/bsdpath" "$(command -v bash)" -c 'source "'"$ROOT"'/scripts/lib-env.sh"; webadmin_password_digest admin')"
 [[ "$b64_bsd" == "ISMvKXpXpadDiUoOSoAfww==" ]] || { echo "FAIL: md5-base64 digest vector via BSD md5 (got '$b64_bsd')" >&2; exit 1; }
 # No digest tool at all must fail loudly, not render an empty digest the
-# dashboard would accept as a blank password.
-if PATH="$tmp/bsdpath/empty" webadmin_password_digest admin >/dev/null 2>&1; then
-  echo "FAIL: digest rendered with no md5 tool on PATH" >&2; exit 1
+# dashboard would accept as a blank password. The restricted PATH keeps the
+# helpers and drops both digest tools, so the failure is md5_hex's own verdict
+# and not a helper that happens to be missing too: a directory that does not
+# exist fails this check for the wrong reason, and deleting the guard in
+# md5_hex would leave it green.
+mkdir -p "$tmp/nomd5"
+for tool in base64 sed cut cat; do
+  ln -s "$(command -v "$tool")" "$tmp/nomd5/$tool"
+done
+digest_rc=0
+digest_out="$(PATH="$tmp/nomd5" "$(command -v bash)" -c 'source "'"$ROOT"'/scripts/lib-env.sh"; webadmin_password_digest admin' 2>"$tmp/nomd5.err")" || digest_rc=$?
+digest_err="$(cat "$tmp/nomd5.err")"
+if (( digest_rc == 0 )) || [[ -n "$digest_out" ]]; then
+  echo "FAIL: digest rendered with no md5 tool on PATH (rc=$digest_rc, out='$digest_out')" >&2; exit 1
 fi
+case "$digest_err" in
+  *"no MD5 digest tool"*) ;;
+  *) echo "FAIL: missing digest tool is not named on stderr (got '$digest_err')" >&2; exit 1 ;;
+esac
 echo "webadmin password rules OK"
 
 # Locale independence of the value policy. `[[:print:]]` and `[[:space:]]` are
@@ -587,6 +610,49 @@ if [[ -s "$tmp/received.bin" ]]; then
   echo "FAIL: health_check wrote to the telnet wire (it must only connect)" >&2; exit 1
 fi
 echo "health_check OK"
+
+# init_telnet_port is what health_check calls, and the default it fills is the
+# port the probe and the entrypoint share. Every health_check case above pins
+# TELNET_PORT explicitly, so the fill and the value rules behind it are only
+# reachable here.
+port_default="$( ( unset TELNET_PORT; init_telnet_port; printf '%s' "$TELNET_PORT" ) )"
+[[ "$port_default" == "$DEFAULT_TELNET_PORT" ]] || {
+  echo "FAIL: init_telnet_port filled '$port_default', not the committed default '$DEFAULT_TELNET_PORT'" >&2; exit 1; }
+if ( TELNET_PORT=99999 init_telnet_port ) >/dev/null 2>&1; then
+  echo "FAIL: init_telnet_port accepted the out-of-range port 99999" >&2; exit 1
+fi
+# An explicit port survives the default: the fill must not overwrite it.
+port_kept="$( ( TELNET_PORT=26900; init_telnet_port; printf '%s' "$TELNET_PORT" ) )"
+[[ "$port_kept" == 26900 ]] || { echo "FAIL: init_telnet_port overwrote an explicit port with '$port_kept'" >&2; exit 1; }
+echo "init_telnet_port OK"
+
+# list_dir is what stage_mods/update_mods report their mod sets through, and
+# its whole reason to exist is the empty case: ls prints nothing for an empty
+# directory, which reads as an empty-but-successful run.
+mkdir -p "$tmp/listdir/mods"
+if [[ "$(list_dir "$tmp/listdir/mods")" != "(empty)" ]]; then
+  echo "FAIL: list_dir on an empty directory did not print (empty)" >&2; exit 1
+fi
+mkdir -p "$tmp/listdir/mods/BotMod" "$tmp/listdir/mods/EfficientServer"
+touch "$tmp/listdir/mods/README.txt"
+listed="$(list_dir "$tmp/listdir/mods" | sort | tr '\n' ' ')"
+[[ "$listed" == "BotMod EfficientServer README.txt " ]] || {
+  echo "FAIL: list_dir printed basenames as '$listed'" >&2; exit 1; }
+# nullglob is a caller-visible shell option: the helper must hand it back the
+# way it found it, or it silently changes the caller's globbing. The setting
+# to compare against is the caller's own, whatever it happens to be here.
+if shopt -q nullglob; then nullglob_before=on; else nullglob_before=off; fi
+list_dir "$tmp/listdir/mods" >/dev/null
+if shopt -q nullglob; then nullglob_after=on; else nullglob_after=off; fi
+[[ "$nullglob_before" == "$nullglob_after" ]] || {
+  echo "FAIL: list_dir changed nullglob for its caller ($nullglob_before -> $nullglob_after)" >&2; exit 1; }
+shopt -s nullglob
+list_dir "$tmp/listdir/mods" >/dev/null
+if ! shopt -q nullglob; then
+  echo "FAIL: list_dir turned off a nullglob the caller had set" >&2; exit 1
+fi
+shopt -u nullglob
+echo "list_dir OK"
 out="$(telnet_session "$FAKE_PORT" retest 'apm status' 10)"
 [[ "$out" == *"telnet ok"* ]] || { echo "FAIL: reply not relayed" >&2; exit 1; }
 printf 'retest\napm status\n' > "$tmp/expected.bin"

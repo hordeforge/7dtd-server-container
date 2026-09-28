@@ -104,6 +104,15 @@ def stub_invocations(log: Path) -> list[list[bytes]]:
     return [rec.split(b"\0") for rec in log.read_bytes().split(b"\0\0") if rec]
 
 
+def parse_backup_stamp(name: str) -> datetime.datetime | None:
+    """An archive name's stamp as UTC, or None when the name is not one."""
+    with contextlib.suppress(ValueError):
+        return datetime.datetime.strptime(name, "%Y%m%d-%H%M%S").replace(
+            tzinfo=datetime.timezone.utc
+        )
+    return None
+
+
 def envfile_paths(records: list[list[bytes]]) -> list[str]:
     """Paths passed to --env-file across invocations, in order."""
     return [
@@ -664,20 +673,17 @@ with tempfile.TemporaryDirectory() as tmp:
         for p in (tmpdir / "backups").glob("7dtd-saves-*.tar.gz")
     ]
     check("backup wrote one archive to name", len(stamps) == 1)
-    if len(stamps) == 1:
-        try:
-            stamp = datetime.datetime.strptime(stamps[0], "%Y%m%d-%H%M%S").replace(
-                tzinfo=datetime.timezone.utc
-            )
-        except ValueError:
-            check("backup stamp parses as %Y%m%d-%H%M%S", False)
-        else:
-            check("backup stamp parses as %Y%m%d-%H%M%S", True)
-            drift = abs((stamp - before).total_seconds())
-            check(
-                "the backup stamp is UTC, not the host wall clock (Europe/Warsaw)",
-                drift < 120,
-            )
+    parsed_stamps = [s for s in (parse_backup_stamp(name) for name in stamps) if s is not None]
+    check(
+        "backup stamp parses as %Y%m%d-%H%M%S",
+        len(stamps) == 1 and len(parsed_stamps) == 1,
+    )
+    if parsed_stamps:
+        drift = abs((parsed_stamps[0] - before).total_seconds())
+        check(
+            "the backup stamp is UTC, not the host wall clock (Europe/Warsaw)",
+            drift < 120,
+        )
 
 
 # backup() while the server runs: saveworld goes over telnet before tar.
