@@ -600,15 +600,28 @@ fi
 # started with no telnet environment (the quadlet unit pins none) still probes
 # the port init_telnet_env defaults to, and it must answer against a live
 # endpoint without ever sending the password.
-if ! ( TELNET_PORT=1 health_check 3 ) >/dev/null 2>&1; then
+if ! ( TELNET_PORT=1 health_check 3 ) >/dev/null 2>"$tmp/health.err"; then
   # Nothing listens on the tcpmux port: unhealthy is the right answer.
   echo "health_check unhealthy on a closed port OK"
 else
   echo "FAIL: health_check reported healthy with nothing listening on port 1" >&2; exit 1
 fi
-if ! ( unset TELNET_PASSWORD; TELNET_PORT="$FAKE_PORT" health_check 3 ) >/dev/null 2>&1; then
+# A failed probe is the only record of why podman marked the container
+# unhealthy, and `run.sh status` prints exactly this text, so it has to name the
+# port and the bound. A silent probe leaves that verdict with no cause.
+if ! grep -q "127.0.0.1:1" "$tmp/health.err"; then
+  echo "FAIL: a failed health_check printed no reason (got: $(cat "$tmp/health.err"))" >&2; exit 1
+fi
+echo "failed health_check names the port it probed OK"
+if ! ( unset TELNET_PASSWORD; TELNET_PORT="$FAKE_PORT" health_check 3 ) >"$tmp/health.out" 2>"$tmp/health.ok.err"; then
   echo "FAIL: health_check missed a listening endpoint" >&2; exit 1
 fi
+# A healthy probe writes nothing: the health log podman keeps holds one line per
+# probe, and a reason on every pass would bury the failures it exists to show.
+if [[ -s "$tmp/health.ok.err" || -s "$tmp/health.out" ]]; then
+  echo "FAIL: a passing health_check wrote output (got: $(cat "$tmp/health.ok.err" "$tmp/health.out"))" >&2; exit 1
+fi
+echo "a passing health_check is silent OK"
 if [[ -s "$tmp/received.bin" ]]; then
   echo "FAIL: health_check wrote to the telnet wire (it must only connect)" >&2; exit 1
 fi

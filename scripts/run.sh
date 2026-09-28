@@ -1156,6 +1156,67 @@ build_image() {
   podman build --timestamp "$SOURCE_DATE_EPOCH" -t "$IMAGE" "$ROOT"
 }
 
+# What podman itself records as the container's state and health verdict, as the
+# two words show_status reports ("<state> <health>", the second "(none)" when
+# the container carries no health check). Returns nonzero when the verdict
+# cannot be read at all: an absent container, or a podman that failed. The
+# caller treats that as unknown rather than as a failure, because "no verdict"
+# and "unhealthy" are different answers and a report that collapsed them would
+# send an operator after a container that is merely gone.
+container_health() {
+  local out
+  out="$(podman inspect --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}(none){{end}}' "$NAME" 2>/dev/null)" || return 1
+  [[ -n "$out" ]] || return 1
+  printf '%s\n' "$out"
+}
+
+show_status() {
+  # The container line, the verdict podman recorded, and, when the server is
+  # not serving, the tail of its own log. `podman ps` on its own answers "is
+  # the container there", which is the right question when the answer is yes
+  # and the wrong one during an incident: the operator had to leave this output
+  # to learn why a server that is up is no longer serving. Everything below is
+  # read-only, and a podman that cannot answer leaves the container line plus a
+  # warning rather than failing the report, because this is the command an
+  # operator runs when things are already wrong.
+  # Anchor the name filter: podman treats it as a regex, and unanchored it
+  # would also list the $NAME-install pre-warm container.
+  podman ps -a --filter "name=^${NAME}$"
+  local verdict state health
+  if ! verdict="$(container_health)"; then
+    echo "health: unknown (podman has no verdict for $NAME; it may not exist)" >&2
+    return 0
+  fi
+  state="${verdict%% *}"
+  health="${verdict#* }"
+  # podman keeps the output of every health probe it ran, and health_check
+  # names the failure in it, so this is the shortest path from "unhealthy" to
+  # the dependency that stopped answering, in the same command that reported
+  # the verdict.
+  if [[ "$health" == "unhealthy" ]]; then
+    local detail
+    detail="$(podman inspect --format '{{range .State.Health.Log}}{{.Output}}{{end}}' "$NAME" 2>/dev/null)" || detail=""
+    if [[ -n "$detail" ]]; then
+      printf 'health log: %s\n' "$detail"
+    fi
+  fi
+  if [[ "$state" == "running" && ( "$health" == "healthy" || "$health" == "starting" ) ]]; then
+    return 0
+  fi
+  # The two states a tail can say something about. A running-but-unhealthy
+  # container and a stopped one are both "the operator needs the last thing it
+  # said"; a healthy or still-starting one needs nothing more here.
+  if [[ "$state" == "running" ]]; then
+    echo "last log lines of $NAME (running but $health; the game log is data/userdata/Logs/):" >&2
+  else
+    echo "last log lines of $NAME (state: $state):" >&2
+  fi
+  # Timestamped for the same reason start()'s smoke-check tail is: these lines
+  # are the only record of how far the last boot got, and unstamped they cannot
+  # be placed against a `run.sh logs` transcript.
+  podman logs --tail 20 --timestamps "$NAME" >&2 || true
+}
+
 case "$COMMAND" in
   build)        build_image ;;
   # `version` is answered above, beside --help and before any setup side
@@ -1187,5 +1248,5 @@ case "$COMMAND" in
   logs)         podman logs -f --timestamps "$NAME" ;;
   # Anchor the name filter: podman treats it as a regex, and unanchored it
   # would also list the $NAME-install pre-warm container.
-  status)       podman ps -a --filter "name=^${NAME}$" ;;
+  status)       show_status ;;
 esac

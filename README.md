@@ -158,7 +158,11 @@ state: the probe opens a TCP connection to the telnet console and sends no
 password, so a server that is running but no longer serving reads `unhealthy`
 (the first 30 minutes after a start are exempt, since a first boot downloads
 the depot before the game opens the port). A health status is reported, never
-acted on: podman does not restart or kill on it.
+acted on: podman does not restart or kill on it. A container that is stopped,
+or running and not healthy, is followed by the last 20 timestamped lines of
+its own log, and an `unhealthy` verdict is followed by the health log, which
+names the port the probe found silent; a container podman has no verdict for
+reads `health: unknown`.
 
 `./scripts/run.sh start` says so too: the line it prints names the container
 and the ports, then says nothing is serving yet, because up to a few minutes
@@ -170,17 +174,20 @@ answering, and the health probe abstains over the same window.
 `./scripts/run.sh logs` follows the container log with a container timestamp
 on every line, so the entrypoint's progress lines and the game's own output
 (undated by the game) can be ordered against each other. Lines the
-entrypoint writes carry two more fields:
+entrypoint writes carry three more fields:
 
 ```
-[entrypoint ts=2026-09-28T04:17:03Z boot=20260928T041701Z-1] render serverconfig.xml (telnet port 8087)
+[entrypoint ts=2026-09-28T04:17:03Z boot=20260928T041701Z-1 level=info] render serverconfig.xml (telnet port 8087)
 ```
 
 `ts` is UTC, `boot` is that boot's id, and every line of one boot carries the
-same one. A container that restarts (`--restart unless-stopped`, or the
+same one. `level` is the severity as a field (`info`, `warn`, `fatal`), so
+`podman logs 7dtd-server | grep 'level=warn'` needs no pattern matching on the
+message; the last line before the game's own output names the game log's path.
+A container that restarts (`--restart unless-stopped`, or the
 quadlet unit's `Restart=always`) keeps the old lines, so a crash loop leaves
 several boots in the same log; `podman logs 7dtd-server | grep
-'boot=20260928T041701Z-1'` pulls one of them out. A `FATAL:` line is the
+'boot=20260928T041701Z-1'` pulls one of them out. A `level=fatal` line is the
 boot's reason for ending and always says which step failed.
 
 ## Loading mods
@@ -482,9 +489,10 @@ login still matches.
 - **Telnet blocked:** a password is set, so the telnet interface listens on
   all interfaces; confirm nothing else uses `TELNET_PORT`.
 - **`(unhealthy)` in `run.sh status`:** the container is up but the telnet
-  console stopped answering, so the game is wedged rather than gone. Read
+  console stopped answering, so the game is wedged rather than gone. `status`
+  already prints the probe's own reason and the last log lines; read
   `podman logs --tail 50 --timestamps 7dtd-server` and the game log under
   `data/userdata/Logs/`, then `./scripts/run.sh restart`.
 - **The container keeps restarting:** each restart is a new boot id, so
-  `podman logs --timestamps 7dtd-server` shows the last boot's `FATAL:` line
-  as its last entry; that line names the step that failed.
+  `podman logs --timestamps 7dtd-server` shows the last boot's `level=fatal`
+  line as its last entry; that line names the step that failed.

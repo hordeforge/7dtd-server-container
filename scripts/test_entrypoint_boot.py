@@ -203,11 +203,13 @@ def no_temp_files(*dirs: Path, keep: tuple[str, ...] = ()) -> bool:
 
 
 # The entrypoint's own lines, in the one shape it writes them
-# (`[entrypoint ts=<stamp> boot=<id>] <message>`), read back from a stream the
-# fake server also writes to. The stub and the entrypoint are separate writers
-# on the same fd, so a line that is not an entrypoint line is the game's or
-# steamcmd's and is not this contract's to stamp.
-LINE_RE = re.compile(r"^\[entrypoint ts=(?P<ts>\S+) boot=(?P<boot>\S+)\] (?P<msg>.*)$")
+# (`[entrypoint ts=<stamp> boot=<id> level=<severity>] <message>`), read back
+# from a stream the fake server also writes to. The stub and the entrypoint are
+# separate writers on the same fd, so a line that is not an entrypoint line is
+# the game's or steamcmd's and is not this contract's to stamp.
+LINE_RE = re.compile(
+    r"^\[entrypoint ts=(?P<ts>\S+) boot=(?P<boot>\S+) level=(?P<level>\S+)\] (?P<msg>.*)$"
+)
 
 
 def entrypoint_lines(stream: bytes) -> list[str]:
@@ -572,6 +574,24 @@ with tempfile.TemporaryDirectory() as tmp:
     check(
         "two boots never share a boot id",
         bool(fatal_lines) and boot_id(fatal_lines[0]) not in {boot_id(line) for line in boot_lines},
+    )
+    # Severity is a field, so the whole stream can be filtered without reading
+    # the prose: progress on info, a skipped seed on warn, a failed boot on
+    # fatal. The three words a log aggregator maps onto its own levels.
+    matches = [m for m in map(LINE_RE.match, boot_lines + fatal_lines) if m is not None]
+    levels = {m.group("level") for m in matches}
+    warns = " ".join(m.group("msg") for m in matches if m.group("level") == "warn")
+    check(
+        f"every entrypoint line carries a severity (levels: {sorted(levels)})",
+        set(levels) == {"info", "warn", "fatal"},
+    )
+    check(
+        f"the warnings are the diagnostic ones, not progress (warn: {warns!r})",
+        ("Harmony" in warns or "seed skipped" in warns) and "render serverconfig" not in warns,
+    )
+    check(
+        "the fatal line is the one that ends the boot",
+        any(m.group("level") == "fatal" and "FATAL" in m.group("msg") for m in matches),
     )
 
 exit_status()

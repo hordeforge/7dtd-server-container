@@ -213,11 +213,11 @@ with tempfile.TemporaryDirectory() as tmp:
         sorted(p.name for p in (root / "mods").iterdir()) == ["EfficientServer"],
     )
 
-    # An enabled mod whose sibling dist is gone: the run warns, drops that mod
-    # from the enabled set, and still succeeds on the rest. A tree carried over
-    # from an earlier run would be stale bytes shipped to the server under the
-    # name of a mod that no longer builds, so the warning says the server
-    # starts without it and the swap honors that. The missing-dist case above
+    # An enabled mod whose sibling dist is gone: the run warns, keeps the copy
+    # that is already enabled, and still succeeds on the rest. Dropping a
+    # working mod because its source vanished is not a decision a staging run
+    # makes, so the swap below must not wipe it as outside the new set; the
+    # warning says which copy is staying and why. The missing-dist case above
     # starts from an empty mods/, so nothing is enabled yet and this branch is
     # unreachable there.
     root = make_stage_sandbox(tmpdir / "unstaged", ["EfficientServer"])
@@ -226,12 +226,19 @@ with tempfile.TemporaryDirectory() as tmp:
     err = proc.stderr.decode(errors="replace")
     check("stage with an unstaged enabled mod exits 0", proc.returncode == 0)
     check(
-        "the unstaged enabled mod is named on stderr",
-        "WARN" in err and "enabled mod BotMod not staged" in err,
+        "the unstaged enabled mod is named on stderr with the copy that stays",
+        "WARN" in err
+        and "enabled mod BotMod not staged" in err
+        and "keeping the copy already enabled" in err,
     )
     check(
-        "the unstaged mod is dropped rather than carried over stale",
-        sorted(p.name for p in (root / "mods").iterdir()) == ["EfficientServer"],
+        "the unstageable enabled mod survives the swap, the restaged one is added",
+        sorted(p.name for p in (root / "mods").iterdir()) == ["BotMod", "EfficientServer"],
+    )
+    check(
+        "the kept mod is the bytes it had before the run",
+        (root / "mods" / "BotMod" / "Config" / "config.json").read_text(encoding="utf-8")
+        == "live-bot",
     )
     check(
         "the restaged mod is still enabled",
