@@ -870,6 +870,106 @@ with tempfile.TemporaryDirectory() as tmp:
     )
 
 
+# The game log is the other record the archive owns: data/userdata/Logs holds
+# the join and leave lines with player names, platform ids and client
+# addresses, and nothing else on the host keeps a copy. A backup that carried
+# only Saves/ left it unprotected while the README claimed otherwise, and a
+# restore that overwrote the live log with an older copy would take every
+# connection made since the backup with it.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    make_sandbox(tmpdir)
+    install_podman_stub(tmpdir, PODMAN_STUB)
+    userdata = tmpdir / "data" / "userdata"
+    saves = userdata / "Saves" / "region"
+    saves.mkdir(parents=True)
+    (saves / "r.0.0.region").write_bytes(b"world")
+    logs = userdata / "Logs"
+    logs.mkdir(parents=True)
+    (logs / "output.log").write_bytes(b"join alice\n")
+    (logs / "output_old.log").write_bytes(b"join bob\n")
+    env = stub_env(tmpdir)
+    proc = subprocess.run(
+        [str(tmpdir / "scripts" / "run.sh"), "backup"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    check("backup with a game log present exits 0", proc.returncode == 0)
+    if proc.returncode != 0:
+        print(proc.stderr.decode(errors="replace"), file=sys.stderr)
+    archives = sorted((tmpdir / "backups").glob("7dtd-saves-*.tar.gz"))
+    check("backup wrote the one archive", len(archives) == 1)
+    if archives:
+        with tarfile.open(archives[0]) as tf:
+            names = tf.getnames()
+        check(
+            "the archive carries the game log next to the world",
+            "Logs/output.log" in names and "Logs/output_old.log" in names,
+        )
+    # The disaster: the world is wrecked and one log file is gone. The other
+    # log file gains the connections made since the backup, and a future mtime
+    # makes "newer than the archive's copy" deterministic rather than a race
+    # against the filesystem's timestamp resolution.
+    (saves / "r.0.0.region").write_bytes(b"corrupted")
+    (logs / "output_old.log").unlink()
+    (logs / "output.log").write_bytes(b"join alice\njoin carol\n")
+    future = time.time() + 3600
+    os.utime(logs / "output.log", (future, future))
+    proc = subprocess.run(
+        [str(tmpdir / "scripts" / "run.sh"), "restore"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    out = proc.stdout + proc.stderr
+    check("restore of an archive carrying a log exits 0", proc.returncode == 0)
+    if proc.returncode != 0:
+        print(proc.stderr.decode(errors="replace"), file=sys.stderr)
+    check(
+        "restore put the world back",
+        (saves / "r.0.0.region").read_bytes() == b"world",
+    )
+    check(
+        "restore put the missing log file back",
+        (logs / "output_old.log").is_file()
+        and (logs / "output_old.log").read_bytes() == b"join bob\n",
+    )
+    check(
+        "restore did not roll the live log back over the backup",
+        (logs / "output.log").read_bytes() == b"join alice\njoin carol\n",
+    )
+
+# An archive written before the log joined BACKUP_TREE holds Saves only, and
+# the restore path must still put a world back from it: the log is restored
+# when the archive has one, not demanded.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    make_sandbox(tmpdir)
+    install_podman_stub(tmpdir, PODMAN_STUB)
+    saves = tmpdir / "data" / "userdata" / "Saves" / "region"
+    saves.mkdir(parents=True)
+    (saves / "r.0.0.region").write_bytes(b"current-world")
+    plant_archive(tmpdir / "backups" / "7dtd-saves-20200101-000000.tar.gz", b"old-world")
+    env = stub_env(tmpdir)
+    proc = subprocess.run(
+        [str(tmpdir / "scripts" / "run.sh"), "restore"],
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    check("restore of a Saves-only archive exits 0", proc.returncode == 0)
+    if proc.returncode != 0:
+        print(proc.stderr.decode(errors="replace"), file=sys.stderr)
+    check(
+        "a Saves-only archive still restores the world",
+        (saves / "r.0.0.region").read_bytes() == b"old-world",
+    )
+
+
 # Two backups inside one second cannot share a name, so the loser of the
 # exclusive create takes a counter suffix, and both the prune and the bare
 # restore read the name as the age order. That order has to survive the

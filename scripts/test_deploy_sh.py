@@ -31,6 +31,11 @@ Scenarios:
               the FATAL names phase, host, and the deployed-tree/stale-mods
               state plus the recovery command
 
+The 'P /.env' protect filter is then run through a real rsync against a local
+--delete, because its meaning is rsync's and the argv-recording stub cannot
+answer it: the deploying tree must keep its own .env in sync and must not take
+the host's away when it has none.
+
 Each failed check prints FAIL; the process exits nonzero if any failed.
 """
 
@@ -113,9 +118,11 @@ EXPECTED_SSH_ARGV = [
 
 # The whole rsync argv is load-bearing, not just its last word: --delete with a
 # dropped --exclude data/backups would wipe server-owned saves and backup
-# archives, a dropped --delay-updates would let an interrupted push leave a
-# half-written script on the server host, and a dropped --timeout=60 would
-# leave a stalled transfer hanging.
+# archives, a dropped 'P /.env' would let a deploying tree that has no .env
+# delete the host's only copy of the telnet and webadmin passwords, a dropped
+# --delay-updates would let an interrupted push leave a half-written script on
+# the server host, and a dropped --timeout=60 would leave a stalled transfer
+# hanging.
 EXPECTED_RSYNC_ARGV = [
     b"-a",
     b"--delete",
@@ -123,6 +130,8 @@ EXPECTED_RSYNC_ARGV = [
     b"--timeout=60",
     b"-e",
     b"ssh -o ConnectTimeout=10",
+    b"--filter",
+    b"P /.env",
     b"--exclude",
     b".git",
     b"--exclude",
@@ -487,6 +496,77 @@ with tempfile.TemporaryDirectory() as tmp:
         invocations(Path(env["DEPLOY_TEST_RSYNC_LOG"])) == []
         and invocations(Path(env["DEPLOY_TEST_SSH_LOG"])) == [],
     )
+
+# The 'P /.env' filter, run through a real rsync. It is the one flag in the
+# argv whose failure is silent and unrecoverable: drop it and a deploy from a
+# tree without a .env (a fresh clone, a second workstation, a worktree) deletes
+# the server host's only copy of the telnet and webadmin passwords. The pinned
+# argv above proves deploy.sh asks for the protection; only rsync can say the
+# protection works, so the flags deploy.sh really passed are replayed against a
+# local --delete pair. Skipped where rsync is not installed rather than failing:
+# the host this deploys to runs it, a workstation may not have it.
+real_rsync = shutil.which("rsync")
+if real_rsync is None:
+    print("SKIP: rsync is not on PATH; the .env protect filter is pinned by argv only")
+else:
+    with tempfile.TemporaryDirectory() as tmp:
+        tmpdir = Path(tmp)
+        project, env = make_sandbox(tmpdir, timeout_name=None)
+        run_deploy(project, env)
+        recorded = invocations(Path(env["DEPLOY_TEST_RSYNC_LOG"]))
+        check("the argv replay has an rsync call to replay", len(recorded) == 1)
+        # Drop the two transfer operands and the -e wrapper (its value is an
+        # ssh command line, useless over a local path); everything else, the
+        # excludes and the protect filter included, is what rsync receives.
+        flags = [
+            a
+            for i, a in enumerate(recorded[0])
+            if i < len(recorded[0]) - 2 and a != b"-e" and a != b"ssh -o ConnectTimeout=10"
+        ]
+        # The deploying tree has an .env: it must reach the host, in place of
+        # the older one, and the rest of the tree must be deleted as usual.
+        (project / ".env").write_text("TELNET_PASSWORD=from-workstation\n", encoding="utf-8")
+        src = tmpdir / "src"
+        dst = tmpdir / "dst"
+        src.mkdir()
+        dst.mkdir()
+        shutil.copytree(project, src, dirs_exist_ok=True)
+        (dst / ".env").write_text("TELNET_PASSWORD=from-host\n", encoding="utf-8")
+        (dst / "stale-on-host.sh").write_text("old\n", encoding="utf-8")
+        proc = subprocess.run(
+            [real_rsync, *flags, f"{src}/", f"{dst}/"],
+            capture_output=True,
+            check=False,
+            timeout=120,
+        )
+        check("the replayed rsync transfer exits 0", proc.returncode == 0)
+        check(
+            "a deploying tree's .env still reaches the host",
+            (dst / ".env").read_text(encoding="utf-8") == "TELNET_PASSWORD=from-workstation\n",
+        )
+        # A deploying tree with no .env (what a fresh clone or a worktree
+        # looks like) must leave the host's .env alone, while --delete still
+        # does its job on everything else. The host copy is reset first: the
+        # transfer above replaced it with the workstation's value, and a file
+        # that merely stayed would read as a pass without proving anything.
+        (src / ".env").unlink()
+        (dst / ".env").write_text("TELNET_PASSWORD=from-host\n", encoding="utf-8")
+        (dst / "stale-on-host.sh").write_text("old\n", encoding="utf-8")
+        proc = subprocess.run(
+            [real_rsync, *flags, f"{src}/", f"{dst}/"],
+            capture_output=True,
+            check=False,
+            timeout=120,
+        )
+        check("the transfer from a tree without .env exits 0", proc.returncode == 0)
+        check(
+            "a deploying tree without .env leaves the host's .env in place",
+            (dst / ".env").read_text(encoding="utf-8") == "TELNET_PASSWORD=from-host\n",
+        )
+        check(
+            "the same transfer still deletes what the host has and the sender does not",
+            not (dst / "stale-on-host.sh").exists(),
+        )
 
 exit_status()
 print("deploy.sh remote-restart contract OK")

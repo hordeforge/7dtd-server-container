@@ -93,8 +93,7 @@ fi
 # data/ is server-owned state; backups/ holds the save archives run.sh backup
 # writes on the server host (deleting them here would be a --delete away);
 # the rest are workstation-local caches that must not accumulate on the
-# server host (.env travels on purpose so the server-side scripts render and
-# validate the same values). The .scratch* pattern also covers scratch files
+# server host. The .scratch* pattern also covers scratch files
 # dropped beside the directory (e.g. .scratch_<name>.sh copies kept for
 # reference). Every pattern is quoted so it reaches rsync verbatim: unquoted,
 # the shell expands it against the working directory before rsync sees it, so
@@ -107,8 +106,21 @@ fi
 # a file that was cut off in the middle. Without it a failed push is not just
 # incomplete but mixed, and the run.sh that then boots it is the residue of two
 # revisions.
+#
+# 'P /.env' protects the server host's .env from --delete while still pushing
+# it, which is the one thing --exclude cannot do. That file is the only copy
+# of the telnet and webadmin passwords on the host (it is git-ignored, so a
+# fresh clone, a second workstation or a worktree has none), and --delete
+# removes every receiver-side file the sender does not have: a deploy from such
+# a tree silently erased the passwords, and the next start then either refused
+# for a missing TELNET_PASSWORD or, with ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD
+# set, booted the server on the committed public default. Protecting it keeps
+# the documented behaviour (.env travels on purpose so the server-side scripts
+# render and validate the same values) without letting a tree that has none
+# take the host's away.
 rsync_rc=0
 rsync -a --delete --delay-updates --timeout=60 -e "ssh -o ConnectTimeout=10" \
+  --filter 'P /.env' \
   --exclude '.git' \
   --exclude 'data' \
   --exclude 'backups' \

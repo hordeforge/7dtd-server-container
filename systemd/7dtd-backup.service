@@ -16,7 +16,8 @@ Documentation=man:systemd.timer(5)
 Type=oneshot
 # The same command the operator runs by hand, so the scheduled and the ad-hoc
 # path cannot drift: it asks the running server to saveworld over telnet,
-# archives data/userdata/Saves into backups/ and prunes to the newest 7.
+# archives data/userdata/Saves and data/userdata/Logs into backups/ and
+# prunes to the newest 7.
 # backups/ is on the same host as the saves; copy it off-host if losing this
 # host matters (see the README's "Recovering state").
 ExecStart=%h/7dtd-server/scripts/run.sh backup

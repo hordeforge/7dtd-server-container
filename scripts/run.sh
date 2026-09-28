@@ -4,8 +4,9 @@
 # container itself is disposable.
 #
 # Usage: run.sh {build|start|run|restart|install-only|stop|logs|status|config|backup|restore|verify-backup|version}
-# (`run` is an alias of `start`; `backup` archives the world saves,
-# `restore [archive]` puts one back, defaulting to the newest, and
+# (`run` is an alias of `start`; `backup` archives the world saves and
+# the game log, `restore [archive]` puts one back, defaulting to the
+# newest, and
 # `verify-backup [archive]` checks the archives are still restorable.)
 # `--help` prints the command list without touching the environment or data/.
 # Env overrides: TELNET_PASSWORD, TELNET_PORT, WEBADMIN_PASSWORD,
@@ -41,9 +42,10 @@ Manage the 7dtd-server podman container; all runtime state lives in ./data
   status         show container state (default with no command)
   config         print the effective configuration and where each value came
                  from, with the secret values redacted
-  backup         archive world saves into backups/ (keeps the newest
-                 BACKUP_KEEP archives, default 7)
-  restore        replace data/userdata/Saves with a backup archive
+  backup         archive the world saves and the game log into backups/
+                 (keeps the newest BACKUP_KEEP archives, default 7)
+  restore        replace data/userdata/Saves with a backup archive (and
+                 put its game log back without rolling the live one back)
                  (no argument = the newest backup in backups/; the
                  -prerestore snapshots it skips are never picked that
                  way, so a repeated bare restore re-applies the same
@@ -176,10 +178,22 @@ ARCHIVE_CLAIM_TRIES=100
 # is not running, not merely late, and the RPO is whatever the oldest
 # surviving archive says.
 BACKUP_STALE_SECS=259200
+# What a backup copies out of data/userdata, in one place so backup and
+# restore cannot disagree about the archive's contents. Both trees hold state
+# nothing regenerates: Saves is the world plus the ban/admin records and the
+# dashboard credential, Logs is the join and leave record with player names,
+# platform ids and client addresses. A member that does not exist yet is left
+# out rather than failing the archive (Logs appears with the first boot).
+BACKUP_TREE=(Saves Logs)
 # The archive archive_saves last wrote, left for its callers: restore() names
 # it when a later extraction fails, so the operator is handed the path of the
 # saves the failed restore replaced instead of having to look for it.
 ARCHIVE_PATH=""
+# Whether the archive check_archive_payload last read carries a Logs/ member.
+# check_archive_payload walks the listing once and this records what it saw, so
+# restore() knows whether the archived game log is there to put back without
+# paying for a second full decompression of the archive.
+ARCHIVE_HAS_LOGS=0
 # Separator for the counter archive_saves appends when several backups land in
 # one second. backup_archives reads the names as an age order, and the counter
 # was the part of the name that did not fit that order: a '-' sorts before the
@@ -830,10 +844,22 @@ archive_saves() {
     # names as an age order and '~10' sorts before '~2'.
     archive="$BACKUP_DIR/$stem${ARCHIVE_COLLIDE_SEP}$(printf '%02d' "$n").tar.gz"
   done
+  # The members that exist right now. BACKUP_TREE names both trees a backup
+  # owns; a missing one (Logs, before the first boot created it) is dropped
+  # here rather than handed to tar, which would call the missing member a
+  # fatal read error and throw away a perfectly good Saves archive.
+  local members=() member
+  for member in "${BACKUP_TREE[@]}"; do
+    [[ -e "$USERDATA_DIR/$member" ]] && members+=("$member")
+  done
+  if (( ${#members[@]} == 0 )); then
+    echo "FATAL: nothing to archive in $USERDATA_DIR (${BACKUP_TREE[*]} are all missing; has the server ever started?)" >&2
+    exit 1
+  fi
   # GNU tar exits 1 for warnings alone (a file changed as it was read, which
   # happens when the game writes during a live backup): keep that archive and
   # say why. Only >= 2 means tar could not produce something usable.
-  tar -czf "$archive" -C "$USERDATA_DIR" Saves || tar_rc=$?
+  tar -czf "$archive" -C "$USERDATA_DIR" "${members[@]}" || tar_rc=$?
   if (( tar_rc >= 2 )); then
     rm -f "$archive"
     echo "FATAL: backup failed (tar exit $tar_rc); removed the partial $archive" >&2
@@ -864,9 +890,11 @@ archive_saves() {
 }
 
 backup() {
-  # Archive the world saves (data/userdata/Saves) into backups/. The saves
-  # are the only state that cannot be regenerated (the game depot re-downloads,
-  # configs re-render from the templates), so they are what backup owns.
+  # Archive the world saves (data/userdata/Saves) and the game log
+  # (data/userdata/Logs) into backups/: the state that cannot be regenerated
+  # (the game depot re-downloads, configs re-render from the templates).
+  # The log is the connection record, names and client addresses included, and
+  # nothing else on the host keeps a copy of it.
   if [[ ! -d "$USERDATA_DIR/Saves" ]]; then
     echo "FATAL: nothing to back up ($USERDATA_DIR/Saves is missing; has the server ever started?)" >&2
     exit 1
@@ -908,6 +936,7 @@ check_archive_payload() { # archive
   # the loop below treats every line of that as an archive entry and a warning
   # line would then read as a path outside the archive root.
   local listing verbose entry has_saves=0
+  ARCHIVE_HAS_LOGS=0
   if ! listing="$(tar -tzf "$archive")"; then
     echo "FATAL: $archive is not a readable tar.gz (truncated or corrupt). tar's own diagnostic is on the line above." >&2
     return 1
@@ -945,6 +974,11 @@ check_archive_payload() { # archive
         return 1
         ;;
       Saves|Saves/*) has_saves=1 ;;
+      # The game log rides along in every archive written since it was added
+      # to BACKUP_TREE. Older archives hold Saves only, which is why this is
+      # recorded rather than required: restore still puts a world back, it
+      # just has no log to restore with it.
+      Logs/*) ARCHIVE_HAS_LOGS=1 ;;
     esac
   done <<<"$listing"
   if (( has_saves == 0 )); then
@@ -1121,6 +1155,19 @@ restore() {
     exit 1
   fi
   rm -rf "$staged"
+  # The archived game log, put back next to the world. --keep-newer-files is
+  # the whole point: the log is append-only, so an entry written after this
+  # archive was taken is newer than the copy inside it and must survive. A
+  # plain extraction would roll the log back and take every connection made
+  # since the backup with it, turning a restore into the loss it exists to
+  # undo. Best effort: the world is already back in place above, and a partial
+  # log is still a log, so a failure here warns instead of failing a recovery
+  # that otherwise worked.
+  if (( ARCHIVE_HAS_LOGS )); then
+    if ! tar -xzf "$archive" --no-same-owner --keep-newer-files -C "$USERDATA_DIR" Logs; then
+      echo "WARN: the game log in $archive could not be extracted; $USERDATA_DIR/Logs keeps what it has" >&2
+    fi
+  fi
   echo "restored $archive into $USERDATA_DIR/Saves (start the server to load it)"
 }
 

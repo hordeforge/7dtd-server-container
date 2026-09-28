@@ -312,8 +312,9 @@ Add players to the admin list via telnet after joining, e.g.
   under `data/game/`.
 - Back up the saves with `./scripts/run.sh backup`: it asks the running
   server to `saveworld` via telnet first (best effort; a skipped save only
-  warns), archives `data/userdata/Saves/` to `backups/7dtd-saves-<UTC stamp>
-  .tar.gz` (owner-only, it carries `serveradmin.xml` and the webadmin record),
+  warns), archives `data/userdata/Saves/` and `data/userdata/Logs/` to
+  `backups/7dtd-saves-<UTC stamp>.tar.gz` (owner-only, it carries
+  `serveradmin.xml` and the webadmin record),
   and keeps the newest `BACKUP_KEEP` archives (default 7, whole number 1 to
   999999999) by that stamp, which is UTC so the order survives a DST transition or
   a host timezone change. `deploy.sh` never
@@ -330,6 +331,7 @@ them is a file on the host. There is no database and no external service:
 | World saves: player names, positions, inventories, bases, ban list, admin platform ids (`serveradmin.xml`) | `data/userdata/Saves/` (0700) | running the world and enforcing bans |
 | Game log: join and leave lines with platform ids, names and client addresses | `data/userdata/Logs/` (0600 files) | the boot and gameplay record `./scripts/run.sh logs` and the dashboard read |
 | Copies of both, plus the dashboard credential | `backups/7dtd-saves-*.tar.gz` (0700 dir, 0600 archives) | restore a world after a bad deploy or a deleted save |
+| Archives written before the log joined the backup (see `CHANGELOG.md`) | the same `backups/` archives | those hold the world only; a current `backup` adds `Logs/`, and `restore` puts it back without rolling the live log over |
 
 `data/game/` and `data/userdata/` are created 0700 and every file the
 container writes into them is 0600, because under rootless podman the
@@ -378,6 +380,12 @@ Restoring:
 ./scripts/run.sh restore backups/7dtd-saves-20260901-120000.tar.gz
 ./start.sh
 ```
+
+A restore puts the world back and, when the archive carries one, the game log
+too: a log file that is missing on the host comes back from the archive, and a
+log file that is already there is left as it is, so the connections made since
+the backup are not rolled back. Archives written before the log joined the
+backup hold `Saves/` only and still restore the world.
 
 Checking the backups before you need them:
 

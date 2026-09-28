@@ -41,6 +41,15 @@ password character domain, below), so it is a **major** release: 1.1.3 to
 
 ### Added
 
+- **The game log is backed up.** `run.sh backup` archived
+  `data/userdata/Saves/` and nothing else, so the join and leave record in
+  `data/userdata/Logs/` (player names, platform ids, client addresses) had no
+  copy anywhere, while the README's state table claimed the archives hold both.
+  `BACKUP_TREE` now names what a backup copies (a member that does not exist
+  yet is left out rather than failing the archive), and `restore` puts the
+  archived log back with `--keep-newer-files`, so a restore recovers a log file
+  that was deleted without rolling back the entries written since the backup.
+  Archives written before this hold the world only, and still restore.
 - **A scheduled readability check on the save archives.** A backup that exited
   0 is a claim about the file it wrote that day, not proof the file is still
   good; a truncated off-host copy, a dropped tail or an archive nobody pruned
@@ -261,6 +270,19 @@ password character domain, below), so it is a **major** release: 1.1.3 to
   build itself.
 
 ### Fixed
+
+- **A deploy deleted the server host's `.env`.** `deploy.sh` pushes with
+  `rsync --delete` and excluded `data` and `backups`, but not `.env`: the file
+  is the only copy of the telnet and webadmin passwords on that host, and it
+  is git-ignored, so any tree without one (a fresh clone, a second
+  workstation, a worktree) made `--delete` remove it. The next start then
+  either refused for a missing `TELNET_PASSWORD` or, with
+  `ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD` set, booted the server on the
+  committed public default. A `P /.env` rsync filter now shields the host's
+  copy from `--delete` while still pushing the deploying tree's own, which is
+  what an `--exclude` cannot do. Pinned in `scripts/test_deploy_sh.py` by
+  replaying the flags deploy.sh passes through a real rsync against a local
+  `--delete` pair.
 
 - **A host with no MD5 tool rendered an empty dashboard password digest.**
   `webadmin_password_digest` ran `md5_hex` in a command substitution and

@@ -135,9 +135,11 @@ Every row above was verified against the tree at the review date.
   `<apitokens>` is empty but would carry bearer secrets if an operator adds
   entries.
 - **Save archives in `backups/`**: the only off-`Saves/` copy of the world
-  (retention `BACKUP_KEEP`, default 7) and, as noted above, of the dashboard
-  credentials. Unencrypted, same host, no off-host copy shipped here
-  (`scripts/run.sh` `archive_saves`, `systemd/7dtd-backup.service`).
+  (retention `BACKUP_KEEP`, default 7), of the dashboard credentials, and of
+  the game log in `data/userdata/Logs/` (join and leave lines: names, platform
+  ids, client addresses), which nothing else copies. Unencrypted, same host, no
+  off-host copy shipped here (`scripts/run.sh` `archive_saves`,
+  `systemd/7dtd-backup.service`).
 - **Compute of the host user session** (rootless, but unconfined within that
   user): CPU/RAM/disk for cryptomining or exhaustion; the host's LAN position
   as a pivot.
@@ -251,7 +253,11 @@ this game service and its user account context.
   (`scripts/run.sh` `restore`) rejects path escapes, absolute entries, and an
   archive with no `Saves/` payload, and `--no-same-owner` blocks a foreign uid
   in the archive; it checks the archive's shape, not the trustworthiness of its
-  XML. Recorded as a threat for sec-review, not fixed here.
+  XML. Recorded as a threat for sec-review, not fixed here. The same operand
+  now also controls the archived `Logs/` extraction, which runs with
+  `--keep-newer-files`: a live log file is kept unless the archive carries a
+  strictly newer mtime for it, so a planted timestamp is the remaining way to
+  overwrite connection history the host still has.
 - **Denial of service / resource exhaustion:** no size, entry-count, or
   expansion bound is applied before extraction. `tar -tzf` on a small
   compression bomb still succeeds, and `restore` then extracts it into a

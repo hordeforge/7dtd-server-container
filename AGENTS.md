@@ -87,7 +87,7 @@ Workspace root guide: [`hordeforge/.github` AGENTS.md](https://github.com/hordef
 ./scripts/run.sh install-only # download/validate game then exit (pre-warm; refuses while the server runs)
 ./scripts/run.sh status       # container state + health probe (telnet connect, no password)
 ./scripts/run.sh config       # effective config + value source, secrets redacted
-./scripts/run.sh backup       # archive data/userdata/Saves into backups/ (keeps the newest 7)
+./scripts/run.sh backup       # archive data/userdata/{Saves,Logs} into backups/ (keeps the newest 7)
 ./scripts/run.sh restore      # put an archive back (no arg = newest); archives the replaced saves first
 ./start.sh / ./stop.sh        # daily start/stop shortcuts (wrap run.sh)
 ```
