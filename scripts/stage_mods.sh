@@ -6,8 +6,9 @@
 # container. The enabled
 # set below is EfficientServer (perf) + the APM bridge + BotMod (combat bots,
 # remove for clean perf runs). This script owns the enabled set: everything in
-# mods/ outside NAMES is wiped on every run, so a mod enabled by hand survives
-# only until the next staging run (deploy.sh calls this script). The new set
+# mods/ outside NAMES is wiped by every successful run, so a mod enabled by
+# hand survives only until the next staging run (deploy.sh calls this script).
+# The new set
 # is built beside the old one and swapped in only once every copy succeeded,
 # so a failed run leaves the previously enabled mods in place, and a run that
 # would stage none of them fails instead of wiping the set. To enable another
@@ -99,8 +100,9 @@ done
 # redeploy that changed no mod. Nothing touches $ROOT/mods before the swap:
 # wiping the stale entries or rewriting a named mod in place would destroy a
 # working enabled set on a run that then reports the failure, and the swap's
-# `rm -rf` already drops whatever the new set does not name, so a mod enabled
-# by hand still survives only until the next successful staging run.
+# `rm -rf` already empties mods/ and drops whatever the new set does not name,
+# so a mod enabled by hand still survives only until the next successful
+# staging run.
 rm -rf "$enabled_staging"
 mkdir -p "$enabled_staging"
 for name in "${NAMES[@]}"; do

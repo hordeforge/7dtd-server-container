@@ -129,14 +129,15 @@ if [[ "$RESTART" == "1" ]]; then
   done
   # shellcheck disable=SC2016  # non-expansion is the point: dest_dir belongs to the remote shell
   REMOTE_CMD='read -r dest_dir && cd "$dest_dir" && ./scripts/update_mods.sh'
+  SSH_ARGV=(ssh -o ConnectTimeout=10 "${SSH_USER}@${HOST}" "$REMOTE_CMD")
   restart_rc=0
   if [[ -n "$TIMEOUT_BIN" ]]; then
     printf '%s\n' "$DEST_DIR" \
-      | "$TIMEOUT_BIN" 300 ssh -o ConnectTimeout=10 "${SSH_USER}@${HOST}" "$REMOTE_CMD" || restart_rc=$?
+      | "$TIMEOUT_BIN" 300 "${SSH_ARGV[@]}" || restart_rc=$?
   else
     echo "WARN: timeout(1) not found; running the remote restart without a local time bound" >&2
     printf '%s\n' "$DEST_DIR" \
-      | ssh -o ConnectTimeout=10 "${SSH_USER}@${HOST}" "$REMOTE_CMD" || restart_rc=$?
+      | "${SSH_ARGV[@]}" || restart_rc=$?
   fi
   # A failed restart must not read as a plain ssh hiccup: rsync already pushed
   # the tree, so the server host now holds code its running container has not

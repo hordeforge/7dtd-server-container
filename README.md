@@ -120,9 +120,10 @@ cd ../7dtd-server-container && ./scripts/deploy.sh
 Dropping a mod into `mods/` and restarting is all it takes. Removing it from
 `mods/` and restarting disables it (the entrypoint keeps only the stock
 `0_TFP_Harmony` from the depot). `scripts/stage_mods.sh` owns the enabled set
-and wipes everything else out of `mods/` on every `deploy.sh`, so removing a
-staged mod only holds until the next deploy; drop its name from `NAMES` in
-`stage_mods.sh` to keep it out.
+and wipes everything else out of `mods/` on every successful `deploy.sh`
+staging run, so removing a staged mod only holds until the next deploy; drop
+its name from `NAMES` in `stage_mods.sh` to keep it out. A staging run that
+fails part way leaves `mods/` exactly as it found it.
 
 **Updating a mod never requires rebuilding the container image.** The image is
 static; mods are bind-mounted from `mods/` and re-synced by the entrypoint on

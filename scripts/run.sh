@@ -490,7 +490,10 @@ restore() {
     echo "FATAL: $archive contains no Saves/ payload; refusing to restore it" >&2
     exit 1
   fi
-  if podman ps --format '{{.Names}}' | grep -Fxq "$NAME"; then
+  # container_running, not a `podman ps | grep -Fxq` pipeline: grep -q exits at
+  # the first match, so under pipefail a podman that then takes SIGPIPE fails
+  # the whole pipeline and the running-server guard below is skipped.
+  if container_running; then
     echo "FATAL: $NAME is running; stop it first (./scripts/run.sh stop) so the game cannot write over the restored saves" >&2
     exit 1
   fi
