@@ -7,9 +7,12 @@
 # set below is EfficientServer (perf) + the APM bridge + BotMod (combat bots,
 # remove for clean perf runs). This script owns the enabled set: everything in
 # mods/ outside NAMES is wiped on every run, so a mod enabled by hand survives
-# only until the next staging run (deploy.sh calls this script). To enable
-# another mod persistently, add its name to NAMES; see MODS.md for what each
-# shipped mod does.
+# only until the next staging run (deploy.sh calls this script). The new set
+# is built beside the old one and swapped in only once every copy succeeded,
+# so a failed run leaves the previously enabled mods in place, and a run that
+# would stage none of them fails instead of wiping the set. To enable another
+# mod persistently, add its name to NAMES; see MODS.md for what each shipped
+# mod does.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$ROOT/scripts/lib-env.sh"
@@ -51,6 +54,15 @@ esac
 require_argc 0 usage "${2:-${1:-}}"
 
 mkdir -p "$ROOT/mods-available" "$ROOT/mods"
+
+# The enabled set is rebuilt out of the way and swapped in only after every
+# copy has succeeded. Wiping mods/ up front (as an in-place rebuild does)
+# leaves the tree with a half-built or empty enabled set when a copy fails,
+# and deploy.sh pushes whatever stands there, so the server host would boot
+# without its mods after a run that reported the failure. The previous set
+# stays intact until the new one is complete.
+enabled_staging="$ROOT/mods/.enabled.tmp.$$"
+
 # Sweep staging leftovers from a previously killed run (both dirs): hidden,
 # so the wipes and globs below would keep them, and mods/ is bind-mounted,
 # so its litter would reach the game's Mods dir (the entrypoint copies
@@ -95,6 +107,11 @@ for d in "$ROOT/mods"/*/; do
     rm -rf "$d"
   fi
 done
+# The new set is staged here and swapped in below, so a failed copy leaves the
+# previously enabled mods in place.
+rm -rf "$enabled_staging"
+mkdir -p "$enabled_staging"
+enabled=0
 for name in "${NAMES[@]}"; do
   if [[ -d "$ROOT/mods-available/$name" ]]; then
     if ! sync_tree "$ROOT/mods-available/$name" "$ROOT/mods/$name"; then
@@ -103,9 +120,30 @@ for name in "${NAMES[@]}"; do
     fi
   else
     echo "WARN: enabled mod $name not staged (missing in mods-available/); server will start without it" >&2
+    continue
   fi
+  if ! cp -a "$ROOT/mods-available/$name" "$enabled_staging/$name"; then
+    rm -rf "$enabled_staging"
+    echo "FATAL: failed to enable $name (copy into $enabled_staging failed); $ROOT/mods left unchanged" >&2
+    exit 1
+  fi
+  enabled=$((enabled + 1))
 done
+# An empty new set means every sibling dist is missing: swapping it in would
+# wipe a working enabled set and deploy a mod-less tree as a successful run.
+if (( enabled == 0 )); then
+  rm -rf "$enabled_staging"
+  echo "FATAL: none of the enabled mods are staged in $ROOT/mods-available (${NAMES[*]}); $ROOT/mods left unchanged" >&2
+  exit 1
+fi
+rm -rf "$ROOT/mods/"*
+for d in "$enabled_staging"/*/; do
+  [[ -d "$d" ]] || continue
+  entry="${d%/}"
+  mv "$entry" "$ROOT/mods/${entry##*/}"
+done
+rm -rf "$enabled_staging"
 
-echo "enabled:  $(ls "$ROOT/mods")"
-echo "available: $(ls "$ROOT/mods-available")"
+echo "enabled:  $(list_dir "$ROOT/mods")"
+echo "available: $(list_dir "$ROOT/mods-available")"
 echo "enable another mod persistently: add its name to NAMES in $ROOT/scripts/stage_mods.sh"

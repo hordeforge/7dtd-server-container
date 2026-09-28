@@ -57,5 +57,13 @@ if [[ -d mods-available ]]; then
 fi
 
 echo "restarting container to re-sync Mods/ ..."
-./scripts/run.sh restart
-echo "mods now enabled: $(ls mods)"
+restart_rc=0
+./scripts/run.sh restart || restart_rc=$?
+# The restage above already landed in mods/, so a failed restart leaves the
+# server host holding mods the running container never loaded. Name that state
+# instead of dying on run.sh's bare exit.
+if (( restart_rc != 0 )); then
+  echo "FATAL: restart failed (exit $restart_rc); mods/ holds the restaged set but the container still runs the old Mods/ -- re-run ./scripts/run.sh start" >&2
+  exit 1
+fi
+echo "mods now enabled: $(list_dir mods)"

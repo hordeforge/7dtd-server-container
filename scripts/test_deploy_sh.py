@@ -96,6 +96,15 @@ os.execvp(argv[1], argv[1:])
 # the usage() heredocs the usage-error scenarios exercise.
 NEEDED_BINS = ("bash", "cat", "dirname", "mkdir", "rm", "cp", "mv", "ls", "python3", "pwd")
 
+# stage_mods.sh's SRCS array, keyed the way it enables them: a deploy from a
+# workstation with no built sibling repos stages nothing and must fail before
+# rsync, never --delete the mods/ set the server host is running.
+SIBLING_DIST = {
+    "EfficientServer": "7dtd-server-optimizer",
+    "7dtd-server-apm-bridge": "7dtd-server-apm",
+    "BotMod": "7dtd-fps-bots",
+}
+
 HOST = "sentinel-host.lan"
 SSH_USER = "sentinel-user"
 DEST_DIR = "/home/sentinel-user/7dtd-server"
@@ -108,17 +117,25 @@ EXPECTED_SSH_ARGV = [
 ]
 
 
-def make_sandbox(tmpdir: Path, timeout_name: str | None) -> tuple[Path, dict[str, str]]:
+def make_sandbox(
+    tmpdir: Path, timeout_name: str | None, with_dists: bool = True
+) -> tuple[Path, dict[str, str]]:
     """Copy the deploy path into a sandbox; return (project root, run env).
 
     timeout_name installs the time-bound stub under that binary name (timeout,
-    gtimeout); None leaves both out so the probe finds neither.
+    gtimeout); None leaves both out so the probe finds neither. with_dists
+    seeds the sibling dist/ dirs stage_mods.sh stages from, which is what a
+    workstation running a deploy actually has.
     """
     project = tmpdir / "project"
     (project / "scripts").mkdir(parents=True)
     shutil.copy2(DEPLOY_SH, project / "scripts" / "deploy.sh")
     shutil.copy2(SCRIPTS / "stage_mods.sh", project / "scripts" / "stage_mods.sh")
     shutil.copy2(SCRIPTS / "lib-env.sh", project / "scripts" / "lib-env.sh")
+    if with_dists:
+        for mod, sibling in SIBLING_DIST.items():
+            (tmpdir / sibling / "dist" / mod / "Config").mkdir(parents=True)
+            (tmpdir / sibling / "dist" / mod / "Config" / "config.json").write_text(mod)
 
     bindir = tmpdir / "bin"
     bindir.mkdir()
@@ -185,6 +202,21 @@ with tempfile.TemporaryDirectory() as tmp:
     check(
         "plain deploy never opens an ssh session",
         invocations(Path(env["DEPLOY_TEST_SSH_LOG"])) == [],
+    )
+
+# Staging that cannot produce the enabled set must abort the deploy before
+# rsync runs: rsync --delete would otherwise strip the mods/ set the server
+# host is running, and the deploy would report success.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    project, env = make_sandbox(tmpdir, timeout_name=None, with_dists=False)
+    proc = run_deploy(project, env)
+    err = proc.stderr.decode(errors="replace")
+    check("deploy without built sibling mods exits nonzero", proc.returncode != 0)
+    check("deploy without built sibling mods names staging", "mods-available" in err)
+    check(
+        "deploy without built sibling mods never reached rsync",
+        invocations(Path(env["DEPLOY_TEST_RSYNC_LOG"])) == [],
     )
 
 # Supervised restart: ssh under the probed wrapper, destination via stdin only.

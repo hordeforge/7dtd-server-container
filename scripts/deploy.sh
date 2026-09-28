@@ -63,6 +63,7 @@ esac
 # validate the same values). The .scratch* pattern also covers scratch files
 # dropped beside the directory (e.g. .scratch_<name>.sh copies kept for
 # reference).
+rsync_rc=0
 rsync -a --delete --timeout=60 -e "ssh -o ConnectTimeout=10" \
   --exclude .git \
   --exclude data \
@@ -74,7 +75,14 @@ rsync -a --delete --timeout=60 -e "ssh -o ConnectTimeout=10" \
   --exclude coverage \
   --exclude coverage.cobertura.xml \
   --exclude .scratch* \
-  "$ROOT/" "${SSH_USER}@${HOST}:${DEST_DIR}/"
+  "$ROOT/" "${SSH_USER}@${HOST}:${DEST_DIR}/" || rsync_rc=$?
+# rsync --delete applies deletions as it goes, so a failed transfer leaves the
+# server host with a partial tree (scripts, and possibly fewer mods). Name the
+# phase and the residue instead of letting the run die on rsync's own exit.
+if (( rsync_rc != 0 )); then
+  echo "FATAL: rsync of $ROOT/ to ${SSH_USER}@${HOST}:${DEST_DIR}/ failed (exit $rsync_rc); the tree there is partial -- re-run $0 before trusting the server host" >&2
+  exit 1
+fi
 
 echo "deployed $ROOT -> ${SSH_USER}@${HOST}:${DEST_DIR}/"
 if [[ "$RESTART" == "1" ]]; then

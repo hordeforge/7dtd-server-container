@@ -64,6 +64,37 @@ require_argc 1 usage "${2:-}"
 require_command "$COMMAND" \
   'build|start|run|restart|install-only|stop|logs|status|backup|version' usage
 
+# Is $NAME in the running set? podman's output is captured rather than piped
+# into `grep -Fxq`: grep -q exits at the first match, and under
+# `set -o pipefail` a podman that then takes SIGPIPE turns the whole pipeline
+# into a failure. A running container would read as stopped, and stop() would
+# take the forced-stop path with no world save. podman's own error text still
+# reaches the operator: only stdout is captured.
+container_running() {
+  local names n
+  names="$(podman ps --format '{{.Names}}')" || return 1
+  while IFS= read -r n; do
+    if [[ "$n" == "$NAME" ]]; then
+      return 0
+    fi
+  done <<< "$names"
+  return 1
+}
+
+# Same capture for the stopped-but-present set: a false negative there would
+# let a failed `podman stop` that left the container in place read as the
+# harmless already-gone case.
+container_exists() {
+  local names n
+  names="$(podman ps -a --format '{{.Names}}')" || return 1
+  while IFS= read -r n; do
+    if [[ "$n" == "$NAME" ]]; then
+      return 0
+    fi
+  done <<< "$names"
+  return 1
+}
+
 GAME_DIR="$ROOT/data/game"
 USERDATA_DIR="$ROOT/data/userdata"
 BACKUP_DIR="$ROOT/backups"
@@ -223,7 +254,7 @@ start() {
   # green "started" line. Give the container a few seconds to prove it stays
   # up; if it is gone, surface its own last log lines instead of success.
   local waited=0
-  until podman ps --format '{{.Names}}' | grep -Fxq "$NAME"; do
+  until container_running; do
     if (( waited >= 4 )); then
       echo "FATAL: $NAME is not running right after start; last log lines:" >&2
       podman logs --tail 20 "$NAME" >&2 || true
@@ -240,7 +271,7 @@ install_only() {
   # swaps files out from under the live game. Pre-warm is a
   # before-first-start step, so refuse instead of racing the depot (start()
   # is the only sanctioned way to replace a running instance).
-  if podman ps --format '{{.Names}}' | grep -Fxq "$NAME"; then
+  if container_running; then
     echo "FATAL: $NAME is running; stop it first (install-only must not rewrite data/game under a live server)" >&2
     exit 1
   fi
@@ -267,7 +298,7 @@ stop() {
   # command, wait for the container to exit, then force-stop as a fallback.
   # A readiness pre-check avoids a stale /dev/tcp session racing a container
   # that was just (re)started and answering telnet on the same host port.
-  if podman ps --format '{{.Names}}' | grep -Fxq "$NAME"; then
+  if container_running; then
     echo "requesting save + shutdown via telnet ..."
     # Declared before the branches that fill it: the forced-stop path below
     # dumps the reply whether or not the request ran, and set -u would abort
@@ -308,7 +339,7 @@ stop() {
   # (the normal no-op) or real trouble; a real failure must not read as
   # success, because the world save may never have happened.
   if ! podman stop -t 30 "$NAME" >/dev/null 2>&1; then
-    if podman ps -a --format '{{.Names}}' 2>/dev/null | grep -Fxq "$NAME"; then
+    if container_exists; then
       echo "FATAL: podman stop failed but $NAME still exists; check podman logs/events" >&2
       exit 1
     fi
@@ -328,7 +359,7 @@ backup() {
     echo "FATAL: nothing to back up ($USERDATA_DIR/Saves is missing; has the server ever started?)" >&2
     exit 1
   fi
-  if podman ps --format '{{.Names}}' | grep -Fxq "$NAME"; then
+  if container_running; then
     # Best-effort live save: a fresh saveworld makes the archive useful even
     # taken mid-session. A failed request must not block the archive (an
     # inconsistent-but-present backup beats none), so every failure here only
@@ -378,7 +409,12 @@ backup() {
   shopt -u nullglob
   excess=$(( ${#archives[@]} - KEEP_BACKUPS ))
   for (( i = 0; i < excess; i++ )); do
-    rm -f -- "${archives[$i]}"
+    # Pruning is housekeeping, not the backup: a failed removal must not abort
+    # the run before the archive just written is reported, nor hide that the
+    # directory now keeps more than KEEP_BACKUPS.
+    if ! rm -f -- "${archives[$i]}"; then
+      echo "WARN: could not remove old backup ${archives[$i]}" >&2
+    fi
   done
   echo "backup written: $archive (keeping the newest $KEEP_BACKUPS in $BACKUP_DIR)"
 }

@@ -15,6 +15,9 @@ unpatched against a sandbox tree with a stub run.sh recording restarts:
               both directories
   stage-miss  a missing dist warns on stderr, stages nothing for that mod,
               and still stages the rest
+  stage-wipe  a run that stages none of the owned mods, and a run whose enable
+              copy fails, both leave the previously enabled set untouched
+              instead of wiping it and exiting 0
   update      restage copies mods-available content over every mod already
               enabled in mods/ (marker propagates), leaves a mod that has
               no mods-available counterpart alone, sweeps litter, and
@@ -159,6 +162,63 @@ with tempfile.TemporaryDirectory() as tmp:
         sorted(p.name for p in (root / "mods").iterdir()) == ["EfficientServer"],
     )
 
+# The enabled set is the one thing staging must never lose: deploy.sh pushes
+# whatever mods/ holds, so a run that fails part way (or stages nothing at all)
+# would otherwise wipe it and still read as a successful deploy.
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+
+    # Nothing staged at all: the previously enabled mods must survive and the
+    # run must fail rather than swap an empty set in.
+    root = make_stage_sandbox(tmpdir / "none", [])
+    seeded_mod(root / "mods", "OldMod", "stale")
+    proc = run_script(root / "scripts" / "stage_mods.sh", cwd=root, env={})
+    err = proc.stderr.decode(errors="replace")
+    check("stage with no dists exits 1", proc.returncode == 1)
+    check("stage with no dists names the cause", "FATAL" in err and "mods-available" in err)
+    check(
+        "stage with no dists left the enabled set alone",
+        sorted(p.name for p in (root / "mods").iterdir()) == ["OldMod"],
+    )
+
+    # A copy that fails mid-rebuild: the swap happens only after every copy
+    # succeeded, so the previous set (including the not-yet-copied mods) stays.
+    root = make_stage_sandbox(tmpdir / "failing", NAMES)
+    mods = root / "mods"
+    seeded_mod(mods, "EfficientServer", "live-efficient")
+    seeded_mod(mods, "BotMod", "live-bot")
+    script = root / "scripts" / "stage_mods.sh"
+    enable_copy = 'cp -a "$ROOT/mods-available/$name" "$enabled_staging/$name"'
+    src = script.read_text(encoding="utf-8")
+    if enable_copy not in src:
+        print(
+            f"FAIL: stage_mods.sh enable copy drifted: {enable_copy!r} not found",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    script.write_text(
+        src.replace(
+            enable_copy,
+            f'{{ if [[ "$name" != BotMod ]]; then {enable_copy}; else false; fi }}',
+        ),
+        encoding="utf-8",
+    )
+    proc = run_script(script, cwd=root, env={})
+    err = proc.stderr.decode(errors="replace")
+    check("a failed enable copy exits 1", proc.returncode == 1)
+    check("a failed enable copy names the mod", "FATAL" in err and "BotMod" in err)
+    check(
+        "a failed enable copy kept the previous enabled set",
+        sorted(p.name for p in mods.iterdir()) == ["BotMod", "EfficientServer"],
+    )
+    check(
+        "a failed enable copy left the old mod content in place",
+        (mods / "EfficientServer" / "Config" / "config.json").read_text(encoding="utf-8")
+        == "live-efficient"
+        and (mods / "BotMod" / "Config" / "config.json").read_text(encoding="utf-8") == "live-bot",
+    )
+    check("a failed enable copy swept its staging dir", litter_gone(mods))
+
 # update_mods.sh: server-side restage from mods-available/ plus one restart.
 with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
@@ -209,6 +269,27 @@ with tempfile.TemporaryDirectory() as tmp:
         stub_log.read_text(encoding="utf-8") == "restart\n",
     )
 
+    # A restart that fails leaves the restaged mods on disk and the running
+    # container on the old set: the run must say so rather than exit on
+    # run.sh's bare status and read as a completed restage.
+    stub.write_text("#!/usr/bin/env bash\nprintf 'restart\\n' >> \"$UPD_STUB_LOG\"\nexit 3\n")
+    proc = run_script(scripts / "update_mods.sh", cwd=root, env={"UPD_STUB_LOG": str(stub_log)})
+    err = proc.stderr.decode(errors="replace")
+    check("a failed restart exits nonzero", proc.returncode != 0)
+    check(
+        "a failed restart names the stale-mods state and the way out",
+        "FATAL" in err and "old Mods/" in err and "run.sh start" in err,
+    )
+    check(
+        "the restage still happened before the failed restart",
+        (mods / "BotMod" / "Config" / "config.json").read_text(encoding="utf-8") == "bot-new",
+    )
+    stub.write_text("#!/usr/bin/env bash\nprintf 'restart\\n' >> \"$UPD_STUB_LOG\"\n")
+    # The usage scenarios below count restarts from a clean log: the failing
+    # restart above is its own scenario, not part of the successful run.
+    stub_log.write_text("")
+    restarts_before = stub_log.read_text(encoding="utf-8")
+
     # Same usage contract as stage_mods.sh: help wins over extra words,
     # anything else exits 2 naming the word, and none of it may restage
     # or restart.
@@ -232,7 +313,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("update unknown flag exits 2 naming it", proc.returncode == 2 and "--dry-run" in err)
     check(
         "rejected update invocations restarted nothing more",
-        stub_log.read_text(encoding="utf-8") == "restart\n",
+        stub_log.read_text(encoding="utf-8") == restarts_before,
     )
 
 # Usage errors are refused before any staging side effect, and the offending

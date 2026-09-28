@@ -1,7 +1,8 @@
 # shellcheck shell=bash
-# Shared .env loader, telnet env validation, and the telnet session helper
-# for the ops scripts (run.sh, perf.sh, deploy.sh, stage_mods.sh,
-# update_mods.sh) and, via the copy baked into the image, for entrypoint.sh.
+# Shared .env loader, telnet env validation, the directory listing helper,
+# and the telnet session helper for the ops scripts (run.sh, perf.sh,
+# deploy.sh, stage_mods.sh, update_mods.sh) and, via the copy baked into the
+# image, for entrypoint.sh.
 #
 # Semantics: variables already present in the environment win over the file;
 # KEY=value lines only; values are taken literally (no variable expansion, no
@@ -42,6 +43,25 @@ require_command() { # command pipe_separated_valid usage_fn
   echo "FATAL: unknown command '$cmd'" >&2
   "$usage_fn" >&2
   exit 2
+}
+
+# Space-separated names of a directory's entries, "(empty)" when it has
+# none. `ls` on an empty directory prints nothing to stdout and writes
+# "cannot access ..." to stderr, so a caller reporting a staged or enabled
+# mod set would print a blank line and read as an empty-but-successful run.
+list_dir() { # dir
+  local dir="$1" entries=() restore_nullglob=0
+  shopt -q nullglob || restore_nullglob=1
+  shopt -s nullglob
+  entries=("$dir"/*)
+  if (( ${#entries[@]} == 0 )); then
+    printf '%s\n' '(empty)'
+  else
+    printf '%s\n' "${entries[@]##*/}"
+  fi
+  if (( restore_nullglob == 1 )); then
+    shopt -u nullglob
+  fi
 }
 
 load_env_file() {
