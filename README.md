@@ -1,11 +1,11 @@
-# 🏰 Outpost (7DTD Server Container)
+# 🏰 Outpost (Server Container)
 
 > **Part of [HordeForge](https://github.com/hordeforge)**: High-Performance Systems Engineering for 7 Days to Die.
 
 ![CI](https://github.com/hordeforge/7dtd-server-container/actions/workflows/ci.yml/badge.svg)
 ![coverage](https://raw.githubusercontent.com/hordeforge/7dtd-server-container/badges/coverage.svg)
-![release](https://img.shields.io/github/v/release/hordeforge/7dtd-server-container)
 ![license](https://img.shields.io/github/license/hordeforge/7dtd-server-container)
+![release](https://img.shields.io/github/v/release/hordeforge/7dtd-server-container)
 
 A 7 Days to Die dedicated server (V3.2.0 line) in a rootless podman container on the LAN host `server.lan` (192.168.0.100). Stock Navezgane map, stock default difficulty and settings, with the workspace perf, APM and FPS-bot mods loaded: **Crucible** (`7dtd-server-optimizer`), **Geiger** (`7dtd-server-apm`) and **BotMod** (`7dtd-fps-bots`). EAC is off (required for C# mods).
 
