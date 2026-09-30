@@ -2,14 +2,13 @@
 """Unit tests for sbom.py, run via `make test`.
 
 Methodology: pin the CycloneDX contract at its boundaries.
-  parsing     a line that is not `name==version` with sha256 hashes is
-              rejected, the marker survives the hash continuation, and the
-              backslash continuation is joined rather than read as its own line
-  rendering   one component per manifest pin (matched by an independent
+  parsing     a uv.lock package that is not an exact, sha256-hashed registry
+              package is rejected, and an edge marker reaches the component
+  rendering   one component per locked package (matched by an independent
               regex, not by the parser under test), sorted, each carrying its
               purl, its sha256 hashes and the license its METADATA declares
   document    the root component, the 1.6 envelope, and a serial number that
-              is a pure function of the manifest
+              is a pure function of the lock
   cli         --help, stdout, the written file, and the usage-error exit code
 Each failed check prints a FAIL line; the process exits nonzero if any failed.
 """
@@ -32,10 +31,33 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import sbom
 
 SBOM = ROOT / "scripts" / "sbom.py"
-MANIFEST = ROOT / "requirements-lint.txt"
+MANIFEST = ROOT / "uv.lock"
 # Read the pins without sbom's parser, so a bug there cannot hide by being
-# used on both sides of the comparison.
-PIN = re.compile(r"^([A-Za-z0-9_.-]+)==([^ \\\n;]+)", re.MULTILINE)
+# used on both sides of the comparison. The virtual project entry is the root,
+# not a component, and has no registry source.
+PIN = re.compile(
+    r'^\[\[package\]\]\nname = "([^"]+)"\nversion = "([^"]+)"\nsource = \{ registry',
+    re.MULTILINE,
+)
+HASH = re.compile(r'hash = "sha256:([0-9a-f]{64})"')
+
+
+def lock(*packages: str, root_edges: str = "") -> str:
+    """A uv.lock with a virtual root whose dev group lists root_edges."""
+    head = (
+        'version = 1\nrevision = 3\n\n[[package]]\nname = "root"\nversion = "0"\n'
+        f'source = {{ virtual = "." }}\n\n[package.dev-dependencies]\ndev = [{root_edges}]\n'
+    )
+    return head + "".join(f"\n[[package]]\n{p}" for p in packages)
+
+
+def package(
+    name: str, version: str, digest: str, source: str = 'registry = "https://pypi.org/simple"'
+) -> str:
+    return (
+        f'name = "{name}"\nversion = "{version}"\nsource = {{ {source} }}\n'
+        f'wheels = [{{ url = "https://x/{name}.whl", hash = "{digest}" }}]\n'
+    )
 
 
 class Hash(TypedDict):
@@ -102,7 +124,7 @@ def tree(tmp: Path, manifest: str) -> Path:
     root = tmp / "tree"
     (root / "scripts").mkdir(parents=True, exist_ok=True)
     (root / "scripts" / "sbom.py").write_bytes(SBOM.read_bytes())
-    (root / "requirements-lint.txt").write_text(manifest, encoding="utf-8")
+    (root / "uv.lock").write_text(manifest, encoding="utf-8")
     (root / "VERSION").write_bytes((ROOT / "VERSION").read_bytes())
     return root
 
@@ -176,14 +198,14 @@ with tempfile.TemporaryDirectory() as tmp:
     check(
         "one component per manifest pin",
         sorted((c["name"], c["version"]) for c in doc["components"])
-        == sorted((n.lower().replace("_", "-"), v) for n, v in PIN.findall(manifest_text)),
+        == sorted(PIN.findall(manifest_text)),
     )
     names = [c["name"] for c in doc["components"]]
     check("components are sorted by name", names == sorted(names))
     check(
         "every manifest hash is carried",
         {h["content"] for c in doc["components"] for h in c["hashes"]}
-        == set(re.findall(r"--hash=sha256:([0-9a-f]{64})", manifest_text)),
+        == set(HASH.findall(manifest_text)),
     )
     check(
         "hashes are declared as SHA-256",
@@ -197,22 +219,13 @@ with tempfile.TemporaryDirectory() as tmp:
         ),
     )
 
-    # The pin the venv does not install at the .python-version pin, the pin
-    # whose marker sits between the pin and its hashes, and the two licenses
+    # The package reached only through a marked edge, and the two licenses
     # only the older metadata forms carry.
-    tomli = component(doc, "tomli")
-    check(
-        "a marker-gated pin that is not installed says so and claims no license",
-        {p["name"] for p in tomli["properties"]}
-        == {"hordeforge:pip:marker", "hordeforge:pip:installed"}
-        and "licenses" not in tomli
-        and tomli["properties"][0]["value"] == 'python_version < "3.11"',
-    )
     librt = component(doc, "librt")
     check(
-        "a marker before the hashes is read as a marker, not as part of them",
+        "a package reached through a marked edge carries that marker",
         {p["name"] for p in librt["properties"]} == {"hordeforge:pip:marker"}
-        and librt["properties"][0]["value"] == 'platform_python_implementation != "PyPy"'
+        and librt["properties"][0]["value"] == "platform_python_implementation != 'PyPy'"
         and all(len(h["content"]) == 64 for h in librt["hashes"]),
     )
     check(
@@ -224,8 +237,8 @@ with tempfile.TemporaryDirectory() as tmp:
         component(doc, "yamllint")["licenses"] == [{"license": {"id": "GPL-3.0-or-later"}}],
     )
     check(
-        "every other installed component declares a license",
-        all("licenses" in c for c in doc["components"] if c["name"] != "tomli"),
+        "every installed component declares a license",
+        all("licenses" in c for c in doc["components"]),
     )
 
     # A copy of the tree with no venv beside it: the script finds its own root
@@ -260,7 +273,10 @@ with tempfile.TemporaryDirectory() as tmp:
     with tempfile.TemporaryDirectory() as uni:
         uni_root = tree(
             Path(uni),
-            f'spätzle==1.0; python_version < "3.11" <café> \\\n    --hash=sha256:{"0" * 64}\n',
+            lock(
+                package("spätzle", "1.0", f"sha256:{'0' * 64}"),
+                root_edges='{ name = "spätzle", marker = "python_version < \'3.11\' <café>" }',
+            ),
         )
         plant_metadata(uni_root, "spätzle", "spätzle", "Café Proprietary")
         uni_out = Path(uni) / "sbom.cdx.json"
@@ -273,7 +289,7 @@ with tempfile.TemporaryDirectory() as tmp:
             "the component name, license and marker survive the render verbatim",
             uni_comp["name"] == "spätzle"
             and uni_comp["licenses"] == [{"license": {"id": "Café Proprietary"}}]
-            and uni_comp["properties"][0]["value"] == 'python_version < "3.11" <café>',
+            and uni_comp["properties"][0]["value"] == "python_version < '3.11' <café>",
         )
         check("the document is written as UTF-8", uni_bytes.decode("utf-8") == uni_text)
         result = run(uni_root)
@@ -283,32 +299,33 @@ with tempfile.TemporaryDirectory() as tmp:
         )
 
     with tempfile.TemporaryDirectory() as bad:
-        bad_root = tree(Path(bad), "ruff==0.16.6\n")
+        unhashed = 'name = "ruff"\nversion = "0.16.6"\nsource = { registry = "x" }\n'
+        bad_root = tree(Path(bad), lock(unhashed))
         result = run(bad_root)
         check(
             "an unhashed pin is a clean failure, not a partial document",
             result.returncode == 1 and not result.stdout,
         )
-        check("the failure names the pin", "no --hash pinning on ruff==0.16.6" in result.stderr)
+        check("the failure names the pin", "no hash pinning on ruff==0.16.6" in result.stderr)
 
-        ranged = tree(Path(bad), f"ruff 0.16.6 --hash=sha256:{'0' * 64}\n")
-        result = run(ranged)
+        git = tree(Path(bad), lock(package("ruff", "0.16.6", f"sha256:{'0' * 64}", 'git = "x"')))
+        result = run(git)
         check(
-            "a range pin is a clean failure",
-            result.returncode == 1 and "not a pinned requirement" in result.stderr,
+            "a non-registry source is a clean failure",
+            result.returncode == 1 and "not an exact registry package" in result.stderr,
         )
 
-        short = tree(Path(bad), f"ruff==0.16.6 --hash=sha256:{'0' * 63}\n")
+        short = tree(Path(bad), lock(package("ruff", "0.16.6", f"sha256:{'0' * 63}")))
         result = run(short)
         check(
             "a truncated hash is a clean failure",
             result.returncode == 1 and "unusable hash" in result.stderr,
         )
 
-        empty = tree(Path(bad), "# nothing pinned\n")
+        empty = tree(Path(bad), lock())
         result = run(empty)
         check(
-            "an empty manifest is a clean failure",
+            "a lock with no packages is a clean failure",
             result.returncode == 1 and "names no packages" in result.stderr,
         )
 

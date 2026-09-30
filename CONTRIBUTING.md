@@ -6,8 +6,8 @@ CI, so the whole local gate is the whole contribution.
 ## Setup
 
 `bash`, `make`, [`uv`](https://docs.astral.sh/uv/) and `shellcheck` on PATH.
-Nothing else: `make` builds `.venv` from the hash-pinned
-`requirements-lint.txt` with `uv`, and Python suites run under that venv.
+Nothing else: `make` builds `.venv` from the hash-pinned `uv.lock` with
+`uv sync --locked`, and Python suites run under that venv.
 
 ```bash
 make venv     # or let `make test` / `make lint` build it on first use

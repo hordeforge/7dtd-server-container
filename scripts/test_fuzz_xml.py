@@ -10,7 +10,7 @@ any byte sequence into a verdict instead of a traceback, and both must say the
 same thing about the same file twice.
 
 Atheris and Hypothesis are not dependencies of this repo and the gate installs
-only the hash-pinned analyzer closure in requirements-lint.txt, so coverage
+only the hash-pinned analyzer closure in uv.lock, so coverage
 comes from a stdlib seeded generator instead: fixed seeds, a bounded case
 count, a fresh temp directory per case, and assertions that encode the
 invariants, not just a crash check. A fuzzer proves bugs exist; the assertions

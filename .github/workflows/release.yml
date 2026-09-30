@@ -40,13 +40,13 @@ jobs:
 
       # Same action SHA and same uv binary as the ci workflow's check job: the
       # inventory step below reads licenses out of the venv, and `make sbom`
-      # builds that venv from requirements-lint.txt with the interpreter pin in
+      # builds that venv from uv.lock with the interpreter pin in
       # .python-version.
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
           version: "0.12.14"
           enable-cache: true
-          cache-dependency-glob: "{requirements-lint.txt,.python-version}"
+          cache-dependency-glob: "{uv.lock,.python-version}"
 
       - name: Check the tag matches VERSION
         shell: bash
@@ -74,7 +74,7 @@ jobs:
       # only third-party code in the tree, and it never reaches the image, so
       # the inventory is the record of a release's dev-time supply chain. It
       # goes in the run summary rather than a committed file: the document is
-      # a pure function of requirements-lint.txt, so anyone can reproduce it
+      # a pure function of uv.lock, so anyone can reproduce it
       # with `make sbom` at the tag, and a copy in the tree would only be a
       # second thing to forget to regenerate.
       - name: Record the dependency inventory

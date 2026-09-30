@@ -1,8 +1,7 @@
 ---
 # Keeps the three dependency surfaces of this repo current:
 # - github-actions: the checkout and setup-uv SHA pins in ci.yml
-# - pip: requirements-lint.txt (hashed analyzer toolchain; PRs must keep
-#   hashes in sync, see the header comment in that file)
+# - uv: the dev group in pyproject.toml, locked with hashes in uv.lock
 # - docker: the base image in Containerfile. It tracks the `:latest` tag, so
 #   without this entry a rebuild on the server host silently picks up a
 #   different image than the one the tree was last reviewed against.
@@ -12,7 +11,7 @@ updates:
     directory: /
     schedule:
       interval: weekly
-  - package-ecosystem: pip
+  - package-ecosystem: uv
     directory: /
     schedule:
       interval: weekly

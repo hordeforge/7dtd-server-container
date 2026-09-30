@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       # uv is the only Python toolchain here; `make lint` and `make test` build
-      # the analyzer venv themselves from the hash-pinned requirements-lint.txt,
+      # the analyzer venv themselves from the hash-pinned uv.lock,
       # so this step installs the binary and nothing else. Same SHA-pin rule as
       # checkout above, and the binary is pinned too: the action's own tag says
       # which action code runs, not which uv it drops, so leaving `version` out
@@ -36,16 +36,15 @@ jobs:
       # would have shown up as a gate difference nobody could trace. (shellcheck
       # and bash come with the runner image and are not pinned; expect minor
       # version drift there.)
-      # enable-cache keys the uv download cache on requirements-lint.txt, the
-      # only manifests this repo resolves from (no uv.lock by design). A
-      # dependency or interpreter bump rotates the key; the venv itself is
-      # still rebuilt from scratch by make, so a cached wheel never decides
-      # what the gate runs.
+      # enable-cache keys the uv download cache on uv.lock, the only lock
+      # this repo resolves from. A dependency or interpreter bump rotates
+      # the key; make syncs the venv exactly to the lock, so a cached wheel
+      # never decides what the gate runs.
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
           version: "0.12.14"
           enable-cache: true
-          cache-dependency-glob: "{requirements-lint.txt,.python-version}"
+          cache-dependency-glob: "{uv.lock,.python-version}"
 
       - name: Lint shell + Python + workflow YAML + Containerfile (make lint)
         # make lint owns every check (bash -n, shellcheck, reference
@@ -79,7 +78,7 @@ jobs:
         with:
           version: "0.12.14"  # same binary the check job pins
           enable-cache: true
-          cache-dependency-glob: "{requirements-lint.txt,.python-version}"
+          cache-dependency-glob: "{uv.lock,.python-version}"
       # No prebuilt kcov works here: apt has no noble package and the v42
       # tarball links against Ubuntu 22.04's binutils (libopcodes-2.38).
       # Build kcov from source at the release commit of the v43 tag; same

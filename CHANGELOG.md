@@ -199,6 +199,13 @@ password character domain, below), so it is a **major** release: 1.1.3 to
 
 ### Changed
 
+- **The analyzer closure is locked in `uv.lock`.** ruff, mypy and yamllint
+  moved from `requirements-lint.txt` to the `dev` group in `pyproject.toml`
+  at the same versions, and `uv.lock` pins and hashes the closure (librt
+  stays at 0.15.0; tomli drops out, since no locked interpreter needs it).
+  `make venv` runs `uv sync --locked` instead of `uv pip install
+  --require-hashes`, the CI cache keys on `uv.lock`, dependabot tracks the
+  uv ecosystem, and `make sbom` reads pins, markers and hashes from the lock.
 - **The analyzers read the language version the gate actually runs on.**
   `pyproject.toml` declared `python_version = "3.10"` for mypy and
   `target-version = "py310"` for ruff while `.python-version` pins 3.14, the

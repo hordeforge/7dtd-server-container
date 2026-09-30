@@ -7,18 +7,18 @@ OUTPUT.json is the SBOM file to write; with no operand the document goes to
 stdout, so the same call serves a pipe and a committed file. The previous
 contents of OUTPUT.json are left untouched when the render fails. `--help`
 prints this text on stdout and exits 0, like every other CLI here. Exits 2 on
-a wrong operand count, 1 when the manifest is unusable.
+a wrong operand count, 1 when uv.lock is unusable.
 
 The package set, versions, environment markers and sha256 hashes come from
-requirements-lint.txt, the one manifest this repo resolves from, so the SBOM
+uv.lock, the one lock this repo resolves from, so the SBOM
 covers the closure that is declared rather than the one a given machine
 happened to install. Licenses come from the installed .venv dist-info
-METADATA; a package whose marker excludes it from this interpreter (tomli on
-Python 3.11+) is listed with no license and says so in a property, because
+METADATA; a package whose marker excludes it from this interpreter is listed
+with no license and says so in a property, because
 guessing a license from the name is how a compliance record turns into fiction.
 
 The document is deterministic: no timestamp, components sorted by name, and
-the serial number derived from the manifest's own bytes. The same manifest
+the serial number derived from the lock's own bytes. The same lock
 and venv always produce byte-identical JSON, so the file diffs cleanly and a
 regenerate is a no-op when nothing was bumped.
 """
@@ -27,8 +27,10 @@ from __future__ import annotations
 
 import json
 import sys
+import tomllib
 import uuid
 from pathlib import Path
+from typing import cast
 
 BOM_FORMAT = "CycloneDX"
 SPEC_VERSION = "1.6"
@@ -38,11 +40,11 @@ PROJECT_NAME = "7dtd-server-container"
 PROJECT_SOURCE = "https://github.com/hordeforge/7dtd-server-container"
 PROJECT_LICENSE = "MIT"
 # Namespace the serial number is derived in. Any fixed UUID works; reusing the
-# URL namespace keeps the derivation a pure function of the manifest.
+# URL namespace keeps the derivation a pure function of the lock.
 SERIAL_NAMESPACE = uuid.UUID("6ba7b811-9dad-11d1-80b4-00c04fd430c8")
-# The two files that make a directory this project: the resolved-from manifest
+# The two files that make a directory this project: the resolved-from lock
 # and the version root component reports.
-MARKER_FILES = ("requirements-lint.txt", "VERSION")
+MARKER_FILES = ("uv.lock", "VERSION")
 # trove classifier tail -> SPDX id, for the packages whose metadata predates
 # the PEP 639 License-Expression field. The vocabulary is the fixed list of
 # OSI classifier strings, so the mapping cannot drift into inventing a license
@@ -65,7 +67,7 @@ CLASSIFIER_LICENSES = {
 
 
 class ManifestError(Exception):
-    """A requirements line that is not a pinned, hashed requirement."""
+    """A uv.lock that is not a set of exact, hashed registry packages."""
 
 
 def find_root(start: Path) -> Path:
@@ -92,48 +94,8 @@ def normalise(name: str) -> str:
     return "".join(out)
 
 
-def logical_lines(text: str) -> list[str]:
-    """Yield the requirements lines, a trailing backslash continuing the line."""
-    joined: list[str] = []
-    buf = ""
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.endswith("\\"):
-            buf = f"{buf} {line[:-1].strip()}"
-            continue
-        joined.append(f"{buf} {line}".strip())
-        buf = ""
-    if buf:
-        joined.append(buf)
-    return joined
-
-
-def parse_requirement(line: str) -> tuple[str, str, str | None, list[str]]:
-    """Split one logical requirement line into name, version, marker, hashes.
-
-    The marker sits between the pin and the hashes (`librt==0.15.0; <marker> \\
-    --hash=...`), so the hashes are collected from the whole line and the pin
-    is what remains of the part before the semicolon.
-    """
-    pin_part, _, marker = line.partition(";")
-    marker = marker.split("--hash=", 1)[0]
-    digests = [tok.partition("=")[2] for tok in line.split() if tok.startswith("--hash=")]
-    pin = pin_part.split("--hash=", 1)[0].strip()
-    name, sep, version = pin.partition("==")
-    if not sep or not name or not version:
-        msg = f"not a pinned requirement: {line}"
-        raise ManifestError(msg)
-    if not digests:
-        msg = f"no --hash pinning on {name}=={version}"
-        raise ManifestError(msg)
-    hashes = [checked_digest(d, name, version) for d in digests]
-    return normalise(name), version, marker.strip() or None, hashes
-
-
 def checked_digest(digest: str, name: str, version: str) -> str:
-    """The hex sha256 behind a `sha256:<hex>` hash option, or a refusal."""
+    """The hex sha256 behind a `sha256:<hex>` artifact hash, or a refusal."""
     algorithm, _, hexdigest = digest.partition(":")
     if algorithm != "sha256" or len(hexdigest) != 64:
         msg = f"unusable hash '{digest}' on {name}=={version}"
@@ -141,8 +103,82 @@ def checked_digest(digest: str, name: str, version: str) -> str:
     return hexdigest
 
 
-def read_pins(manifest: Path) -> list[tuple[str, str, str | None, list[str]]]:
-    return [parse_requirement(line) for line in logical_lines(manifest.read_text(encoding="utf-8"))]
+Table = dict[str, object]
+
+
+def tables(value: object, where: str) -> list[Table]:
+    """value as a list of TOML tables, or a refusal naming where it sat."""
+    if not isinstance(value, list) or not all(isinstance(v, dict) for v in value):
+        msg = f"uv.lock: {where} is not a list of tables"
+        raise ManifestError(msg)
+    return cast("list[Table]", value)
+
+
+def edges(package: Table) -> list[Table]:
+    """Every dependency entry a lock package lists, dev groups included."""
+    out = tables(package.get("dependencies", []), "dependencies")
+    groups = package.get("dev-dependencies", {})
+    if not isinstance(groups, dict):
+        msg = "uv.lock: dev-dependencies is not a table"
+        raise ManifestError(msg)
+    for group, entries in cast("Table", groups).items():
+        out.extend(tables(entries, f"dev-dependencies.{group}"))
+    return out
+
+
+def edge_markers(packages: list[Table]) -> dict[str, str | None]:
+    """name -> the marker every edge into it carries, or None when one edge has none.
+
+    A package pulled in unconditionally by any dependent is unconditional; one
+    reached only through marked edges carries their markers, joined with `or`.
+    """
+    unconditional: set[str] = set()
+    marked: dict[str, set[str]] = {}
+    for package in packages:
+        for edge in edges(package):
+            name = normalise(str(edge.get("name", "")))
+            marker = edge.get("marker")
+            if marker is None:
+                unconditional.add(name)
+            else:
+                marked.setdefault(name, set()).add(str(marker))
+    out: dict[str, str | None] = {n: " or ".join(sorted(m)) for n, m in marked.items()}
+    out.update(dict.fromkeys(unconditional))
+    return out
+
+
+def read_pins(lock: Path) -> list[tuple[str, str, str | None, list[str]]]:
+    """(name, version, marker, sha256 hex digests) for every locked package.
+
+    The virtual project entry is the root, not a component. Every other entry
+    must come from the registry with an exact version and at least one hashed
+    artifact, so the inventory never lists a package uv could not verify.
+    """
+    try:
+        document = tomllib.loads(lock.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as exc:
+        msg = f"{lock} is not TOML: {exc}"
+        raise ManifestError(msg) from exc
+    packages = tables(document.get("package", []), "package")
+    markers = edge_markers(packages)
+    pins: list[tuple[str, str, str | None, list[str]]] = []
+    for package in packages:
+        source = package.get("source", {})
+        if isinstance(source, dict) and "virtual" in source:
+            continue
+        name, version = normalise(str(package.get("name", ""))), str(package.get("version", ""))
+        if not name or not version or not isinstance(source, dict) or "registry" not in source:
+            msg = f"not an exact registry package: {name or '?'}=={version or '?'}"
+            raise ManifestError(msg)
+        artifacts = tables([package["sdist"]] if "sdist" in package else [], "sdist")
+        artifacts.extend(tables(package.get("wheels", []), "wheels"))
+        digests = [str(a["hash"]) for a in artifacts if "hash" in a]
+        if not digests:
+            msg = f"no hash pinning on {name}=={version}"
+            raise ManifestError(msg)
+        hashes = [checked_digest(d, name, version) for d in digests]
+        pins.append((name, version, markers.get(name), hashes))
+    return pins
 
 
 def metadata_field(dist_info: Path, field: str) -> str:
@@ -218,18 +254,18 @@ def component(
 
 
 def build(root: Path, site_packages: Path) -> dict[str, object]:
-    manifest = root / "requirements-lint.txt"
-    pins = read_pins(manifest)
+    lock = root / "uv.lock"
+    pins = read_pins(lock)
     version = (root / "VERSION").read_text(encoding="utf-8").strip()
     if not version:
         msg = "VERSION is empty"
         raise ManifestError(msg)
     if not pins:
-        msg = f"{manifest} names no packages"
+        msg = f"{lock} names no packages"
         raise ManifestError(msg)
     components = [component(n, v, m, h, site_packages) for n, v, m, h in pins]
     components.sort(key=lambda c: str(c["name"]))
-    serial = uuid.uuid5(SERIAL_NAMESPACE, manifest.read_text(encoding="utf-8"))
+    serial = uuid.uuid5(SERIAL_NAMESPACE, lock.read_text(encoding="utf-8"))
     return {
         "bomFormat": BOM_FORMAT,
         "specVersion": SPEC_VERSION,
@@ -251,7 +287,7 @@ def build(root: Path, site_packages: Path) -> dict[str, object]:
                 {
                     "name": "hordeforge:dependency-surface",
                     "value": (
-                        "requirements-lint.txt: the hash-pinned analyzer toolchain installed "
+                        "uv.lock: the hash-pinned analyzer toolchain (the dev group) installed "
                         "into the git-ignored .venv by the Makefile. None of these components "
                         "is copied into the container image, so none of them reaches a "
                         "downstream consumer of the image."

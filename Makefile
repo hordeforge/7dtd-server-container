@@ -20,11 +20,12 @@ YAML := $(sort $(wildcard .github/workflows/*.yml) $(wildcard .github/workflows/
 TESTS := $(sort $(wildcard scripts/test_*.py))
 
 # Analyzer toolchain: one uv-managed venv built from the hash-pinned closure
-# in requirements-lint.txt. uv is the only Python toolchain this repo uses, so
-# dev and CI resolve identical analyzer versions from the same recipe; CI adds
-# nothing but the uv binary. --require-hashes turns any artifact mismatch into
-# a hard failure. Every Python the gate runs comes from this venv, including
-# the test suites, so one interpreter version covers the whole gate.
+# in uv.lock (the dev group of pyproject.toml). uv is the only Python toolchain
+# this repo uses, so dev and CI resolve identical analyzer versions from the
+# same recipe; CI adds nothing but the uv binary. uv checks every artifact
+# against its locked sha256. Every Python the gate runs comes from this venv,
+# including the test suites, so one interpreter version covers the whole gate.
+# .venv is where uv sync puts the project environment.
 VENV := .venv
 PYBIN := $(VENV)/bin
 # The interpreter every gate command runs on, read from the one file that owns
@@ -48,7 +49,7 @@ help:
 	@echo 'make sbom                   CycloneDX inventory of the pinned analyzer closure (dist/sbom.cdx.json)'
 	@echo 'make coverage               line coverage for scripts/lib-env.sh (needs kcov on PATH)'
 
-$(PYBIN)/ruff: requirements-lint.txt .python-version
+$(PYBIN)/ruff: pyproject.toml uv.lock .python-version
 	# Named failure beats "uv: command not found" from make: uv is the only
 	# Python toolchain this repo resolves anything through, and a contributor
 	# arriving without it has nothing else to fall back on.
@@ -56,16 +57,15 @@ $(PYBIN)/ruff: requirements-lint.txt .python-version
 	  echo "FATAL: uv not found on PATH. It is the only Python toolchain here; install it from https://docs.astral.sh/uv/ (or 'curl -LsSf https://astral.sh/uv/install.sh | sh')." >&2; \
 	  exit 1; \
 	}
-	# --clear, not reuse: when the pinned closure changes the venv is rebuilt
-	# from scratch, so a package dropped from requirements-lint.txt cannot
-	# linger and keep satisfying an import the gate should have failed on.
-	# --python is the .python-version pin, and it is a prerequisite above, so a
-	# version bump there rebuilds the venv instead of leaving a stale one that
-	# make considers up to date.
-	uv venv --quiet --clear --python $(PYVER) $(VENV)
-	uv pip install --quiet --python $(VENV) --require-hashes -r requirements-lint.txt
+	# --locked refuses a uv.lock that no longer matches pyproject.toml instead
+	# of re-resolving it, and sync is exact, so a package dropped from the lock
+	# cannot linger and keep satisfying an import the gate should have failed
+	# on. --python is the .python-version pin, and it is a prerequisite above,
+	# so a version bump there rebuilds the venv instead of leaving a stale one
+	# that make considers up to date.
+	uv sync --quiet --locked --python $(PYVER)
 	# uv hardlinks from its cache, so the installed files can carry an older
-	# mtime than requirements-lint.txt and re-trigger this rule every run.
+	# mtime than uv.lock and re-trigger this rule every run.
 	touch $(PYBIN)/ruff
 
 # The analyzer venv and nothing else. A caller that needs the pinned
@@ -169,8 +169,8 @@ check: lint test
 
 # The dependency inventory a consumer or a vuln scanner needs to know what a
 # release was resolved against. It is generated, never committed: the file is
-# reproducible from requirements-lint.txt, so a checked-in copy would only be
-# a second thing to forget to regenerate. Reads the manifest for pins and
+# reproducible from uv.lock, so a checked-in copy would only be
+# a second thing to forget to regenerate. Reads the lock for pins and
 # hashes and the venv for licenses, so it depends on the venv like the gates do.
 SBOM := dist/sbom.cdx.json
 sbom: $(PYBIN)/ruff

@@ -11,7 +11,7 @@ mods/
 coverage/
 coverage.cobertura.xml
 # Generated dependency inventory (make sbom); reproducible from
-# requirements-lint.txt plus the venv, so committing it would only add a
+# uv.lock plus the venv, so committing it would only add a
 # second thing to forget to regenerate.
 dist/
 # Python bytecode from importing coverage_badge in its unit tests.
@@ -19,7 +19,7 @@ scripts/__pycache__/
 # Analyzer caches (mypy, ruff); regenerable, never commit.
 .mypy_cache/
 .ruff_cache/
-# Analyzer venv built by `make lint`/`make test` from requirements-lint.txt.
+# Analyzer venv built by `make lint`/`make test` from uv.lock.
 .venv/
 
 # Local scratch space (never commit); the .scratch* glob matches the
@@ -28,3 +28,5 @@ scripts/__pycache__/
 .scratch/
 .scratch*
 *.lock
+# The analyzer lock is source, not scratch.
+!/uv.lock

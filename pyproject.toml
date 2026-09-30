@@ -1,7 +1,38 @@
 # Static analysis for the Python helpers in scripts/. Enforced by `make lint`
 # (local) and the ci workflow (blocking); the analyzer versions are pinned in
-# requirements-lint.txt and installed by the same Makefile recipe both times,
-# so the two gates run identical rules.
+# the dev group below, locked with sha256 hashes in uv.lock, and installed by
+# the same Makefile recipe (`uv sync --locked`) both times, so the two gates
+# run identical rules.
+#
+# The project is virtual: nothing here is built or published, and the image
+# version lives in VERSION. requires-python matches .python-version, the
+# interpreter every gate runs on.
+#
+# License of the closure, read from each installed dist-info METADATA:
+# ruff, mypy, mypy_extensions, ast-serialize, librt and pyyaml are MIT;
+# typing_extensions is PSF-2.0; pathspec is MPL-2.0; yamllint is
+# GPL-3.0-or-later. None of this ships: the venv is git-ignored and the image
+# copies only entrypoint.sh and scripts/lib-env.sh, so the copyleft yamllint
+# never reaches a distributed artifact and the MIT license of this repo is
+# unaffected. Re-read the METADATA on every bump (`make sbom` lists it): a
+# license line changing here is the signal to look again at whether the tool
+# should run anywhere near a shipped image.
+[project]
+name = "7dtd-server-container"
+version = "0"
+requires-python = ">=3.14"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "ruff==0.16.9",
+    "mypy==2.3.1",
+    "yamllint==1.38.0",
+]
+
+[tool.uv]
+package = false
+
 [tool.ruff]
 line-length = 100
 # The interpreter version, owned by .python-version and read from there by the
