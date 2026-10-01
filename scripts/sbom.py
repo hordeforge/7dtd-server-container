@@ -25,6 +25,7 @@ regenerate is a no-op when nothing was bumped.
 
 from __future__ import annotations
 
+import io
 import json
 import sys
 import tomllib
@@ -327,7 +328,8 @@ def main(argv: list[str]) -> int:
         # raises UnicodeEncodeError on a single-byte-locale host, and the run
         # that writes the file (the one a release cuts from) would differ from
         # the run that prints it.
-        sys.stdout.reconfigure(encoding="utf-8")
+        if isinstance(sys.stdout, io.TextIOWrapper):
+            sys.stdout.reconfigure(encoding="utf-8")
         sys.stdout.write(text)
     return 0
 

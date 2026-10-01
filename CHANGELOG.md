@@ -424,6 +424,8 @@ time, not here.
 
 ### Fixed
 
+- SBOM output supports redirected text streams, and the Unicode fixture renders its own dependency tree for both stdout and file output.
+
 - **A deploy deleted the server host's `.env`.** `deploy.sh` pushes with
   `rsync --delete` and excluded `data` and `backups`, but not `.env`: the file
   is the only copy of the telnet and webadmin passwords on that host, and it

@@ -142,13 +142,13 @@ def plant_metadata(root: Path, stem: str, name: str, licence: str) -> None:
     )
 
 
-def run(root: Path) -> subprocess.CompletedProcess[str]:
+def run(root: Path, output: Path | None = None) -> subprocess.CompletedProcess[str]:
     # encoding="utf-8", never text=True: the document is written with
     # ensure_ascii=False out of UTF-8 metadata, so a locale codec on the pipe
     # either raises on a non-ASCII component or decodes it into mojibake that
     # still parses as JSON.
     return subprocess.run(
-        [sys.executable, str(root / "scripts" / "sbom.py")],
+        [sys.executable, str(root / "scripts" / "sbom.py"), *([str(output)] if output else [])],
         capture_output=True,
         encoding="utf-8",
         cwd="/",
@@ -280,7 +280,7 @@ with tempfile.TemporaryDirectory() as tmp:
         )
         plant_metadata(uni_root, "spätzle", "spätzle", "Café Proprietary")
         uni_out = Path(uni) / "sbom.cdx.json"
-        check("a non-ASCII pin renders to a file", sbom.main([str(SBOM), str(uni_out)]) == 0)
+        check("a non-ASCII pin renders to a file", run(uni_root, uni_out).returncode == 0)
         uni_bytes = uni_out.read_bytes()
         uni_text = uni_bytes.decode("utf-8")
         uni_doc = parse(uni_text)
@@ -333,6 +333,11 @@ with tempfile.TemporaryDirectory() as tmp:
         [sys.executable, str(SBOM)], capture_output=True, encoding="utf-8", check=False
     )
     check("stdout carries the same document as the file", parse(result.stdout) == doc)
+    with contextlib.redirect_stdout(io.StringIO()) as captured:
+        rc = sbom.main([str(SBOM)])
+    check(
+        "redirected stdout carries the same document", rc == 0 and parse(captured.getvalue()) == doc
+    )
     with contextlib.redirect_stdout(io.StringIO()) as help_out:
         rc = sbom.main([str(SBOM), "--help"])
     check(
