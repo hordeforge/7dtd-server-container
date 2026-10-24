@@ -13,10 +13,10 @@ the only automated check a release ever gets. The rules pinned here:
   monotonicity   never older than or equal to a version the changelog already
                  releases: a published version is not re-tagged or re-pointed.
   semver honesty a section that groups entries under "### Breaking changes"
-                 ships as a major release. The Unreleased batch in this tree
+                 ships as a major release. The 2.0.0 section in this tree
                  does exactly that (the printable-ASCII secret domain), so the
                  refusal case below is run against the real CHANGELOG.md
-                 promoted to 1.1.4, not a synthetic stand-in.
+                 re-dated as 1.1.4, not a synthetic stand-in.
 
 Every case runs the real script against a synthetic tree; the last two read
 the real CHANGELOG.md so the pinned rules cannot drift away from the file they
@@ -179,24 +179,24 @@ def main() -> None:
             proc.returncode == 1 and b"not found" in proc.stderr,
         )
 
-        # The real Unreleased batch declares itself a breaking 2.0.0. Promoting
-        # it verbatim is the case that would ship 1.1.4 if the gate only
+        # The real 2.0.0 section declares a breaking change. Re-dating that same
+        # section as a minor is the case that would ship 1.1.4 if the gate only
         # compared the tag to VERSION, which is what it did before.
         changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-        released, body = changelog.split("## [Unreleased]", 1)
+        section_heading = "## [2.0.0] - 2026-10-25"
 
-        def promoted_as(version: str) -> str:
-            return f"{released}## [{version}] - 2026-09-30{body}"
+        def retitled_as(version: str) -> str:
+            return changelog.replace(section_heading, f"## [{version}] - 2026-09-30")
 
-        proc = gate("v1.1.4", make_tree(root / "real_minor", "1.1.4", promoted_as("1.1.4")))
+        proc = gate("v1.1.4", make_tree(root / "real_minor", "1.1.4", retitled_as("1.1.4")))
         check(
-            "this tree's own breaking batch is refused as 1.1.4",
+            "this tree's own breaking section is refused as 1.1.4",
             proc.returncode == 1 and b"ships as a major release" in proc.stderr,
         )
+        proc = gate("v2.0.0", make_tree(root / "real_major", "2.0.0", changelog))
         check(
-            "the same batch is releasable as 2.0.0",
-            gate("v2.0.0", make_tree(root / "real_major", "2.0.0", promoted_as("2.0.0"))).returncode
-            == 0,
+            "the same section is releasable as 2.0.0",
+            proc.returncode == 0 and b"ships a major bump" in proc.stdout,
         )
 
     workflow = WORKFLOW.read_text(encoding="utf-8")

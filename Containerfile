@@ -20,7 +20,7 @@ LABEL org.opencontainers.image.title="7dtd-server" \
       org.opencontainers.image.description="7 Days to Die dedicated server harness (Outpost)" \
       org.opencontainers.image.source="https://github.com/hordeforge/7dtd-server-container" \
       org.opencontainers.image.licenses="MIT" \
-      org.opencontainers.image.version="1.1.3"
+      org.opencontainers.image.version="2.0.0"
 
 USER root
 

@@ -12,11 +12,12 @@ releases never got one.
 
 ## [Unreleased]
 
-This batch carries breaking changes to a documented default and to what a
+## [2.0.0] - 2026-10-25
+
+This release carries breaking changes to a documented default and to what a
 host may put in `.env` (the telnet password fallback, the unknown-key
-refusal, and the password character domain, all below), so it is a **major**
-release: 1.1.3 to 2.0.0. `VERSION` and the tag gate are bumped at release
-time, not here.
+refusal, and the password character domain, all below), and ships as a
+major release: 1.1.3 to 2.0.0.
 
 ### Breaking changes
 
@@ -902,7 +903,8 @@ First tagged tree: container image, entrypoint, config templates, mod staging
 and ops scripts, plus the self-contained checks (shell syntax, Containerfile
 shape, config XML).
 
-[Unreleased]: https://github.com/hordeforge/7dtd-server-container/compare/v1.1.3...HEAD
+[Unreleased]: https://github.com/hordeforge/7dtd-server-container/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/hordeforge/7dtd-server-container/releases/tag/v2.0.0
 [1.1.3]: https://github.com/hordeforge/7dtd-server-container/releases/tag/v1.1.3
 [1.1.2]: https://github.com/hordeforge/7dtd-server-container/releases/tag/v1.1.2
 [1.1.1]: https://github.com/hordeforge/7dtd-server-container/releases/tag/v1.1.1
