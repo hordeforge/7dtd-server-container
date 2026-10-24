@@ -195,14 +195,15 @@ coverage:
 	# and the unit suite contributed nothing to the published number.
 	kcov --clean --include-pattern=lib-env.sh coverage ./scripts/test_lib_env.sh
 	kcov --include-pattern=lib-env.sh coverage ./scripts/test_fuzz_env.sh
-	# Exactly one report, or say so. Two reports mean kcov did not merge the
-	# two runs, and taking whichever the directory order returned first would
-	# publish a number that measures half the suites and reads like the whole.
-	# Naming the paths beats publishing one at random.
-	@reports=$$(find coverage -name cobertura.xml); \
-	 lines=$$(printf '%s\n' "$$reports" | grep -c .); \
-	 if [ "$$lines" -ne 1 ]; then \
-	   echo "FATAL: kcov produced $$lines cobertura reports under coverage/ ($${reports:-none}); the two suites were not measured as one run, so there is no single coverage number to publish" >&2; \
+	# kcov records each run in its own directory and writes the union of every
+	# run in that output directory to coverage/kcov-merged/. Publish that one:
+	# a per-run report measures half the suites and reads like the whole, and
+	# picking it by directory order is how the badge would go backwards while
+	# both suites still passed. Without the merged report the two runs were not
+	# combined, so there is no number to publish.
+	@merged=coverage/kcov-merged/cobertura.xml; \
+	 test -f "$$merged" || { \
+	   echo "FATAL: no merged kcov report at $$merged; the two suites were not measured as one run, so there is no single coverage number to publish" >&2; \
 	   exit 1; \
-	 fi; \
-	 printf '%s\n' "$$reports" | xargs -I{} cp {} coverage.cobertura.xml
+	 }; \
+	 cp "$$merged" coverage.cobertura.xml

@@ -57,6 +57,21 @@ cleanup() {
   rm -rf "$tmp"
 }
 trap cleanup EXIT
+
+# Snippets run the lib in a fresh bash under the suite's strict mode, so a case
+# cannot pass on state the parent shell happens to carry. Each one is a script
+# file, never `bash -c`: kcov's bash tracer sets PS4 to an expression that
+# expands BASH_SOURCE, a `-c` shell has no BASH_SOURCE entry, and the first
+# traced command after `set -u` then aborts the snippet with "BASH_SOURCE:
+# unbound variable", which failed the coverage lane on its own instrumentation.
+# A file keeps the fresh shell, the strict mode, and the coverage of the lib
+# the snippet sources. Body on stdin, path on stdout.
+snippet() { # name
+  local file="$tmp/snippet-$1.sh"
+  cat > "$file"
+  printf '%s\n' "$file"
+}
+
 cat > "$tmp/test.env" <<'ENV'
 # comment line
 
@@ -281,13 +296,16 @@ echo "env key set matches .env.example OK"
 )
 # The opted-in public default still comes from apply, and a provided port
 # survives it (a fresh bash: the values must not leak into this suite's own).
-out="$(ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD=1 TELNET_PORT=26902 bash -c '
-  set -euo pipefail
-  source "'"$ROOT"'/scripts/lib-env.sh"
-  unset TELNET_PASSWORD
-  apply_telnet_defaults 2>/dev/null
-  printf "%s %s" "$TELNET_PASSWORD" "$TELNET_PORT"
-')"
+optin="$(snippet apply-telnet-optin <<'SNIPPET'
+set -euo pipefail
+source "$LIB"
+unset TELNET_PASSWORD
+apply_telnet_defaults 2>/dev/null
+printf "%s %s" "$TELNET_PASSWORD" "$TELNET_PORT"
+SNIPPET
+)"
+out="$(LIB="$ROOT/scripts/lib-env.sh" ALLOW_PUBLIC_DEFAULT_TELNET_PASSWORD=1 TELNET_PORT=26902 \
+  bash "$optin")"
 [[ "$out" == "retest 26902" ]] || {
   echo "FAIL: apply_telnet_defaults mishandled the opted-in default (got '$out')" >&2; exit 1; }
 
@@ -628,12 +646,14 @@ echo "init_steamcmd_env validation OK"
 
 # telnet_session guards its own boundary: a non-numeric port would make
 # /dev/tcp fall back to another port and hang, so it must exit up front.
+port_guard="$(snippet telnet-port-guard <<'SNIPPET'
+set -euo pipefail
+source "$LIB"
+telnet_session "$1" pw payload 1
+SNIPPET
+)"
 for bad in '' 'abc' '80a' '-1'; do
-  if timeout 5 bash -c "
-    set -euo pipefail
-    source '$ROOT/scripts/lib-env.sh'
-    telnet_session '$bad' pw payload 1
-  " 2>/dev/null; then
+  if LIB="$ROOT/scripts/lib-env.sh" timeout 5 bash "$port_guard" "$bad" 2>/dev/null; then
     echo "FAIL: telnet_session accepted non-numeric port: '$bad'" >&2; exit 1
   fi
 done
@@ -791,11 +811,14 @@ else
   start_fake_server ignored.bin --hold
   SECONDS=0
   session_rc=0
-  reply="$(timeout 8 bash -c "
-    set -euo pipefail
-    source '$ROOT/scripts/lib-env.sh'
-    telnet_session '$FAKE_PORT' retest 'apm status' 2
-  " 2>/dev/null)" || session_rc=$?
+  silent="$(snippet telnet-session-silent <<'SNIPPET'
+set -euo pipefail
+source "$LIB"
+telnet_session "$FAKE_PORT" retest 'apm status' 2
+SNIPPET
+)"
+  reply="$(LIB="$ROOT/scripts/lib-env.sh" FAKE_PORT="$FAKE_PORT" \
+    timeout 8 bash "$silent" 2>/dev/null)" || session_rc=$?
   [[ "$session_rc" == 124 ]] || {
     echo "FAIL: silent endpoint did not end the session at its timeout (rc $session_rc)" >&2; exit 1; }
   (( SECONDS <= 4 )) || { echo "FAIL: session outlived its ${SECONDS}s budget" >&2; exit 1; }
@@ -811,6 +834,13 @@ fi
 # (running unsupervised) instead of dying on "command not found", which
 # reads as an unreachable console and skips the world save.
 BASH_BIN="$(command -v bash)"
+time_bound="$(snippet telnet-time-bound <<'SNIPPET'
+set -euo pipefail
+source "$LIB"
+telnet_probe "$FAKE_PORT" 3
+telnet_session "$FAKE_PORT" retest 'apm status' 10
+SNIPPET
+)"
 for case_dir in "$tmp/gtimeout-only" "$tmp/no-timeout"; do
   mkdir -p "$case_dir"
   for needed in bash cat; do
@@ -827,12 +857,8 @@ chmod +x "$tmp/gtimeout-only/gtimeout"
 : > "$tmp/bound.log"
 start_fake_server "$tmp/received-gtimeout.bin"
 bound_rc=0
-bound_out="$(BOUND_LOG="$tmp/bound.log" PATH="$tmp/gtimeout-only" "$BASH_BIN" -c "
-  set -euo pipefail
-  source '$ROOT/scripts/lib-env.sh'
-  telnet_probe '$FAKE_PORT' 3
-  telnet_session '$FAKE_PORT' retest 'apm status' 10
-" 2>"$tmp/gtimeout.err")" || bound_rc=$?
+bound_out="$(BOUND_LOG="$tmp/bound.log" LIB="$ROOT/scripts/lib-env.sh" FAKE_PORT="$FAKE_PORT" \
+  PATH="$tmp/gtimeout-only" "$BASH_BIN" "$time_bound" 2>"$tmp/gtimeout.err")" || bound_rc=$?
 [[ "$bound_rc" == 0 ]] || {
   echo "FAIL: telnet helpers failed with only gtimeout on PATH (rc $bound_rc: $( < "$tmp/gtimeout.err"))" >&2; exit 1; }
 [[ "$bound_out" == *"telnet ok"* ]] || {
@@ -849,12 +875,8 @@ echo "telnet time bound via gtimeout OK"
 
 start_fake_server "$tmp/received-unbounded.bin"
 unbounded_rc=0
-unbounded_out="$(PATH="$tmp/no-timeout" "$BASH_BIN" -c "
-  set -euo pipefail
-  source '$ROOT/scripts/lib-env.sh'
-  telnet_probe '$FAKE_PORT' 3
-  telnet_session '$FAKE_PORT' retest 'apm status' 10
-" 2>"$tmp/unbounded.err")" || unbounded_rc=$?
+unbounded_out="$(LIB="$ROOT/scripts/lib-env.sh" FAKE_PORT="$FAKE_PORT" \
+  PATH="$tmp/no-timeout" "$BASH_BIN" "$time_bound" 2>"$tmp/unbounded.err")" || unbounded_rc=$?
 [[ "$unbounded_rc" == 0 ]] || {
   echo "FAIL: telnet helpers died with no timeout/gtimeout on PATH (rc $unbounded_rc: $( < "$tmp/unbounded.err"))" >&2; exit 1; }
 [[ "$unbounded_out" == *"telnet ok"* ]] || {
@@ -874,12 +896,14 @@ echo "telnet time bound absent OK"
 # destination directory is derived from the account rather than hardcoded:
 # deploy.sh reads both, and a second copy of either is how a deploy ends up
 # pointing somewhere the other half of the project does not expect.
-deploy_defaults="$("$BASH_BIN" -c "
-  set -euo pipefail
-  source '$ROOT/scripts/lib-env.sh'
-  printf '%s|%s|%s|%s' \"\$DEFAULT_SEVENDTD_SERVER_HOST\" \"\$DEFAULT_SEVENDTD_SERVER_USER\" \\
-    \"\$(default_sevendtd_server_dir)\" \"\$(default_sevendtd_server_dir ops)\"
-")"
+deploy_snippet="$(snippet deploy-defaults <<'SNIPPET'
+set -euo pipefail
+source "$LIB"
+printf '%s|%s|%s|%s' "$DEFAULT_SEVENDTD_SERVER_HOST" "$DEFAULT_SEVENDTD_SERVER_USER" \
+  "$(default_sevendtd_server_dir)" "$(default_sevendtd_server_dir ops)"
+SNIPPET
+)"
+deploy_defaults="$(LIB="$ROOT/scripts/lib-env.sh" "$BASH_BIN" "$deploy_snippet")"
 if [[ "$deploy_defaults" != '192.168.0.100|maci|/home/maci/7dtd-server|/home/ops/7dtd-server' ]]; then
   echo "FAIL: deploy defaults moved or the directory stopped following the user (got '$deploy_defaults')" >&2
   exit 1

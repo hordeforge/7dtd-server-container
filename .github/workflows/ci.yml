@@ -125,9 +125,13 @@ jobs:
         run: |
           set -euo pipefail
           url="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          if git ls-remote --exit-code --heads origin badges >/dev/null 2>&1; then
-            git clone --depth 1 --branch badges "$url" badge-repo
-          else
+          # Clone the existing branch and fall back to a fresh one only when the
+          # clone fails. A `git ls-remote` probe cannot tell an absent branch
+          # from a failed probe, so a network or auth blip would init an empty
+          # branch and race the real one; the clone reports its own failure and
+          # an absent branch is the one failure a fresh init can fix.
+          if ! git clone --depth 1 --branch badges "$url" badge-repo; then
+            rm -rf badge-repo
             git init -q -b badges badge-repo
           fi
           cp "$RUNNER_TEMP/coverage.svg" badge-repo/
