@@ -15,8 +15,8 @@ the only automated check a release ever gets. The rules pinned here:
   semver honesty a section that groups entries under "### Breaking changes"
                  ships as a major release. The 2.0.0 section in this tree
                  does exactly that (the printable-ASCII secret domain), so the
-                 refusal case below is run against the real CHANGELOG.md
-                 re-dated as 1.1.4, not a synthetic stand-in.
+                 two cases below re-date that real section as a minor release
+                 and as the next major, instead of a synthetic stand-in.
 
 Every case runs the real script against a synthetic tree; the last two read
 the real CHANGELOG.md so the pinned rules cannot drift away from the file they
@@ -33,6 +33,7 @@ from harness import ROOT, check, exit_status
 
 GATE = ROOT / "scripts" / "check_release_gate.sh"
 WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
+VERSION = ROOT / "VERSION"
 
 # A changelog with two released sections, an Unreleased section, and nothing
 # else, so each case states only the one thing it is about.
@@ -168,6 +169,24 @@ def main() -> None:
         proc = subprocess.run(["bash", str(GATE)], capture_output=True, check=False, timeout=30)
         check("no tag is a usage error", proc.returncode == 2)
 
+        # A newer release sits above an older one that declares a breaking
+        # change. The extraction must stop at the next release heading, or the
+        # older section's heading is read as part of the newer one and a plain
+        # minor release is refused as a major.
+        newest_above_breaking = (
+            "# Changelog\n\n"
+            "## [2.1.0] - 2026-10-05\n\n### Changed\n\n- the newest release\n\n"
+            "## [2.0.0] - 2026-09-30" + BREAKING_SECTION
+        )
+        proc = gate(
+            "v2.1.0",
+            make_tree(root / "above_breaking", "2.1.0", newest_above_breaking),
+        )
+        check(
+            "an older breaking section does not leak into a newer release",
+            proc.returncode == 0 and b"declares no breaking change" in proc.stdout,
+        )
+
         proc = subprocess.run(
             ["bash", str(GATE), "v1.2.0", str(root / "nowhere")],
             capture_output=True,
@@ -180,22 +199,38 @@ def main() -> None:
         )
 
         # The real 2.0.0 section declares a breaking change. Re-dating that same
-        # section as a minor is the case that would ship 1.1.4 if the gate only
-        # compared the tag to VERSION, which is what it did before.
+        # section as the next minor is the case that would ship as a minor if
+        # the gate only compared the tag to VERSION, which is what it did
+        # before. Both targets sit above the current VERSION, so the
+        # monotonicity rule cannot hide the semver rule under test.
+        current = VERSION.read_text(encoding="utf-8").strip()
+        major, minor = (int(part) for part in current.split(".")[:2])
+        minor_target = f"{major}.{minor + 1}.0"
+        major_target = f"{major + 1}.0.0"
         changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
         section_heading = "## [2.0.0] - 2026-10-25"
+        check(
+            "the real breaking section is still in CHANGELOG.md",
+            section_heading in changelog,
+        )
 
         def retitled_as(version: str) -> str:
             return changelog.replace(section_heading, f"## [{version}] - 2026-09-30")
 
-        proc = gate("v1.1.4", make_tree(root / "real_minor", "1.1.4", retitled_as("1.1.4")))
+        proc = gate(
+            f"v{minor_target}",
+            make_tree(root / "real_minor", minor_target, retitled_as(minor_target)),
+        )
         check(
-            "this tree's own breaking section is refused as 1.1.4",
+            f"this tree's own breaking section is refused as {minor_target}",
             proc.returncode == 1 and b"ships as a major release" in proc.stderr,
         )
-        proc = gate("v2.0.0", make_tree(root / "real_major", "2.0.0", changelog))
+        proc = gate(
+            f"v{major_target}",
+            make_tree(root / "real_major", major_target, retitled_as(major_target)),
+        )
         check(
-            "the same section is releasable as 2.0.0",
+            f"the same section is releasable as {major_target}",
             proc.returncode == 0 and b"ships a major bump" in proc.stdout,
         )
 

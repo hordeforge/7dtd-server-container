@@ -78,7 +78,9 @@ echo "ok: tag $TAG matches $VERSION_FILE ($SHIPPED)"
 # The tagged section only: the `## [X.Y.Z] - <date>` line that starts it,
 # everything under it, and nothing of the next release. The heading is matched
 # whole, with its date, so an undated `## [1.1.3]` is not a release, and the
-# dots in X.Y.Z are escaped rather than read as regex wildcards.
+# dots in X.Y.Z are escaped rather than read as regex wildcards. A later
+# release's `### Breaking changes` heading must not leak into an earlier one,
+# so the extraction stops at the next `## [` release heading.
 section="$(awk -v version="$VERSION" '
   BEGIN {
     escaped = version
@@ -86,6 +88,7 @@ section="$(awk -v version="$VERSION" '
     heading = "^## \\[" escaped "\\] - "
   }
   $0 ~ heading { inside = 1 }
+  inside && /^## \[/ && $0 !~ heading { exit }
   inside { print }
 ' "$CHANGELOG")"
 

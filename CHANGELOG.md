@@ -12,6 +12,24 @@ releases never got one.
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-11-05
+
+The supported game line moves to V3.4.0 build b10: Steam app 294420, depot
+294422, buildid 26310339, depot manifest 5022117301453546978. The
+`Assembly-CSharp.dll` in that depot is 11752960 bytes, sha256
+`00a962dbbb5ef1bb454368322221f9eb4148dc2d548ed2b77244f9bda5ecc167`. No
+operator action: the entrypoint still installs and validates through
+`steamcmd +app_update 294420`, and the stock `serverconfig.xml` in b10 is
+byte-identical (same size and SHA-256) to the b18 file, so the committed
+template needs no change and the config schema and documented keys are
+unchanged.
+
+- State the V3.4.0 line in `README.md`, `AGENTS.md` and the `Containerfile`
+  header, and record the build and manifest in the version-pin rule.
+- Stop the release gate at the next `## [` heading when it reads a release
+  section, so an older section's `### Breaking changes` no longer leaks into a
+  newer release.
+
 ## [2.0.0] - 2026-10-25
 
 This release carries breaking changes to a documented default and to what a

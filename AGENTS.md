@@ -1,6 +1,6 @@
 # AGENTS.md - 7dtd-server
 
-Deployment harness for a 7 Days to Die dedicated server (V3.3.0 line) in a
+Deployment harness for a 7 Days to Die dedicated server (V3.4.0 line) in a
 rootless podman container on the LAN server host (192.168.0.100). Owns the
 container image, server config template, mod staging, and ops scripts. It does
 NOT own mod code, measurement, or game RE; those live in the sibling repos.
@@ -59,8 +59,10 @@ Workspace root guide: [`hordeforge/.github` AGENTS.md](https://github.com/hordef
    under `LC_ALL=C` (`reject_unsafe_value` turns its answer into the refusal)
    so the host and the container agree whatever locale either runs under.
 7. **No AI attribution, no em dashes** in shipped text.
-8. Version pin: mods are built for V3.3.0. If a newer depot build ships and
-   mods fail to load, rebuild mods in the sibling repos, restage, redeploy.
+8. Version pin: the game is V3.4.0 b10 (depot 294422, buildid 26310339,
+   manifest 5022117301453546978) and the mods are built for it. If a newer
+   depot build ships and mods fail to load, rebuild mods in the sibling repos,
+   restage, redeploy.
 9. **`uv` is the only Python toolchain.** `make lint` and `make test` build
    `.venv` from the hash-pinned `uv.lock` (`uv sync --locked`); CI installs the `uv`
    binary and runs the same targets. Never `pip`, and never a bare `python3`

@@ -1,4 +1,4 @@
-# 7dtd-server: 7 Days to Die dedicated server (V3.3.0 line) on the official
+# 7dtd-server: 7 Days to Die dedicated server (V3.4.0 line) on the official
 # steamcmd image. The container is stateless: game files, userdata, mods and
 # config are all bind-mounted from the host (see scripts/run.sh and README).
 #
@@ -20,7 +20,7 @@ LABEL org.opencontainers.image.title="7dtd-server" \
       org.opencontainers.image.description="7 Days to Die dedicated server harness (Outpost)" \
       org.opencontainers.image.source="https://github.com/hordeforge/7dtd-server-container" \
       org.opencontainers.image.licenses="MIT" \
-      org.opencontainers.image.version="2.0.0"
+      org.opencontainers.image.version="2.1.0"
 
 USER root
 
