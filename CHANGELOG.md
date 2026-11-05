@@ -921,7 +921,8 @@ First tagged tree: container image, entrypoint, config templates, mod staging
 and ops scripts, plus the self-contained checks (shell syntax, Containerfile
 shape, config XML).
 
-[Unreleased]: https://github.com/hordeforge/7dtd-server-container/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/hordeforge/7dtd-server-container/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/hordeforge/7dtd-server-container/releases/tag/v2.1.0
 [2.0.0]: https://github.com/hordeforge/7dtd-server-container/releases/tag/v2.0.0
 [1.1.3]: https://github.com/hordeforge/7dtd-server-container/releases/tag/v1.1.3
 [1.1.2]: https://github.com/hordeforge/7dtd-server-container/releases/tag/v1.1.2
